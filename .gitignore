@@ -1,0 +1,13 @@
+node_modules/
+.harness/
+main.js
+main.js.map
+tests/e2e/harness.js
+test-results/
+playwright-report/
+.DS_Store
+.harness/nodes/**/command-output-*.txt
+.harness/nodes/**/screenshot-*.png
+*.log
+coverage/
+dist/

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
+  <title id="title">Daily Cockpit logo</title>
+  <desc id="desc">A calm dashboard mark with a local-first memory panel.</desc>
+  <rect width="160" height="160" rx="28" fill="#f7f5ef"/>
+  <rect x="24" y="28" width="112" height="104" rx="16" fill="#ffffff" stroke="#d6d1c5" stroke-width="2"/>
+  <path d="M42 58h76M42 80h52M42 102h66" stroke="#3f7e6b" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="116" cy="103" r="13" fill="#3f7e6b"/>
+  <path d="M111 103l4 4 8-10" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

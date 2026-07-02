@@ -1,0 +1,37 @@
+{
+  "name": "daily-cockpit",
+  "version": "0.1.0",
+  "description": "An Obsidian daily cockpit for ADHD-friendly external working memory.",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "build": "node esbuild.config.mjs production",
+    "dev": "node esbuild.config.mjs development --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --import tsx --test tests/*.test.ts",
+    "test:e2e": "npm run build && node scripts/build-e2e.mjs && playwright test",
+    "lint": "npm run typecheck && node scripts/privacy-check.mjs && node scripts/readme-check.mjs",
+    "install:local": "npm run build && node scripts/install-local.mjs",
+    "verify:local": "node scripts/verify-local.mjs",
+    "check": "npm run lint && npm test && npm run test:e2e"
+  },
+  "keywords": [
+    "obsidian",
+    "obsidian-plugin",
+    "daily-planning",
+    "adhd",
+    "local-first"
+  ],
+  "author": "WdBlink",
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "@types/jsdom": "28.0.3",
+    "@types/node": "26.1.0",
+    "esbuild": "0.28.1",
+    "jsdom": "29.1.1",
+    "obsidian": "1.13.1",
+    "tsx": "^4.22.5",
+    "typescript": "6.0.3"
+  }
+}
