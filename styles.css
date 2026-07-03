@@ -16,7 +16,10 @@
   --dc-font-mono: "SFMono-Regular", "Roboto Mono", "Cascadia Code", monospace;
   display: block;
   container-type: inline-size;
+  height: 100%;
   min-height: 100%;
+  min-width: 0;
+  overflow: hidden;
   color: var(--dc-text);
   background: var(--dc-bg);
   font-family: var(--dc-font-body);
@@ -37,13 +40,19 @@
 .daily-cockpit-shell {
   width: 100%;
   max-width: 1180px;
+  height: 100%;
+  min-height: 0;
   margin: 0 auto;
   padding: 28px;
+  overflow: hidden;
 }
 
 .daily-cockpit-main {
   display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 18px;
+  height: 100%;
+  min-height: 0;
   min-width: 0;
 }
 
@@ -217,13 +226,17 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
   gap: 18px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .daily-cockpit-panel {
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: 14px;
+  min-height: 0;
   min-width: 0;
+  overflow: hidden;
 }
 
 .daily-cockpit-panel-subtle {
@@ -273,6 +286,13 @@
 .daily-cockpit-hot-list {
   display: grid;
   gap: 10px;
+  flex: 1 1 auto;
+  min-height: 96px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 6px;
+  scrollbar-gutter: stable;
 }
 
 .daily-cockpit-task {
@@ -432,6 +452,10 @@
     grid-template-columns: 1fr;
   }
 
+  .daily-cockpit-workspace {
+    grid-template-rows: minmax(0, 1fr) minmax(0, 0.8fr);
+  }
+
   .daily-cockpit-panel-subtle {
     padding-left: 0;
     border-left: 0;
@@ -463,6 +487,10 @@
   .daily-cockpit-header,
   .daily-cockpit-workspace {
     grid-template-columns: 1fr;
+  }
+
+  .daily-cockpit-workspace {
+    grid-template-rows: minmax(0, 1fr) minmax(0, 0.8fr);
   }
 
   .daily-cockpit-intro h1 {

@@ -1,8 +1,10 @@
 import { renderCockpit } from "../../src/render";
-import { addPlanFromModelTasks, createSeedData, setLastExportPath, toggleHotStartTask } from "../../src/state";
-import type { CockpitData, RendererState } from "../../src/types";
+import { addPlanFromModelTasks, createEmptyData, createSeedData, setLastExportPath, toggleHotStartTask } from "../../src/state";
+import type { CockpitData, ModelTask, RendererState } from "../../src/types";
 
-let data: CockpitData = createSeedData();
+let data: CockpitData = new URLSearchParams(window.location.search).get("fixture") === "long"
+  ? createLongListData()
+  : createSeedData();
 let state: RendererState = {
   data,
   processing: false
@@ -71,4 +73,27 @@ const controller = renderCockpit(root, state, {
 function update(next: RendererState): void {
   state = next;
   controller.update(state);
+}
+
+function createLongListData(): CockpitData {
+  const longPhrase =
+    "这是一个非常长的待办描述，用来模拟用户把复杂任务、背景、约束、验证标准和热启动建议全部说在一起，必须换行且不能撑破屏幕范围。";
+  const tasks: ModelTask[] = Array.from({ length: 18 }, (_, index) => ({
+    title: `长待办 ${index + 1}：${longPhrase} keep-this-unbroken-token-wrapping-without-horizontal-overflow-${index}`,
+    detail: `${longPhrase} 需要继续补充上下文、明确交付物、列出验收方式，并保留足够多的文字来触发滚动区域。${longPhrase}`,
+    category: index % 2 === 0 ? "analysis" : "build",
+    priority: index < 3 ? "P0" : "P1",
+    warmStart: `热启动建议 ${index + 1}：${longPhrase} 明天打开时应该先准备资料、链接、命令和失败日志。${longPhrase}`,
+    selectedForHotStart: index < 12
+  }));
+  const result = addPlanFromModelTasks(
+    createEmptyData(),
+    `${longPhrase} ${longPhrase}`,
+    tasks,
+    "long-fixture-model",
+    "playwright",
+    "2026-07-03T08:00:00.000Z"
+  );
+  if (!result.ok) throw new Error(result.error.message);
+  return result.data;
 }
