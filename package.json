@@ -1,7 +1,7 @@
 {
   "name": "daily-cockpit",
   "version": "0.1.0",
-  "description": "An Obsidian hot-start planner that decomposes natural language intent into selectable AI-prep tasks.",
+  "description": "An Obsidian cockpit that restores local agent sessions and decomposes natural language intent into selectable AI hot-start tasks.",
   "main": "main.js",
   "type": "module",
   "scripts": {
@@ -20,6 +20,7 @@
     "obsidian-plugin",
     "task-decomposition",
     "local-ai",
+    "agent-sessions",
     "hot-start"
   ],
   "author": "WdBlink",

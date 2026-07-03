@@ -6,7 +6,7 @@
   </picture>
 
   <h1>Daily Cockpit</h1>
-  <p>Turn one loose plan into tomorrow's selectable AI hot-start tasks inside Obsidian.</p>
+  <p>Wake up to yesterday's local agent work, then turn today's intent into selectable AI hot-start tasks inside Obsidian.</p>
 </div>
 
 <div align="center">
@@ -30,18 +30,20 @@
 
 ## Why
 
-AI makes it easy to keep opening new threads at night and then wake up cold. The missing step is not another kanban board; it is a small bridge from "what I want to do tomorrow" to concrete tasks that an AI can prepare before you sit down.
+Coding agents are useful, but their work often disappears into yesterday's terminal history. Daily Cockpit is a small Obsidian morning board that restores that context: what Codex, Claude, or other local agents did yesterday, where the session lives, and which thread can be resumed.
 
-Daily Cockpit keeps that bridge simple: write one natural-language intent, let a local model decompose it into todos, then explicitly choose which todos become hot-start candidates.
+After that, it stays simple. You write one natural-language intent for today, a local model decomposes it into todos, and you explicitly choose which tasks become Hot Start candidates.
 
 ## Features
 
-- **Intent-first input**: paste or type a rough Chinese or English plan instead of managing statuses.
+- **Yesterday's Agent Sessions**: scans local Codex, Claude, and Minimax-style session files, then shows platform, title, summary, path, id, and resume command.
+- **Intent-first planning**: type one rough Chinese or English paragraph instead of maintaining a generic todo board.
 - **Local-model decomposition**: calls an OpenAI-compatible chat endpoint and expects structured JSON tasks.
-- **Selectable Hot Start**: each generated todo has a checkbox; only selected tasks enter the hot-start list.
-- **Prep-oriented fields**: tasks include priority, category, detail, and a `warmStart` action suitable for background research, reading, or experiments.
-- **Obsidian-native export**: writes `Daily Cockpit/YYYY-MM-DD.md` with the original intent, selected hot starts, and all candidates.
-- **Simple full-window view**: one input, one candidate list, one hot-start list. No inbox, no daily state machine, no generic todo board.
+- **Selectable Hot Start**: every generated todo has a checkbox; only selected tasks enter the Hot Start list.
+- **Obsidian-native export**: writes `Daily Cockpit/YYYY-MM-DD.md` with yesterday's sessions, the original intent, selected hot starts, and all candidates.
+- **Local-first boundary**: session scanning reads local files only. Session text is not sent to any model during scan or render.
+
+Daily Cockpit borrows one practical idea from [FanBox](https://github.com/alchaincyf/fanbox): agent memory should stay local, visible, and resumable. It does not recreate FanBox's full cockpit, file browser, terminal, or replay system.
 
 ## Quick Start
 
@@ -75,22 +77,24 @@ It also enables `daily-cockpit` in `.obsidian/community-plugins.json` when neede
 
 ## Usage
 
-Daily Cockpit adds one view, one ribbon action, and three commands:
+Daily Cockpit adds one view, one ribbon action, and four commands:
 
 | Entry point | What it does |
 | --- | --- |
-| `打开每日热启动` | Opens the full-window decomposition view |
+| `打开每日热启动` | Opens the full-window cockpit |
 | Ribbon icon | Opens the same view |
+| `刷新昨日工作会话` | Re-reads local agent session roots |
 | `快速拆解待办` | Opens a modal for one quick intent |
 | `导出热启动清单` | Writes `Daily Cockpit/YYYY-MM-DD.md` in the current vault |
 
 Basic flow:
 
-1. Describe tomorrow's goal in one paragraph.
-2. Click **拆成待办**.
-3. Review the generated candidate todos.
-4. Check the todos suitable for hot-start preparation.
-5. Export the Markdown note when you want a durable handoff.
+1. Open Daily Cockpit and review **昨日工作会话**.
+2. Refresh sessions if you started or moved agent work after Obsidian opened.
+3. Describe today's goal in one paragraph.
+4. Click **拆成待办**.
+5. Check the todos suitable for Hot Start preparation.
+6. Export the Markdown note when you want a durable handoff.
 
 ## Local Model
 
@@ -100,15 +104,22 @@ By default, the plugin calls:
 http://127.0.0.1:11434/v1/chat/completions
 ```
 
-The default model name is `qwen2.5:7b`. You can change endpoint, model, API key, and export folder in the plugin settings.
+The default model name is `qwen2.5:7b`. You can change endpoint, model, API key, export folder, and session scan roots in the plugin settings.
 
 The code does not include a public LLM host or hardcoded API key. If you point the endpoint at a remote provider, that is your explicit configuration.
 
-## Roadmap
+## Session Sources
 
-The first working scope is the evening flow: intent decomposition and selected hot-start tasks.
+Default scan roots:
 
-The original product idea also includes a morning flow: summarize yesterday's local agent sessions, surface session IDs/paths, and show which hot-start tasks already have preparation work attached. That belongs in the next version after the simple planner is stable.
+```text
+~/.codex/archived_sessions
+~/.codex/memories/rollout_summaries
+~/.claude/tasks
+~/.minimax/plans
+```
+
+The scanner is intentionally bounded: it filters to the previous local day, caps the number of files and sessions, and tolerates missing or unreadable roots.
 
 ## Verification
 
@@ -120,7 +131,7 @@ npm run install:local -- --vault "$HOME/Knowledge/Obsidian"
 npm run verify:local -- --vault "$HOME/Knowledge/Obsidian"
 ```
 
-`npm run test:e2e` checks the browser harness at 320px, 768px, 1024px, and 1440px and fails if the interface creates horizontal overflow.
+`npm run test:e2e` checks the browser harness at 320px, 768px, 1024px, and 1440px, including long todo lists with internal scroll containers.
 
 ## License
 

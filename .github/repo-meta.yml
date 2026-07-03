@@ -1,9 +1,10 @@
-description: "Obsidian hot-start planner that uses a local OpenAI-compatible model to decompose natural language intent into selectable prep tasks."
+description: "Obsidian cockpit that restores yesterday's local agent sessions and turns today's intent into selectable AI hot-start tasks."
 homepage: "https://github.com/WdBlink/daily-cockpit"
 topics:
   - obsidian
   - obsidian-plugin
   - local-first
   - local-ai
+  - agent-sessions
   - task-decomposition
   - hot-start

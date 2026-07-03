@@ -3,8 +3,8 @@
   "name": "Daily Cockpit",
   "version": "0.1.0",
   "minAppVersion": "1.5.0",
-  "description": "Local-model intent decomposition and hot-start task selection for Obsidian.",
+  "description": "Local agent-session recovery and local-model hot-start planning for Obsidian.",
   "author": "WdBlink",
   "authorUrl": "https://github.com/WdBlink",
-  "isDesktopOnly": false
+  "isDesktopOnly": true
 }

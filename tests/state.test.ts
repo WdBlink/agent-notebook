@@ -130,7 +130,38 @@ test("normalizeData repairs corrupted settings and task fields", () => {
   assert.equal(normalized.settings.dailyNoteFolder, "Daily Cockpit");
   assert.equal(normalized.settings.llmEndpoint, "http://127.0.0.1:11434/v1/chat/completions");
   assert.equal(normalized.settings.llmModel, "qwen2.5:7b");
+  assert.ok(normalized.settings.sessionScanRoots.includes("~/.codex/archived_sessions"));
   assert.equal(normalized.plans[0]?.tasks[0]?.category, "other");
   assert.equal(normalized.plans[0]?.tasks[0]?.priority, "P1");
   assert.equal(dailyNotePath(normalized, new Date("2026-07-03T00:00:00.000Z")), "Daily Cockpit/2026-07-03.md");
+});
+
+test("work session snapshots are normalized and capped", () => {
+  const sessions = Array.from({ length: 35 }, (_, index) => ({
+    id: `session-${index}`,
+    platform: index === 0 ? "codex" : "unknown-platform",
+    title: `昨日会话 ${index}`,
+    summary: `summary ${index}`,
+    path: `~/.codex/archived_sessions/session-${index}.jsonl`,
+    updatedAt: "2026-07-02T08:00:00.000Z",
+    artifacts: ["src/main.ts"],
+    status: index === 0 ? "completed" : "bad"
+  }));
+
+  const data = normalizeData({
+    schemaVersion: 2,
+    settings: {},
+    plans: [],
+    workSessionSnapshot: {
+      date: "2026-07-02",
+      generatedAt: "2026-07-03T08:00:00.000Z",
+      sources: ["~/.codex/archived_sessions"],
+      sessions
+    }
+  });
+
+  assert.equal(data.workSessionSnapshot.sessions.length, 30);
+  assert.equal(data.workSessionSnapshot.sessions[0]?.platform, "codex");
+  assert.equal(data.workSessionSnapshot.sessions[1]?.platform, "other");
+  assert.equal(data.workSessionSnapshot.sessions[1]?.status, "unknown");
 });

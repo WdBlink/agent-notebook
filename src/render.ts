@@ -1,6 +1,6 @@
 import { CATEGORY_LABELS } from "./constants";
 import { activePlan, selectedHotStartTasks } from "./state";
-import type { DecomposedTask, IntentInput, RenderController, RendererActions, RendererState } from "./types";
+import type { AgentWorkSession, DecomposedTask, IntentInput, RenderController, RendererActions, RendererState } from "./types";
 
 export function renderCockpit(root: HTMLElement, initialState: RendererState, actions: RendererActions): RenderController {
   let state = initialState;
@@ -56,7 +56,7 @@ function createHeader(state: RendererState): HTMLElement {
 
   const metrics = createEl("dl", "daily-cockpit-metrics");
   const pairs: Array<[string, string]> = [
-    ["Plans", String(state.data.plans.length)],
+    ["Sessions", String(state.data.workSessionSnapshot.sessions.length)],
     ["Tasks", String(plan?.tasks.length ?? 0)],
     ["Hot start", String(selected.length)],
     ["Model", state.data.settings.llmModel]
@@ -109,6 +109,8 @@ function createWorkspace(state: RendererState, actions: RendererActions): HTMLEl
   const left = createEl("div", "daily-cockpit-panel");
   const right = createEl("aside", "daily-cockpit-panel daily-cockpit-panel-subtle");
 
+  left.append(createWorkSessions(state, actions));
+
   left.append(createSectionTitle("待办候选", plan ? `${plan.tasks.length} 条` : "未拆解"));
   if (state.processing) {
     left.append(createLoading());
@@ -141,6 +143,51 @@ function createWorkspace(state: RendererState, actions: RendererActions): HTMLEl
 
   workspace.append(left, right);
   return workspace;
+}
+
+function createWorkSessions(state: RendererState, actions: RendererActions): HTMLElement {
+  const snapshot = state.data.workSessionSnapshot;
+  const section = createEl("section", "daily-cockpit-sessions");
+  const header = createEl("div", "daily-cockpit-section-toolbar");
+  const title = createEl("div", "daily-cockpit-section-title daily-cockpit-section-title-compact");
+  title.append(textEl("h2", "昨日工作会话"), textEl("span", `${snapshot.date} · ${snapshot.sessions.length} 条`));
+  const button = createEl("button", "daily-cockpit-action daily-cockpit-action-small");
+  button.type = "button";
+  button.textContent = state.refreshingSessions ? "刷新中" : "刷新";
+  button.disabled = Boolean(state.refreshingSessions);
+  button.setAttribute("aria-label", "刷新昨日工作会话");
+  button.addEventListener("click", () => void actions.refreshWorkSessions());
+  header.append(title, button);
+  section.append(header);
+
+  if (snapshot.sessions.length === 0) {
+    section.append(createEmpty("还没有读到昨天的 agent 工作会话。检查扫描目录，或先点击刷新。"));
+    return section;
+  }
+
+  const list = createEl("div", "daily-cockpit-session-list");
+  for (const session of snapshot.sessions) {
+    list.append(createWorkSession(session));
+  }
+  section.append(list);
+  return section;
+}
+
+function createWorkSession(session: AgentWorkSession): HTMLElement {
+  const article = createEl("article", "daily-cockpit-session");
+  article.dataset.platform = session.platform;
+
+  const head = createEl("div", "daily-cockpit-session-head");
+  head.append(textEl("span", platformLabel(session.platform)), textEl("h3", session.title));
+  article.append(head, textEl("p", session.summary));
+
+  const meta = createEl("div", "daily-cockpit-session-meta");
+  meta.append(textEl("code", `path: ${session.path}`));
+  if (session.id) meta.append(textEl("code", `id: ${session.id}`));
+  if (session.projectPath) meta.append(textEl("code", `project: ${session.projectPath}`));
+  if (session.resumeHint) meta.append(textEl("code", `resume: ${session.resumeHint}`));
+  article.append(meta);
+  return article;
 }
 
 function createTask(task: DecomposedTask, actions: RendererActions): HTMLElement {
@@ -210,6 +257,13 @@ function createEmpty(copy: string): HTMLElement {
   const empty = createEl("div", "daily-cockpit-empty");
   empty.append(textEl("p", copy));
   return empty;
+}
+
+function platformLabel(platform: AgentWorkSession["platform"]): string {
+  if (platform === "codex") return "Codex";
+  if (platform === "claude") return "Claude";
+  if (platform === "minimax") return "Minimax";
+  return "Agent";
 }
 
 function createEl<K extends keyof HTMLElementTagNameMap>(tag: K, className: string): HTMLElementTagNameMap[K] {

@@ -1,6 +1,6 @@
 import { CATEGORY_LABELS } from "./constants";
 import { activePlan, selectedHotStartTasks } from "./state";
-import type { CockpitData, DecomposedTask } from "./types";
+import type { AgentWorkSession, CockpitData, DecomposedTask } from "./types";
 
 const DAILY_COCKPIT_SOURCE = "source: daily-cockpit";
 
@@ -22,6 +22,19 @@ export function buildDailyMarkdown(data: CockpitData, date = new Date()): string
     "",
     `# 每日热启动 ${day}`,
     "",
+    "## 昨日工作会话",
+    ""
+  ];
+
+  if (data.workSessionSnapshot.sessions.length === 0) {
+    lines.push("- 暂无昨日工作会话。", "");
+  } else {
+    for (const session of data.workSessionSnapshot.sessions) {
+      lines.push(formatWorkSession(session), "");
+    }
+  }
+
+  lines.push(
     "## 原始意图",
     "",
     plan ? blockquote(plan.intent) : "> 还没有拆解过今天的意图。",
@@ -29,7 +42,7 @@ export function buildDailyMarkdown(data: CockpitData, date = new Date()): string
     "## 选定热启动",
     "",
     selected.length > 0 ? "" : "- 还没有选定热启动待办。"
-  ];
+  );
 
   for (const task of selected) {
     lines.push(formatTask(task), "");
@@ -58,6 +71,20 @@ export function formatDate(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function formatWorkSession(session: AgentWorkSession): string {
+  const lines = [
+    `- **${escapeMarkdown(session.title)}**`,
+    `  - platform: ${session.platform}`,
+    `  - updated: ${session.updatedAt}`,
+    `  - summary: ${escapeMarkdown(session.summary)}`,
+    `  - path: ${escapeMarkdown(session.path)}`,
+    `  - id: ${escapeMarkdown(session.id)}`
+  ];
+  if (session.projectPath) lines.push(`  - project: ${escapeMarkdown(session.projectPath)}`);
+  if (session.resumeHint) lines.push(`  - resume: ${escapeMarkdown(session.resumeHint)}`);
+  return lines.join("\n");
 }
 
 function formatTask(task: DecomposedTask): string {

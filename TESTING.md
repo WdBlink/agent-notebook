@@ -17,10 +17,11 @@ The plugin uses Node.js 22 during development and targets Obsidian's Electron ru
 | --- | --- | --- |
 | Full-window hot-start view | `打开每日热启动` | Opens `daily-cockpit-view` |
 | Ribbon action | List-check icon | Opens the same full-window view |
+| Yesterday work sessions | `刷新昨日工作会话` | Reads configured local agent session roots and updates the session panel |
 | Quick decomposition | `快速拆解待办` | Sends one intent to the configured model and stores a task plan |
-| Model settings | Plugin settings | Stores endpoint, model, API key, and export folder |
+| Model settings | Plugin settings | Stores endpoint, model, API key, export folder, and session scan roots |
 | Hot-start selection | Task checkbox | Adds or removes a generated todo from the hot-start list |
-| Markdown export | `导出热启动清单` | Writes `Daily Cockpit/YYYY-MM-DD.md` |
+| Markdown export | `导出热启动清单` | Writes `Daily Cockpit/YYYY-MM-DD.md` with sessions and hot starts |
 | Local persistence | Obsidian plugin data | Data survives reload through `data.json` |
 
 ## Automated Checks
@@ -33,9 +34,9 @@ npm run test:e2e
 
 `npm run lint` includes type checking, README asset checks, and a privacy check that rejects hardcoded public LLM hosts or API keys.
 
-`npm test` covers task decomposition state, hot-start selection, export formatting, renderer states, model-output parsing, install behavior, and Obsidian registration source checks.
+`npm test` covers task decomposition state, hot-start selection, work-session scanning, export formatting, renderer states, model-output parsing, install behavior, and Obsidian registration source checks.
 
-`npm run test:e2e` builds a deterministic browser harness and verifies responsive layout at 320px, 768px, 1024px, and 1440px.
+`npm run test:e2e` builds a deterministic browser harness and verifies responsive layout, session refresh, and scroll containment at 320px, 768px, 1024px, and 1440px.
 
 ## Local Obsidian Check
 
@@ -49,12 +50,14 @@ In Obsidian:
 
 1. Open the command palette.
 2. Run `打开每日热启动`.
-3. Enter one Chinese paragraph describing tomorrow's goal.
-4. Click `拆成待办`.
-5. Confirm generated todos appear. If no local model is running, confirm the recoverable model error appears instead.
-6. Select at least one todo as hot start.
-7. Run `导出热启动清单`.
-8. Confirm `Daily Cockpit/YYYY-MM-DD.md` contains `## 原始意图`, `## 选定热启动`, and `## 全部待办候选`.
+3. Confirm `昨日工作会话` is visible. If there are no local session files from yesterday, confirm the empty state appears instead.
+4. Run `刷新昨日工作会话` and confirm the panel remains usable.
+5. Enter one Chinese paragraph describing today's goal.
+6. Click `拆成待办`.
+7. Confirm generated todos appear. If no local model is running, confirm the recoverable model error appears instead.
+8. Select at least one todo as hot start.
+9. Run `导出热启动清单`.
+10. Confirm `Daily Cockpit/YYYY-MM-DD.md` contains `## 昨日工作会话`, `## 原始意图`, `## 选定热启动`, and `## 全部待办候选`.
 
 ## Cleanup
 

@@ -36,6 +36,8 @@ test("renderer shows selected hot starts and recoverable error state", () => {
 
   renderCockpit(root, state, noopActions());
   assert.ok(root.querySelector('[role="alert"]'));
+  assert.ok(root.textContent?.includes("昨日工作会话"));
+  assert.ok(root.textContent?.includes("codex resume seed-codex-session"));
   assert.ok(root.textContent?.includes("热启动"));
   assert.ok(root.textContent?.includes("读取原始想法"));
 });
@@ -46,6 +48,9 @@ function noopActions(): RendererActions {
       return { ok: true, data: createEmptyData() };
     },
     async toggleHotStart() {
+      return { ok: true, data: createEmptyData() };
+    },
+    async refreshWorkSessions() {
       return { ok: true, data: createEmptyData() };
     },
     async exportDailyNote() {

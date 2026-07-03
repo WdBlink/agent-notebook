@@ -15,15 +15,18 @@ import {
   COMMAND_EXPORT_DAILY_NOTE,
   COMMAND_OPEN_COCKPIT,
   COMMAND_QUICK_CAPTURE,
+  COMMAND_REFRESH_WORK_SESSIONS,
   PLUGIN_ID,
   VIEW_TYPE_DAILY_COCKPIT
 } from "./constants";
+import { loadAgentWorkSnapshot } from "./agent-sessions";
 import { buildDailyMarkdown, dailyNotePath, isDailyCockpitMarkdown } from "./export";
 import { requestTaskDecomposition } from "./llm";
 import {
   addPlanFromModelTasks,
   normalizeData,
   setLastExportPath,
+  setWorkSessionSnapshot,
   toggleHotStartTask,
   touchOpened
 } from "./state";
@@ -75,6 +78,16 @@ export default class DailyCockpitPlugin extends Plugin {
         void this.exportDailyNote();
       }
     });
+
+    this.addCommand({
+      id: COMMAND_REFRESH_WORK_SESSIONS,
+      name: "刷新昨日工作会话",
+      callback: () => {
+        void this.refreshWorkSessions();
+      }
+    });
+
+    void this.refreshWorkSessions(false);
   }
 
   onunload(): void {
@@ -128,6 +141,25 @@ export default class DailyCockpitPlugin extends Plugin {
 
   async exportDailyNote(): Promise<CockpitResult<{ path: string }>> {
     return this.enqueueWrite(() => this.exportDailyNoteLocked());
+  }
+
+  async refreshWorkSessions(showNotice = true): Promise<CockpitResult<CockpitData>> {
+    return this.enqueueWrite(async () => {
+      try {
+        const snapshot = await loadAgentWorkSnapshot(this.data.settings);
+        const result = await this.commit({ ok: true, data: setWorkSessionSnapshot(this.data, snapshot) });
+        if (result.ok && showNotice) {
+          new Notice(`已刷新昨日工作会话：${snapshot.sessions.length} 条`);
+        }
+        return result;
+      } catch (error) {
+        console.error(`[${PLUGIN_ID}] session scan failed`, error);
+        return {
+          ok: false,
+          error: { code: "SESSION_SCAN_FAILED", message: "读取昨日工作会话失败。请检查扫描目录是否存在且可读。" }
+        };
+      }
+    });
   }
 
   private async exportDailyNoteLocked(): Promise<CockpitResult<{ path: string }>> {
@@ -248,6 +280,7 @@ export default class DailyCockpitPlugin extends Plugin {
 class DailyCockpitView extends ItemView {
   private controller?: RenderController;
   private processing = false;
+  private refreshingSessions = false;
   private error?: RendererState["error"];
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: DailyCockpitPlugin) {
@@ -279,7 +312,10 @@ class DailyCockpitView extends ItemView {
   }
 
   private render(): void {
-    const state = this.plugin.rendererState(this.processing, this.error);
+    const state: RendererState = {
+      ...this.plugin.rendererState(this.processing, this.error),
+      refreshingSessions: this.refreshingSessions
+    };
     const actions = {
       decompose: async (input: IntentInput) => {
         this.processing = true;
@@ -291,6 +327,14 @@ class DailyCockpitView extends ItemView {
       },
       toggleHotStart: async (taskId: string, selected: boolean) =>
         this.handleResult(await this.plugin.toggleHotStart(taskId, selected)),
+      refreshWorkSessions: async () => {
+        this.refreshingSessions = true;
+        this.error = undefined;
+        this.render();
+        const result = await this.plugin.refreshWorkSessions();
+        this.refreshingSessions = false;
+        return this.handleResult(result);
+      },
       exportDailyNote: async () => {
         const result = await this.plugin.exportDailyNote();
         if (result.ok) {
@@ -414,6 +458,22 @@ class DailyCockpitSettingTab extends PluginSettingTab {
         text.setValue(this.plugin.data.settings.dailyNoteFolder);
         text.onChange((value) => {
           void this.plugin.updateSettings({ dailyNoteFolder: value });
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("工作会话扫描目录")
+      .setDesc("一行一个本机路径。默认读取 Codex、Claude 和 Minimax 的本地会话记录。")
+      .addTextArea((text) => {
+        text.inputEl.rows = 5;
+        text.setValue(this.plugin.data.settings.sessionScanRoots.join("\n"));
+        text.onChange((value) => {
+          void this.plugin.updateSettings({
+            sessionScanRoots: value
+              .split(/\r?\n/)
+              .map((line) => line.trim())
+              .filter(Boolean)
+          });
         });
       });
   }

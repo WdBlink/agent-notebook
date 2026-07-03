@@ -7,6 +7,7 @@ export interface CockpitSettings {
   llmEndpoint: string;
   llmModel: string;
   llmApiKey?: string;
+  sessionScanRoots: string[];
 }
 
 export interface IntentInput {
@@ -36,10 +37,36 @@ export interface IntentPlan {
   source?: string;
 }
 
+export type AgentPlatform = "codex" | "claude" | "minimax" | "other";
+
+export type AgentSessionStatus = "active" | "completed" | "unknown";
+
+export interface AgentWorkSession {
+  id: string;
+  platform: AgentPlatform;
+  title: string;
+  summary: string;
+  path: string;
+  updatedAt: string;
+  startedAt?: string;
+  projectPath?: string;
+  resumeHint?: string;
+  artifacts: string[];
+  status: AgentSessionStatus;
+}
+
+export interface AgentWorkSnapshot {
+  date: string;
+  generatedAt: string;
+  sessions: AgentWorkSession[];
+  sources: string[];
+}
+
 export interface CockpitData {
   schemaVersion: 2;
   settings: CockpitSettings;
   plans: IntentPlan[];
+  workSessionSnapshot: AgentWorkSnapshot;
   activePlanId?: string;
   lastOpenedAt?: string;
   lastExportPath?: string;
@@ -53,6 +80,7 @@ export interface CockpitError {
     | "LLM_FAILED"
     | "LLM_PARSE_FAILED"
     | "EXPORT_FAILED"
+    | "SESSION_SCAN_FAILED"
     | "SAVE_FAILED";
   message: string;
 }
@@ -84,6 +112,7 @@ export interface ModelDecomposition {
 export interface RendererActions {
   decompose(input: IntentInput): Promise<CockpitResult<CockpitData>>;
   toggleHotStart(taskId: string, selected: boolean): Promise<CockpitResult<CockpitData>>;
+  refreshWorkSessions(): Promise<CockpitResult<CockpitData>>;
   exportDailyNote(): Promise<CockpitResult<{ path: string }>>;
   clearError(): void;
 }
@@ -91,6 +120,7 @@ export interface RendererActions {
 export interface RendererState {
   data: CockpitData;
   processing: boolean;
+  refreshingSessions?: boolean;
   error?: CockpitError;
   exportPath?: string;
 }

@@ -6,12 +6,21 @@ export const VIEW_TYPE_DAILY_COCKPIT = "daily-cockpit-view";
 export const COMMAND_OPEN_COCKPIT = "open-daily-cockpit";
 export const COMMAND_QUICK_CAPTURE = "quick-capture";
 export const COMMAND_EXPORT_DAILY_NOTE = "export-daily-note";
+export const COMMAND_REFRESH_WORK_SESSIONS = "refresh-work-sessions";
+
+export const DEFAULT_SESSION_SCAN_ROOTS = [
+  "~/.codex/archived_sessions",
+  "~/.codex/memories/rollout_summaries",
+  "~/.claude/tasks",
+  "~/.minimax/plans"
+];
 
 export const DEFAULT_SETTINGS: CockpitSettings = {
   dailyNoteFolder: "Daily Cockpit",
   llmEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
   llmModel: "qwen2.5:7b",
-  llmApiKey: ""
+  llmApiKey: "",
+  sessionScanRoots: DEFAULT_SESSION_SCAN_ROOTS
 };
 
 export const TASK_CATEGORIES: TaskCategory[] = ["research", "build", "write", "analysis", "admin", "other"];
@@ -33,5 +42,6 @@ export const ERROR_MESSAGES = {
   llmFailed: "本地模型没有响应。请检查模型服务、endpoint 和 model 设置。",
   llmParseFailed: "模型返回的内容不是可解析的 JSON 待办列表。",
   exportFailed: "导出失败，请检查目标文件夹权限后重试。",
+  sessionScanFailed: "读取昨日工作会话失败。请检查扫描目录是否存在且可读。",
   saveFailed: "保存失败，请稍后重试，当前界面内容仍保留。"
 } as const;

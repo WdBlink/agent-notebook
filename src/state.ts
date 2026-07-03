@@ -1,5 +1,9 @@
-import { DEFAULT_SETTINGS, ERROR_MESSAGES, TASK_CATEGORIES, TASK_PRIORITIES } from "./constants";
+import { DEFAULT_SESSION_SCAN_ROOTS, DEFAULT_SETTINGS, ERROR_MESSAGES, TASK_CATEGORIES, TASK_PRIORITIES } from "./constants";
 import type {
+  AgentPlatform,
+  AgentSessionStatus,
+  AgentWorkSession,
+  AgentWorkSnapshot,
   CockpitData,
   CockpitError,
   CockpitResult,
@@ -24,6 +28,7 @@ export function createEmptyData(settings: Partial<CockpitSettings> = {}): Cockpi
   return {
     schemaVersion: 2,
     settings: normalizeSettings(settings),
+    workSessionSnapshot: createEmptyWorkSessionSnapshot(),
     plans: []
   };
 }
@@ -47,6 +52,7 @@ export function normalizeData(input: unknown): CockpitData {
     schemaVersion: 2,
     settings,
     plans,
+    workSessionSnapshot: normalizeWorkSessionSnapshot(source.workSessionSnapshot),
     ...(activePlanId ? { activePlanId } : {}),
     ...(typeof source.lastOpenedAt === "string" ? { lastOpenedAt: source.lastOpenedAt } : {}),
     ...(typeof source.lastExportPath === "string" ? { lastExportPath: source.lastExportPath } : {})
@@ -101,6 +107,7 @@ export function createSeedData(): CockpitData {
 
   return {
     ...createEmptyData(),
+    workSessionSnapshot: createSeedWorkSessionSnapshot(),
     plans: [plan],
     activePlanId: plan.id
   };
@@ -199,9 +206,16 @@ export function setLastExportPath(data: CockpitData, path: string): CockpitData 
   };
 }
 
+export function setWorkSessionSnapshot(data: CockpitData, snapshot: AgentWorkSnapshot): CockpitData {
+  return {
+    ...data,
+    workSessionSnapshot: normalizeWorkSessionSnapshot(snapshot)
+  };
+}
+
 export function normalizeSettings(input: unknown): CockpitSettings {
   if (!input || typeof input !== "object") {
-    return { ...DEFAULT_SETTINGS };
+    return { ...DEFAULT_SETTINGS, sessionScanRoots: [...DEFAULT_SETTINGS.sessionScanRoots] };
   }
 
   const settings = input as Partial<CockpitSettings>;
@@ -209,7 +223,17 @@ export function normalizeSettings(input: unknown): CockpitSettings {
     dailyNoteFolder: cleanFolder(settings.dailyNoteFolder),
     llmEndpoint: cleanEndpoint(settings.llmEndpoint),
     llmModel: cleanModel(settings.llmModel),
-    llmApiKey: typeof settings.llmApiKey === "string" ? settings.llmApiKey.trim() : ""
+    llmApiKey: typeof settings.llmApiKey === "string" ? settings.llmApiKey.trim() : "",
+    sessionScanRoots: cleanSessionScanRoots(settings.sessionScanRoots)
+  };
+}
+
+export function createEmptyWorkSessionSnapshot(date = previousLocalDateString(), timestamp = nowIso()): AgentWorkSnapshot {
+  return {
+    date,
+    generatedAt: timestamp,
+    sessions: [],
+    sources: []
   };
 }
 
@@ -258,6 +282,87 @@ function normalizeModelTask(task: ModelTask, index: number, timestamp: string): 
   };
 }
 
+function createSeedWorkSessionSnapshot(): AgentWorkSnapshot {
+  return {
+    date: "2026-07-02",
+    generatedAt: "2026-07-03T08:00:00.000Z",
+    sources: ["~/.codex/archived_sessions", "~/.claude/tasks"],
+    sessions: [
+      {
+        id: "seed-codex-session",
+        platform: "codex",
+        title: "实现每日看板热启动原型",
+        summary: "Codex 已经把一句话拆待办、热启动勾选、Markdown 导出和滚动容器串起来。",
+        path: "~/.codex/archived_sessions/rollout-2026-07-02-seed.jsonl",
+        updatedAt: "2026-07-02T22:20:00.000Z",
+        projectPath: "~/Documents/new day board",
+        resumeHint: "codex resume seed-codex-session",
+        artifacts: ["src/render.ts", "src/state.ts", "styles.css"],
+        status: "completed"
+      },
+      {
+        id: "seed-claude-task",
+        platform: "claude",
+        title: "补齐原始 idea 的产品语义",
+        summary: "Claude task 记录了原始想法：先看昨日各平台 agent 做了什么，再决定今天哪些待办适合热启动。",
+        path: "~/.claude/tasks/seed/1.json",
+        updatedAt: "2026-07-02T19:10:00.000Z",
+        resumeHint: "claude --resume seed-claude-task",
+        artifacts: ["LLM-Wiki/raw/notes/2026-07-02 每日看板的idea.md"],
+        status: "completed"
+      }
+    ]
+  };
+}
+
+function normalizeWorkSessionSnapshot(input: unknown): AgentWorkSnapshot {
+  if (!input || typeof input !== "object") {
+    return createEmptyWorkSessionSnapshot();
+  }
+
+  const source = input as Partial<AgentWorkSnapshot>;
+  const sessions = Array.isArray(source.sessions)
+    ? source.sessions.map((session) => normalizeWorkSession(session)).filter((session): session is AgentWorkSession => session !== null)
+    : [];
+
+  return {
+    date: cleanText(source.date, previousLocalDateString()),
+    generatedAt: cleanText(source.generatedAt, nowIso()),
+    sessions: sessions.slice(0, 30),
+    sources: cleanSessionScanRoots(source.sources)
+  };
+}
+
+function normalizeWorkSession(session: unknown): AgentWorkSession | null {
+  if (!session || typeof session !== "object") return null;
+  const source = session as Partial<AgentWorkSession>;
+  const title = cleanText(source.title, "");
+  const summary = cleanText(source.summary, "");
+  const path = cleanText(source.path, "");
+  if (!title || !path) return null;
+
+  const normalized: AgentWorkSession = {
+    id: cleanText(source.id, fallbackSessionId(path)),
+    platform: normalizePlatform(source.platform),
+    title,
+    summary: summary || title,
+    path,
+    updatedAt: cleanText(source.updatedAt, nowIso()),
+    artifacts: Array.isArray(source.artifacts)
+      ? source.artifacts.map((artifact) => cleanText(artifact, "")).filter(Boolean).slice(0, 12)
+      : [],
+    status: normalizeSessionStatus(source.status)
+  };
+
+  const startedAt = cleanText(source.startedAt, "");
+  const projectPath = cleanText(source.projectPath, "");
+  const resumeHint = cleanText(source.resumeHint, "");
+  if (startedAt) normalized.startedAt = startedAt;
+  if (projectPath) normalized.projectPath = projectPath;
+  if (resumeHint) normalized.resumeHint = resumeHint;
+  return normalized;
+}
+
 function isPartialPlan(plan: unknown): plan is IntentPlan {
   if (!plan || typeof plan !== "object") return false;
   const candidate = plan as Partial<IntentPlan>;
@@ -290,6 +395,42 @@ function cleanEndpoint(value: unknown): string {
 
 function cleanModel(value: unknown): string {
   return typeof value === "string" && value.trim() ? value.trim() : DEFAULT_SETTINGS.llmModel;
+}
+
+function cleanSessionScanRoots(value: unknown): string[] {
+  const values = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/\r?\n/)
+      : DEFAULT_SESSION_SCAN_ROOTS;
+  const roots = values.map((root) => cleanText(root, "")).filter(Boolean);
+  return roots.length > 0 ? Array.from(new Set(roots)).slice(0, 12) : [...DEFAULT_SESSION_SCAN_ROOTS];
+}
+
+function cleanText(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function normalizePlatform(value: unknown): AgentPlatform {
+  return value === "codex" || value === "claude" || value === "minimax" || value === "other" ? value : "other";
+}
+
+function normalizeSessionStatus(value: unknown): AgentSessionStatus {
+  return value === "active" || value === "completed" || value === "unknown" ? value : "unknown";
+}
+
+function fallbackSessionId(path: string): string {
+  const tail = path.split(/[\\/]/).filter(Boolean).pop() ?? "session";
+  return tail.replace(/\.[^.]+$/, "") || "session";
+}
+
+function previousLocalDateString(now = new Date()): string {
+  const date = new Date(now);
+  date.setDate(date.getDate() - 1);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function success<T>(data: T): CockpitResult<T> {

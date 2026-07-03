@@ -1,5 +1,12 @@
 import { renderCockpit } from "../../src/render";
-import { addPlanFromModelTasks, createEmptyData, createSeedData, setLastExportPath, toggleHotStartTask } from "../../src/state";
+import {
+  addPlanFromModelTasks,
+  createEmptyData,
+  createSeedData,
+  setLastExportPath,
+  setWorkSessionSnapshot,
+  toggleHotStartTask
+} from "../../src/state";
 import type { CockpitData, ModelTask, RendererState } from "../../src/types";
 
 let data: CockpitData = new URLSearchParams(window.location.search).get("fixture") === "long"
@@ -57,6 +64,28 @@ const controller = renderCockpit(root, state, {
       update({ data, processing: false });
     }
     return result;
+  },
+  async refreshWorkSessions() {
+    data = setWorkSessionSnapshot(data, {
+      date: "2026-07-02",
+      generatedAt: "2026-07-03T08:06:00.000Z",
+      sources: ["playwright"],
+      sessions: [
+        {
+          id: "playwright-codex-session",
+          platform: "codex",
+          title: "Playwright 刷新出来的昨日会话",
+          summary: "测试刷新按钮会更新本地 agent 工作会话。",
+          path: "~/.codex/archived_sessions/playwright.jsonl",
+          updatedAt: "2026-07-02T18:30:00.000Z",
+          resumeHint: "codex resume playwright-codex-session",
+          artifacts: [],
+          status: "completed"
+        }
+      ]
+    });
+    update({ data, processing: false });
+    return { ok: true, data };
   },
   async exportDailyNote() {
     const path = "Daily Cockpit/2026-07-03.md";

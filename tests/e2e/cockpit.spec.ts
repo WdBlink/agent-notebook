@@ -10,10 +10,21 @@ for (const width of [320, 768, 1024, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto(harnessUrl);
     await expect(page.getByRole("heading", { name: "把一句话拆成明天可启动的待办" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "昨日工作会话" })).toBeVisible();
     const hasOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     expect(hasOverflow).toBe(false);
   });
 }
+
+test("shows and refreshes yesterday agent work sessions", async ({ page }) => {
+  await page.goto(harnessUrl);
+  await expect(page.getByText("实现每日看板热启动原型")).toBeVisible();
+  await expect(page.getByText("codex resume seed-codex-session")).toBeVisible();
+
+  await page.getByRole("button", { name: "刷新昨日工作会话" }).click();
+  await expect(page.getByText("Playwright 刷新出来的昨日会话")).toBeVisible();
+  await expect(page.getByText("codex resume playwright-codex-session")).toBeVisible();
+});
 
 test("decomposes intent into tasks and selected hot starts", async ({ page }) => {
   await page.goto(harnessUrl);

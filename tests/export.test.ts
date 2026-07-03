@@ -39,6 +39,7 @@ test("daily markdown exports intent, selected hot starts, and candidates", () =>
   if (!dataResult.ok) return;
   const markdown = buildDailyMarkdown(dataResult.data, new Date("2026-07-03T00:00:00.000Z"));
 
+  assert.ok(markdown.includes("## 昨日工作会话"));
   assert.ok(markdown.includes("## 原始意图"));
   assert.ok(markdown.includes("## 选定热启动"));
   assert.ok(markdown.includes("## 全部待办候选"));
@@ -46,9 +47,17 @@ test("daily markdown exports intent, selected hot starts, and candidates", () =>
   assert.ok(markdown.includes("warm-start: 提前读 README 和论文。"));
 });
 
+test("daily markdown includes prior agent sessions before intent", () => {
+  const markdown = buildDailyMarkdown(seededData(), new Date("2026-07-03T00:00:00.000Z"));
+  assert.ok(markdown.indexOf("## 昨日工作会话") < markdown.indexOf("## 原始意图"));
+  assert.ok(markdown.includes("实现每日看板热启动原型"));
+  assert.ok(markdown.includes("resume: codex resume seed-codex-session"));
+});
+
 test("empty export still writes structured note", () => {
   const markdown = buildDailyMarkdown(createEmptyData(), new Date("2026-07-03T00:00:00.000Z"));
   assert.ok(markdown.includes("# 每日热启动 2026-07-03"));
+  assert.ok(markdown.includes("- 暂无昨日工作会话。"));
   assert.ok(markdown.includes("还没有拆解过今天的意图"));
 });
 
