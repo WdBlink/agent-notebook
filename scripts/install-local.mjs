@@ -3,6 +3,12 @@ import path from "node:path";
 import process from "node:process";
 
 const pluginId = "daily-cockpit";
+const defaultSessionScanRoots = [
+  "~/.codex/archived_sessions",
+  "~/.codex/memories/rollout_summaries",
+  "~/.claude/tasks",
+  "~/.minimax/plans"
+];
 
 const vault = parseVault(process.argv.slice(2));
 const repo = process.cwd();
@@ -25,8 +31,10 @@ const seedData = () => ({
     dailyNoteFolder: "Daily Cockpit",
     llmEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
     llmModel: "qwen2.5:7b",
-    llmApiKey: ""
+    llmApiKey: "",
+    sessionScanRoots: defaultSessionScanRoots
   },
+  workSessionSnapshot: emptyWorkSessionSnapshot(),
   activePlanId: "local-smoke-plan",
   plans: [
     {
@@ -59,9 +67,15 @@ try {
   if (!data || data.schemaVersion !== 2 || !Array.isArray(data.plans)) {
     await fs.copyFile(dataPath, `${dataPath}.v1.bak`);
     await fs.writeFile(dataPath, JSON.stringify(seedData(), null, 2));
+  } else {
+    const migrated = migrateData(data);
+    if (JSON.stringify(migrated) !== JSON.stringify(data)) {
+      await backupOnce(dataPath, `${dataPath}.pre-agent-sessions.bak`);
+      await writeJsonAtomic(dataPath, migrated);
+    }
   }
 } catch {
-  await fs.writeFile(dataPath, JSON.stringify(seedData(), null, 2));
+  await writeJsonAtomic(dataPath, seedData());
 }
 
 await enablePlugin(pluginConfig, pluginId);
@@ -75,6 +89,69 @@ function parseVault(args) {
     throw new Error('Missing vault path. Use: npm run install:local -- --vault "$HOME/Knowledge/Obsidian"');
   }
   return path.resolve(value);
+}
+
+function migrateData(data) {
+  const settings = data.settings && typeof data.settings === "object" ? data.settings : {};
+  const roots = Array.isArray(settings.sessionScanRoots)
+    ? Array.from(new Set([...settings.sessionScanRoots.filter((root) => typeof root === "string" && root.trim()), ...defaultSessionScanRoots]))
+    : defaultSessionScanRoots;
+  return {
+    ...data,
+    schemaVersion: 2,
+    settings: {
+      dailyNoteFolder: typeof settings.dailyNoteFolder === "string" && settings.dailyNoteFolder.trim() ? settings.dailyNoteFolder : "Daily Cockpit",
+      llmEndpoint:
+        typeof settings.llmEndpoint === "string" && settings.llmEndpoint.trim()
+          ? settings.llmEndpoint
+          : "http://127.0.0.1:11434/v1/chat/completions",
+      llmModel: typeof settings.llmModel === "string" && settings.llmModel.trim() ? settings.llmModel : "qwen2.5:7b",
+      llmApiKey: typeof settings.llmApiKey === "string" ? settings.llmApiKey : "",
+      sessionScanRoots: roots
+    },
+    workSessionSnapshot: normalizeSnapshot(data.workSessionSnapshot)
+  };
+}
+
+function normalizeSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object" || !Array.isArray(snapshot.sessions)) {
+    return emptyWorkSessionSnapshot();
+  }
+  return {
+    date: typeof snapshot.date === "string" && snapshot.date.trim() ? snapshot.date : previousDate(),
+    generatedAt: typeof snapshot.generatedAt === "string" && snapshot.generatedAt.trim() ? snapshot.generatedAt : new Date().toISOString(),
+    sessions: snapshot.sessions,
+    sources: Array.isArray(snapshot.sources) ? snapshot.sources.filter((source) => typeof source === "string") : []
+  };
+}
+
+function emptyWorkSessionSnapshot() {
+  return {
+    date: previousDate(),
+    generatedAt: new Date().toISOString(),
+    sessions: [],
+    sources: []
+  };
+}
+
+function previousDate() {
+  const date = new Date();
+  date.setDate(date.getDate() - 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+async function writeJsonAtomic(file, value) {
+  const tempPath = `${file}.tmp`;
+  await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`);
+  await fs.rename(tempPath, file);
+}
+
+async function backupOnce(source, target) {
+  try {
+    await fs.access(target);
+  } catch {
+    await fs.copyFile(source, target);
+  }
 }
 
 async function assertFile(file) {

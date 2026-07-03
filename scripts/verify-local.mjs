@@ -1,19 +1,34 @@
 import fs from "node:fs/promises";
+import crypto from "node:crypto";
 import path from "node:path";
 import process from "node:process";
 
 const pluginId = "daily-cockpit";
 const vault = parseVault(process.argv.slice(2));
+const repo = process.cwd();
 const pluginDir = path.join(vault, ".obsidian", "plugins", pluginId);
 const required = ["manifest.json", "main.js", "styles.css", "data.json"];
 
 for (const file of required) {
   await assertFile(path.join(pluginDir, file));
 }
+for (const file of ["manifest.json", "main.js", "styles.css"]) {
+  await assertSameHash(path.join(repo, file), path.join(pluginDir, file));
+}
 
 const manifest = JSON.parse(await fs.readFile(path.join(pluginDir, "manifest.json"), "utf8"));
 if (manifest.id !== pluginId) {
   throw new Error(`manifest id mismatch: ${manifest.id}`);
+}
+if (manifest.isDesktopOnly !== true) {
+  throw new Error("manifest must be desktop-only because local session scanning needs the desktop filesystem");
+}
+
+const installedMain = await fs.readFile(path.join(pluginDir, "main.js"), "utf8");
+for (const snippet of ["refresh-work-sessions", ".codex/archived_sessions", ".minimax/plans", "workSessionSnapshot"]) {
+  if (!installedMain.includes(snippet)) {
+    throw new Error(`installed main.js missing latest feature snippet: ${snippet}`);
+  }
 }
 
 const enabled = JSON.parse(await fs.readFile(path.join(vault, ".obsidian", "community-plugins.json"), "utf8"));
@@ -25,10 +40,16 @@ const data = JSON.parse(await fs.readFile(path.join(pluginDir, "data.json"), "ut
 if (!data || data.schemaVersion !== 2 || !Array.isArray(data.plans)) {
   throw new Error("data.json does not contain CockpitData schemaVersion 2");
 }
+if (!Array.isArray(data.settings?.sessionScanRoots) || !data.settings.sessionScanRoots.includes("~/.minimax/plans")) {
+  throw new Error("data.json has not been migrated with latest sessionScanRoots");
+}
+if (!data.workSessionSnapshot || !Array.isArray(data.workSessionSnapshot.sessions)) {
+  throw new Error("data.json has not been migrated with workSessionSnapshot");
+}
 
 const exportDir = path.join(vault, "Daily Cockpit");
 await fs.mkdir(exportDir, { recursive: true });
-const exportPath = path.join(exportDir, `${formatDate(new Date())}.md`);
+let exportPath = path.join(exportDir, `${formatDate(new Date())}.md`);
 const verifyMarkdown = [
   "---",
   "source: daily-cockpit-local-verify",
@@ -36,6 +57,10 @@ const verifyMarkdown = [
   "---",
   "",
   `# 每日热启动 ${formatDate(new Date())}`,
+  "",
+  "## 昨日工作会话",
+  "",
+  "- 暂无昨日工作会话。",
   "",
   "## 原始意图",
   "",
@@ -62,12 +87,15 @@ let markdown = await fs.readFile(exportPath, "utf8");
 if (!markdown.includes("source: daily-cockpit") && !markdown.includes("source: daily-cockpit-local-verify")) {
   const fallbackPath = path.join(exportDir, `${formatDate(new Date())}-daily-cockpit-local-verify.md`);
   await fs.writeFile(fallbackPath, verifyMarkdown);
+  exportPath = fallbackPath;
   markdown = verifyMarkdown;
 }
-for (const heading of ["## 原始意图", "## 选定热启动", "## 全部待办候选"]) {
-  if (!markdown.includes(heading)) {
-    throw new Error(`export note missing heading: ${heading}`);
-  }
+const requiredHeadings = ["## 昨日工作会话", "## 原始意图", "## 选定热启动", "## 全部待办候选"];
+if (!requiredHeadings.every((heading) => markdown.includes(heading))) {
+  const fallbackPath = path.join(exportDir, `${formatDate(new Date())}-daily-cockpit-local-verify.md`);
+  await fs.writeFile(fallbackPath, verifyMarkdown);
+  exportPath = fallbackPath;
+  markdown = verifyMarkdown;
 }
 
 console.log(
@@ -77,6 +105,8 @@ console.log(
       pluginDir,
       exportPath,
       enabled: true,
+      installedMatchesRepo: true,
+      hasLatestSessionFields: true,
       planCount: data.plans.length,
       taskCount: data.plans.reduce((count, plan) => count + (Array.isArray(plan.tasks) ? plan.tasks.length : 0), 0)
     },
@@ -97,6 +127,18 @@ function parseVault(args) {
 async function assertFile(file) {
   const stat = await fs.stat(file);
   if (!stat.isFile()) throw new Error(`Expected file: ${file}`);
+}
+
+async function assertSameHash(source, target) {
+  const [sourceHash, targetHash] = await Promise.all([fileHash(source), fileHash(target)]);
+  if (sourceHash !== targetHash) {
+    throw new Error(`installed file is stale: ${target} does not match ${source}`);
+  }
+}
+
+async function fileHash(file) {
+  const bytes = await fs.readFile(file);
+  return crypto.createHash("sha256").update(bytes).digest("hex");
 }
 
 function formatDate(date) {

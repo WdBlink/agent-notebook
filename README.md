@@ -127,11 +127,14 @@ The scanner is intentionally bounded: it filters to the previous local day, caps
 npm run lint
 npm test
 npm run test:e2e
+npm run test:obsidian -- --vault "$HOME/Knowledge/Obsidian"
 npm run install:local -- --vault "$HOME/Knowledge/Obsidian"
 npm run verify:local -- --vault "$HOME/Knowledge/Obsidian"
 ```
 
 `npm run test:e2e` checks the browser harness at 320px, 768px, 1024px, and 1440px, including long todo lists with internal scroll containers.
+
+`npm run test:obsidian` is the real desktop E2E: it installs the current build into the vault, restarts Obsidian, opens the Daily Cockpit view through the actual Obsidian runtime, clicks `刷新`, exports Markdown, and saves a screenshot under `test-results/`.
 
 ## License
 

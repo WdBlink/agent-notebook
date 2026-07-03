@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --import tsx --test tests/*.test.ts",
     "test:e2e": "npm run build && node scripts/build-e2e.mjs && playwright test",
+    "test:obsidian": "node scripts/test-obsidian-local.mjs",
     "lint": "npm run typecheck && node scripts/privacy-check.mjs && node scripts/readme-check.mjs",
     "install:local": "npm run build && node scripts/install-local.mjs",
     "verify:local": "node scripts/verify-local.mjs",

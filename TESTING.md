@@ -1,6 +1,6 @@
 # Testing Daily Cockpit
 
-Daily Cockpit has three verification layers: TypeScript tests, browser harness tests, and local Obsidian vault installation checks.
+Daily Cockpit has four verification layers: TypeScript tests, browser harness tests, local Obsidian vault installation checks, and a real Obsidian desktop E2E.
 
 ## Environment Setup
 
@@ -30,6 +30,7 @@ The plugin uses Node.js 22 during development and targets Obsidian's Electron ru
 npm run lint
 npm test
 npm run test:e2e
+npm run test:obsidian -- --vault "$HOME/Knowledge/Obsidian"
 ```
 
 `npm run lint` includes type checking, README asset checks, and a privacy check that rejects hardcoded public LLM hosts or API keys.
@@ -38,11 +39,14 @@ npm run test:e2e
 
 `npm run test:e2e` builds a deterministic browser harness and verifies responsive layout, session refresh, and scroll containment at 320px, 768px, 1024px, and 1440px.
 
+`npm run test:obsidian` is the real local Obsidian E2E. It builds the current repo, installs and migrates the plugin into the vault, restarts Obsidian with a remote debugging port, opens the actual Daily Cockpit view, clicks the real `刷新` button, invokes the plugin export path, and writes a screenshot to `test-results/obsidian-daily-cockpit.png`.
+
 ## Local Obsidian Check
 
 ```bash
 npm run install:local -- --vault "$HOME/Knowledge/Obsidian"
 npm run verify:local -- --vault "$HOME/Knowledge/Obsidian"
+npm run test:obsidian -- --vault "$HOME/Knowledge/Obsidian"
 open -a Obsidian
 ```
 
