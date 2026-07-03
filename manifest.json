@@ -3,7 +3,7 @@
   "name": "Daily Cockpit",
   "version": "0.1.0",
   "minAppVersion": "1.5.0",
-  "description": "ADHD-friendly external working memory and daily startup cockpit for Obsidian.",
+  "description": "Local-model intent decomposition and hot-start task selection for Obsidian.",
   "author": "WdBlink",
   "authorUrl": "https://github.com/WdBlink",
   "isDesktopOnly": false

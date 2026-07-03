@@ -6,21 +6,21 @@
   </picture>
 
   <h1>Daily Cockpit</h1>
-  <p>ADHD-friendly external working memory for Obsidian: capture ideas, protect today, and reconnect with yesterday.</p>
+  <p>Turn one loose plan into tomorrow's selectable AI hot-start tasks inside Obsidian.</p>
 </div>
 
 <div align="center">
 
 [![License: MIT][license-shield]][license-url]
 [![Obsidian][obsidian-shield]][obsidian-url]
-[![Local-first][local-first-shield]][local-first-url]
+[![Local Model][local-model-shield]][local-model-url]
 
 </div>
 
 <div align="center">
   <a href="#quick-start">Quick Start</a> &middot;
-  <a href="#install">Install</a> &middot;
   <a href="#usage">Usage</a> &middot;
+  <a href="#local-model">Local Model</a> &middot;
   <a href="#verification">Verification</a>
 </div>
 
@@ -30,18 +30,18 @@
 
 ## Why
 
-AI work makes it easy to open too many threads and carry too much unfinished context in your head. Daily Cockpit gives you one quiet Obsidian surface for the morning restart: what matters today, what is happening now, and what can safely wait.
+AI makes it easy to keep opening new threads at night and then wake up cold. The missing step is not another kanban board; it is a small bridge from "what I want to do tomorrow" to concrete tasks that an AI can prepare before you sit down.
 
-It is not a generic todo app. New ideas land in an inbox first, Today is capped at five items, and the interface repeatedly reinforces that stored ideas are not debt.
+Daily Cockpit keeps that bridge simple: write one natural-language intent, let a local model decompose it into todos, then explicitly choose which todos become hot-start candidates.
 
 ## Features
 
-- **Quick capture without pressure**: write a thought immediately, then let it default to `灵感收纳箱` instead of becoming urgent work.
-- **Bounded daily planning**: `今天` has a five-item limit and `正在做` allows exactly one active item.
-- **Gentle triage states**: move ideas through `先替我记着`, `近期看看`, `归档`, and `已完成` without creating an infinite backlog.
-- **Full-window Obsidian view**: the main experience is a custom view, not a cramped sidebar.
-- **Local-first storage**: data is saved through Obsidian plugin data in your vault; the runtime contains no network calls.
-- **Daily Markdown export**: write a structured `Daily Cockpit/YYYY-MM-DD.md` note for review, journaling, or LLM-Wiki workflows.
+- **Intent-first input**: paste or type a rough Chinese or English plan instead of managing statuses.
+- **Local-model decomposition**: calls an OpenAI-compatible chat endpoint and expects structured JSON tasks.
+- **Selectable Hot Start**: each generated todo has a checkbox; only selected tasks enter the hot-start list.
+- **Prep-oriented fields**: tasks include priority, category, detail, and a `warmStart` action suitable for background research, reading, or experiments.
+- **Obsidian-native export**: writes `Daily Cockpit/YYYY-MM-DD.md` with the original intent, selected hot starts, and all candidates.
+- **Simple full-window view**: one input, one candidate list, one hot-start list. No inbox, no daily state machine, no generic todo board.
 
 ## Quick Start
 
@@ -51,7 +51,7 @@ npm run build
 npm run install:local -- --vault "$HOME/Knowledge/Obsidian"
 ```
 
-Open Obsidian, then run **Open Daily Cockpit** from the command palette or click the cockpit ribbon icon.
+Open Obsidian, then run **打开每日热启动** from the command palette or click the ribbon icon.
 
 ## Install
 
@@ -71,7 +71,7 @@ The install script copies `main.js`, `styles.css`, and `manifest.json` into:
 <vault>/.obsidian/plugins/daily-cockpit/
 ```
 
-It also adds `daily-cockpit` to `.obsidian/community-plugins.json` if the plugin is not already enabled.
+It also enables `daily-cockpit` in `.obsidian/community-plugins.json` when needed.
 
 ## Usage
 
@@ -79,21 +79,36 @@ Daily Cockpit adds one view, one ribbon action, and three commands:
 
 | Entry point | What it does |
 | --- | --- |
-| `Open Daily Cockpit` | Opens the full-window cockpit view |
-| `Quick Capture` | Captures a thought into the inbox without opening the full view |
-| `Export Daily Note` | Writes `Daily Cockpit/YYYY-MM-DD.md` in the current vault |
+| `打开每日热启动` | Opens the full-window decomposition view |
+| Ribbon icon | Opens the same view |
+| `快速拆解待办` | Opens a modal for one quick intent |
+| `导出热启动清单` | Writes `Daily Cockpit/YYYY-MM-DD.md` in the current vault |
 
-Core states:
+Basic flow:
 
-| State | Purpose |
-| --- | --- |
-| `灵感收纳箱` | Default home for new ideas |
-| `今天` | Confirmed commitments, capped at five |
-| `正在做` | The one thing currently in focus |
-| `近期看看` | Worth revisiting soon |
-| `先替我记着` | Safe holding area with no pressure |
-| `已完成` | Daily completion trail |
-| `归档` | Record-only storage |
+1. Describe tomorrow's goal in one paragraph.
+2. Click **拆成待办**.
+3. Review the generated candidate todos.
+4. Check the todos suitable for hot-start preparation.
+5. Export the Markdown note when you want a durable handoff.
+
+## Local Model
+
+By default, the plugin calls:
+
+```text
+http://127.0.0.1:11434/v1/chat/completions
+```
+
+The default model name is `qwen2.5:7b`. You can change endpoint, model, API key, and export folder in the plugin settings.
+
+The code does not include a public LLM host or hardcoded API key. If you point the endpoint at a remote provider, that is your explicit configuration.
+
+## Roadmap
+
+The first working scope is the evening flow: intent decomposition and selected hot-start tasks.
+
+The original product idea also includes a morning flow: summarize yesterday's local agent sessions, surface session IDs/paths, and show which hot-start tasks already have preparation work attached. That belongs in the next version after the simple planner is stable.
 
 ## Verification
 
@@ -105,11 +120,7 @@ npm run install:local -- --vault "$HOME/Knowledge/Obsidian"
 npm run verify:local -- --vault "$HOME/Knowledge/Obsidian"
 ```
 
-`npm run test:e2e` checks the browser harness at 320px, 768px, 1024px, and 1440px and fails if the cockpit creates horizontal overflow.
-
-## Local-first
-
-Daily Cockpit stores data through Obsidian's local plugin data API. Runtime source is checked for `fetch`, `XMLHttpRequest`, `WebSocket`, and remote URL primitives so captured ideas stay in the vault unless you export or sync them yourself.
+`npm run test:e2e` checks the browser harness at 320px, 768px, 1024px, and 1440px and fails if the interface creates horizontal overflow.
 
 ## License
 
@@ -119,5 +130,5 @@ MIT
 [license-url]: LICENSE
 [obsidian-shield]: https://img.shields.io/badge/Obsidian-plugin-3f7e6b.svg
 [obsidian-url]: https://obsidian.md
-[local-first-shield]: https://img.shields.io/badge/local--first-vault%20data-3f7e6b.svg
-[local-first-url]: #local-first
+[local-model-shield]: https://img.shields.io/badge/model-localhost%20default-3f7e6b.svg
+[local-model-url]: #local-model

@@ -22,44 +22,49 @@ if (!Array.isArray(enabled) || !enabled.includes(pluginId)) {
 }
 
 const data = JSON.parse(await fs.readFile(path.join(pluginDir, "data.json"), "utf8"));
-if (!data || data.schemaVersion !== 1 || !Array.isArray(data.items)) {
-  throw new Error("data.json does not contain CockpitData schemaVersion 1");
+if (!data || data.schemaVersion !== 2 || !Array.isArray(data.plans)) {
+  throw new Error("data.json does not contain CockpitData schemaVersion 2");
 }
 
 const exportDir = path.join(vault, "Daily Cockpit");
 await fs.mkdir(exportDir, { recursive: true });
 const exportPath = path.join(exportDir, `${formatDate(new Date())}.md`);
+const verifyMarkdown = [
+  "---",
+  "source: daily-cockpit-local-verify",
+  `date: ${formatDate(new Date())}`,
+  "---",
+  "",
+  `# 每日热启动 ${formatDate(new Date())}`,
+  "",
+  "## 原始意图",
+  "",
+  "> 本地验证脚本已确认插件文件安装完成。",
+  "",
+  "## 选定热启动",
+  "",
+  "- [x] **确认本地模型配置**",
+  "  - warm-start: 启动本地模型服务并跑一次待办拆解。",
+  "",
+  "## 全部待办候选",
+  "",
+  "- [x] **确认本地模型配置**",
+  ""
+].join("\n");
+
 try {
   await fs.access(exportPath);
 } catch {
-  await fs.writeFile(
-    exportPath,
-    [
-      "---",
-      "source: daily-cockpit-local-verify",
-      `date: ${formatDate(new Date())}`,
-      "---",
-      "",
-      `# 每日启动台 ${formatDate(new Date())}`,
-      "",
-      "## 正在做",
-      "",
-      "- 暂无。",
-      "",
-      "## 今天",
-      "",
-      "- 本地验证脚本已确认插件文件安装完成。",
-      "",
-      "## 灵感收纳箱",
-      "",
-      "- Obsidian 打开后可通过命令面板进入每日启动台。",
-      ""
-    ].join("\n")
-  );
+  await fs.writeFile(exportPath, verifyMarkdown);
 }
 
-const markdown = await fs.readFile(exportPath, "utf8");
-for (const heading of ["## 正在做", "## 今天", "## 灵感收纳箱"]) {
+let markdown = await fs.readFile(exportPath, "utf8");
+if (!markdown.includes("source: daily-cockpit") && !markdown.includes("source: daily-cockpit-local-verify")) {
+  const fallbackPath = path.join(exportDir, `${formatDate(new Date())}-daily-cockpit-local-verify.md`);
+  await fs.writeFile(fallbackPath, verifyMarkdown);
+  markdown = verifyMarkdown;
+}
+for (const heading of ["## 原始意图", "## 选定热启动", "## 全部待办候选"]) {
   if (!markdown.includes(heading)) {
     throw new Error(`export note missing heading: ${heading}`);
   }
@@ -72,7 +77,8 @@ console.log(
       pluginDir,
       exportPath,
       enabled: true,
-      itemCount: data.items.length
+      planCount: data.plans.length,
+      taskCount: data.plans.reduce((count, plan) => count + (Array.isArray(plan.tasks) ? plan.tasks.length : 0), 0)
     },
     null,
     2

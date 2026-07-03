@@ -19,31 +19,49 @@ await fs.copyFile(path.join(repo, "styles.css"), path.join(pluginDir, "styles.cs
 await fs.copyFile(path.join(repo, "manifest.json"), path.join(pluginDir, "manifest.json"));
 
 const dataPath = path.join(pluginDir, "data.json");
+const seedData = () => ({
+  schemaVersion: 2,
+  settings: {
+    dailyNoteFolder: "Daily Cockpit",
+    llmEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
+    llmModel: "qwen2.5:7b",
+    llmApiKey: ""
+  },
+  activePlanId: "local-smoke-plan",
+  plans: [
+    {
+      id: "local-smoke-plan",
+      intent: "明天研究一个项目，先让模型拆出待办，再选几条适合热启动。",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      model: "install-local",
+      source: "install-local",
+      tasks: [
+        {
+          id: "local-smoke-task-a",
+          title: "确认本地模型配置",
+          detail: "检查 endpoint 和 model 是否指向本机大模型服务。",
+          category: "admin",
+          priority: "P0",
+          warmStart: "启动本地模型服务并跑一次待办拆解。",
+          selectedForHotStart: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      ]
+    }
+  ]
+});
+
 try {
-  await fs.access(dataPath);
+  const raw = await fs.readFile(dataPath, "utf8");
+  const data = JSON.parse(raw);
+  if (!data || data.schemaVersion !== 2 || !Array.isArray(data.plans)) {
+    await fs.copyFile(dataPath, `${dataPath}.v1.bak`);
+    await fs.writeFile(dataPath, JSON.stringify(seedData(), null, 2));
+  }
 } catch {
-  await fs.writeFile(
-    dataPath,
-    JSON.stringify(
-      {
-        schemaVersion: 1,
-        settings: { dailyNoteFolder: "Daily Cockpit", todayLimit: 5 },
-        items: [
-          {
-            id: "local-smoke-a",
-            title: "本地 Obsidian 冒烟测试",
-            body: "这条记录用于确认插件安装目录、data.json 和每日导出都在本地 vault 内。",
-            state: "inbox",
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            context: "install-local"
-          }
-        ]
-      },
-      null,
-      2
-    )
-  );
+  await fs.writeFile(dataPath, JSON.stringify(seedData(), null, 2));
 }
 
 await enablePlugin(pluginConfig, pluginId);

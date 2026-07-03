@@ -1,7 +1,7 @@
 {
   "name": "daily-cockpit",
   "version": "0.1.0",
-  "description": "An Obsidian daily cockpit for ADHD-friendly external working memory.",
+  "description": "An Obsidian hot-start planner that decomposes natural language intent into selectable AI-prep tasks.",
   "main": "main.js",
   "type": "module",
   "scripts": {
@@ -18,9 +18,9 @@
   "keywords": [
     "obsidian",
     "obsidian-plugin",
-    "daily-planning",
-    "adhd",
-    "local-first"
+    "task-decomposition",
+    "local-ai",
+    "hot-start"
   ],
   "author": "WdBlink",
   "license": "MIT",

@@ -4,17 +4,13 @@
   --dc-panel-strong: var(--background-primary);
   --dc-text: var(--text-normal);
   --dc-muted: var(--text-muted);
-  --dc-faint: var(--text-faint);
   --dc-border: var(--background-modifier-border);
   --dc-accent: #3f7e6b;
   --dc-accent-strong: #245a4a;
-  --dc-warning: #a66a2a;
   --dc-danger: #a54848;
-  --dc-success: #4f7b4c;
   --dc-on-accent: #ffffff;
   --dc-radius-sm: 6px;
   --dc-radius-md: 8px;
-  --dc-radius-lg: 12px;
   --dc-font-heading: ui-sans-serif, "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
   --dc-font-body: "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
   --dc-font-mono: "SFMono-Regular", "Roboto Mono", "Cascadia Code", monospace;
@@ -22,18 +18,13 @@
   container-type: inline-size;
   min-height: 100%;
   color: var(--dc-text);
-  background:
-    linear-gradient(135deg, rgba(63, 126, 107, 0.08), transparent 34%),
-    var(--dc-bg);
+  background: var(--dc-bg);
   font-family: var(--dc-font-body);
 }
 
 .theme-dark .daily-cockpit-root {
   --dc-accent: #6fa08f;
   --dc-accent-strong: #9fbfb4;
-  --dc-warning: #d09a5e;
-  --dc-danger: #d17878;
-  --dc-success: #8fb58b;
   --dc-on-accent: #17201d;
 }
 
@@ -44,128 +35,25 @@
 }
 
 .daily-cockpit-shell {
-  display: grid;
-  grid-template-columns: minmax(190px, 240px) minmax(0, 1fr);
-  gap: 24px;
   width: 100%;
-  max-width: 1440px;
-  min-height: 100%;
+  max-width: 1180px;
   margin: 0 auto;
-  padding: 24px;
-}
-
-.daily-cockpit-nav {
-  position: sticky;
-  top: 16px;
-  align-self: start;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  padding: 16px;
-  border: 1px solid var(--dc-border);
-  border-radius: var(--dc-radius-lg);
-  background: color-mix(in srgb, var(--dc-panel) 88%, transparent);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-.daily-cockpit-brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.daily-cockpit-brand-mark {
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  border: 1px solid color-mix(in srgb, var(--dc-accent) 40%, var(--dc-border));
-  border-radius: var(--dc-radius-md);
-  color: var(--dc-accent-strong);
-  font-family: var(--dc-font-mono);
-  font-size: 13px;
-  font-weight: 700;
-  background: color-mix(in srgb, var(--dc-accent) 10%, transparent);
-}
-
-.daily-cockpit-brand-text {
-  display: grid;
-  gap: 2px;
-}
-
-.daily-cockpit-brand-text strong {
-  font-family: var(--dc-font-heading);
-  font-size: 15px;
-}
-
-.daily-cockpit-brand-text span,
-.daily-cockpit-nav-item small,
-.daily-cockpit-intro span,
-.daily-cockpit-card-meta span,
-.daily-cockpit-section-title span {
-  color: var(--dc-muted);
-  font-size: 12px;
-}
-
-.daily-cockpit-nav-list {
-  display: grid;
-  gap: 6px;
-}
-
-.daily-cockpit-nav-item,
-.daily-cockpit-action,
-.daily-cockpit-primary {
-  border: 1px solid transparent;
-  border-radius: var(--dc-radius-sm);
-  font: inherit;
-  cursor: pointer;
-  transition:
-    transform 160ms cubic-bezier(0.2, 0, 0, 1),
-    border-color 160ms cubic-bezier(0.2, 0, 0, 1),
-    background-color 160ms cubic-bezier(0.2, 0, 0, 1);
-}
-
-.daily-cockpit-nav-item {
-  display: grid;
-  gap: 2px;
-  width: 100%;
-  padding: 10px 12px;
-  color: var(--dc-text);
-  text-align: left;
-  background: transparent;
-}
-
-.daily-cockpit-nav-item:hover,
-.daily-cockpit-action:hover {
-  background: color-mix(in srgb, var(--dc-accent) 10%, transparent);
-}
-
-.daily-cockpit-nav-item.is-active {
-  border-color: color-mix(in srgb, var(--dc-accent) 44%, var(--dc-border));
-  background: color-mix(in srgb, var(--dc-accent) 14%, transparent);
-}
-
-.daily-cockpit-nav-item:active,
-.daily-cockpit-action:active,
-.daily-cockpit-primary:active {
-  transform: translateY(1px);
+  padding: 28px;
 }
 
 .daily-cockpit-main {
   display: grid;
-  gap: 20px;
+  gap: 18px;
   min-width: 0;
 }
 
 .daily-cockpit-header {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
-  gap: 20px;
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.7fr);
+  gap: 24px;
   align-items: end;
-  padding: 26px;
-  border: 1px solid var(--dc-border);
-  border-radius: var(--dc-radius-lg);
-  background: color-mix(in srgb, var(--dc-panel-strong) 92%, transparent);
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--dc-border);
 }
 
 .daily-cockpit-intro {
@@ -182,24 +70,30 @@
 
 .daily-cockpit-intro h1 {
   margin: 0;
-  max-width: 760px;
+  max-width: 720px;
   font-family: var(--dc-font-heading);
-  font-size: 34px;
-  line-height: 1.12;
+  font-size: 32px;
+  line-height: 1.16;
+  overflow-wrap: anywhere;
+}
+
+.daily-cockpit-intro span {
+  color: var(--dc-muted);
+  font-size: 14px;
+  overflow-wrap: anywhere;
 }
 
 .daily-cockpit-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 10px 18px;
   margin: 0;
 }
 
 .daily-cockpit-metric {
-  padding: 12px;
-  border: 1px solid var(--dc-border);
-  border-radius: var(--dc-radius-md);
-  background: color-mix(in srgb, var(--dc-panel) 72%, transparent);
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--dc-border);
 }
 
 .daily-cockpit-metric dt,
@@ -214,59 +108,78 @@
 
 .daily-cockpit-metric dd {
   margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: anywhere;
   font-family: var(--dc-font-mono);
-  font-size: 22px;
-  color: var(--dc-text);
+  font-size: 18px;
 }
 
-.daily-cockpit-capture {
+.daily-cockpit-intent {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(180px, 280px) auto;
-  gap: 12px;
-  align-items: end;
+  gap: 10px;
   padding: 16px;
   border: 1px solid var(--dc-border);
-  border-radius: var(--dc-radius-lg);
+  border-radius: var(--dc-radius-md);
   background: var(--dc-panel);
 }
 
-.daily-cockpit-field,
-.daily-cockpit-context {
+.daily-cockpit-field {
   display: grid;
-  gap: 7px;
+  gap: 8px;
 }
 
-.daily-cockpit-field span,
-.daily-cockpit-context span {
+.daily-cockpit-field span {
   color: var(--dc-muted);
   font-size: 12px;
   font-weight: 700;
 }
 
-.daily-cockpit-field textarea,
-.daily-cockpit-context input {
+.daily-cockpit-field textarea {
   width: 100%;
+  min-height: 132px;
   min-width: 0;
+  padding: 12px;
   border: 1px solid var(--dc-border);
   border-radius: var(--dc-radius-md);
   color: var(--dc-text);
   background: var(--background-primary);
   font: inherit;
-}
-
-.daily-cockpit-field textarea {
-  min-height: 82px;
-  padding: 12px;
   resize: vertical;
 }
 
-.daily-cockpit-context input {
-  height: 40px;
-  padding: 0 10px;
+.daily-cockpit-intent-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.daily-cockpit-intent-footer span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dc-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: anywhere;
+}
+
+.daily-cockpit-primary,
+.daily-cockpit-action {
+  min-height: 36px;
+  border: 1px solid transparent;
+  border-radius: var(--dc-radius-sm);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    transform 160ms cubic-bezier(0.2, 0, 0, 1),
+    border-color 160ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 160ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .daily-cockpit-primary {
-  min-height: 40px;
   padding: 0 16px;
   color: var(--dc-on-accent);
   background: var(--dc-accent);
@@ -279,15 +192,43 @@
   background: var(--dc-accent-strong);
 }
 
-.daily-cockpit-lane,
-.daily-cockpit-export,
-.daily-cockpit-loading {
+.daily-cockpit-primary:disabled {
+  cursor: progress;
+  opacity: 0.72;
+}
+
+.daily-cockpit-action {
+  padding: 0 12px;
+  color: var(--dc-text);
+  background: transparent;
+  border-color: var(--dc-border);
+}
+
+.daily-cockpit-action:hover {
+  background: color-mix(in srgb, var(--dc-accent) 10%, transparent);
+}
+
+.daily-cockpit-primary:active,
+.daily-cockpit-action:active {
+  transform: translateY(1px);
+}
+
+.daily-cockpit-workspace {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  gap: 18px;
+}
+
+.daily-cockpit-panel {
+  display: grid;
+  align-content: start;
   gap: 14px;
-  padding: 18px;
-  border: 1px solid var(--dc-border);
-  border-radius: var(--dc-radius-lg);
-  background: color-mix(in srgb, var(--dc-panel) 86%, transparent);
+  min-width: 0;
+}
+
+.daily-cockpit-panel-subtle {
+  padding-left: 18px;
+  border-left: 1px solid var(--dc-border);
 }
 
 .daily-cockpit-section-title {
@@ -295,116 +236,138 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--dc-border);
 }
 
-.daily-cockpit-section-title h2,
-.daily-cockpit-export h2,
-.daily-cockpit-loading h2 {
+.daily-cockpit-section-title h2 {
   margin: 0;
   font-family: var(--dc-font-heading);
-  font-size: 22px;
+  font-size: 19px;
+  overflow-wrap: anywhere;
 }
 
-.daily-cockpit-card-list {
+.daily-cockpit-section-title span,
+.daily-cockpit-task-meta span {
+  color: var(--dc-muted);
+  font-size: 12px;
+}
+
+.daily-cockpit-intent-source {
+  display: grid;
+  gap: 6px;
+  padding: 12px 0;
+}
+
+.daily-cockpit-intent-source strong {
+  color: var(--dc-muted);
+  font-size: 12px;
+}
+
+.daily-cockpit-intent-source p {
+  margin: 0;
+  line-height: 1.62;
+}
+
+.daily-cockpit-task-list,
+.daily-cockpit-hot-list {
   display: grid;
   gap: 10px;
 }
 
-.daily-cockpit-card,
-.daily-cockpit-compact-card {
+.daily-cockpit-task {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 14px;
-  align-items: start;
-  padding: 14px;
-  border: 1px solid var(--dc-border);
-  border-radius: var(--dc-radius-md);
-  background: var(--dc-panel-strong);
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--dc-border);
 }
 
-.daily-cockpit-compact-card {
-  grid-template-columns: minmax(0, 1fr);
-  gap: 10px;
-  padding: 12px;
+.daily-cockpit-task input {
+  margin-top: 4px;
 }
 
-.daily-cockpit-card-body {
+.daily-cockpit-task-body {
+  display: grid;
+  gap: 6px;
   min-width: 0;
 }
 
-.daily-cockpit-card-meta {
+.daily-cockpit-task-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 6px;
 }
 
-.daily-cockpit-card h3,
-.daily-cockpit-compact-card h3,
-.daily-cockpit-empty h3,
-.daily-cockpit-overview-group h3 {
+.daily-cockpit-task h3,
+.daily-cockpit-hot-item h3,
+.daily-cockpit-loading h3 {
   margin: 0;
   font-family: var(--dc-font-heading);
   font-size: 16px;
   line-height: 1.3;
 }
 
-.daily-cockpit-card p,
-.daily-cockpit-compact-card p,
+.daily-cockpit-task p,
+.daily-cockpit-hot-item p,
 .daily-cockpit-empty p,
-.daily-cockpit-export p,
-.daily-cockpit-overview-group p {
-  margin: 7px 0 0;
+.daily-cockpit-export p {
+  margin: 0;
   color: var(--dc-muted);
   line-height: 1.55;
   overflow-wrap: anywhere;
 }
 
-.daily-cockpit-card-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 7px;
-  max-width: 268px;
+.daily-cockpit-warm {
+  display: grid;
+  gap: 3px;
+  margin-top: 4px;
+  padding: 9px 10px;
+  border-left: 2px solid var(--dc-accent);
+  background: color-mix(in srgb, var(--dc-accent) 8%, transparent);
 }
 
-.daily-cockpit-card-actions.compact {
-  justify-content: flex-start;
-  max-width: none;
-}
-
-.daily-cockpit-action {
-  min-height: 32px;
-  padding: 0 10px;
-  color: var(--dc-text);
-  background: transparent;
-  border-color: var(--dc-border);
+.daily-cockpit-warm strong {
+  color: var(--dc-accent-strong);
   font-size: 12px;
 }
 
+.daily-cockpit-warm span {
+  color: var(--dc-text);
+  line-height: 1.5;
+}
+
+.daily-cockpit-hot-item {
+  display: grid;
+  gap: 6px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--dc-border);
+}
+
 .daily-cockpit-empty {
-  padding: 28px;
-  border: 1px dashed color-mix(in srgb, var(--dc-border) 80%, transparent);
-  border-radius: var(--dc-radius-lg);
-  background: color-mix(in srgb, var(--dc-panel-strong) 64%, transparent);
-}
-
-.daily-cockpit-overview {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.daily-cockpit-overview-group {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-  padding: 14px;
-  border-top: 1px solid var(--dc-border);
+  padding: 18px 0;
+  border-bottom: 1px dashed var(--dc-border);
 }
 
 .daily-cockpit-export {
-  max-width: 760px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--dc-border);
+}
+
+.daily-cockpit-export-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.daily-cockpit-export h2 {
+  margin: 0;
+  font-family: var(--dc-font-heading);
+  font-size: 17px;
+  overflow-wrap: anywhere;
 }
 
 .daily-cockpit-error {
@@ -424,18 +387,20 @@
 }
 
 .daily-cockpit-loading {
+  display: grid;
+  gap: 10px;
   overflow: hidden;
 }
 
 .daily-cockpit-skeleton {
-  height: 64px;
+  height: 54px;
   border-radius: var(--dc-radius-md);
   background:
     linear-gradient(
       90deg,
-      color-mix(in srgb, var(--dc-panel-strong) 78%, transparent),
-      color-mix(in srgb, var(--dc-accent) 14%, var(--dc-panel-strong)),
-      color-mix(in srgb, var(--dc-panel-strong) 78%, transparent)
+      color-mix(in srgb, var(--dc-panel) 78%, transparent),
+      color-mix(in srgb, var(--dc-accent) 14%, var(--dc-panel)),
+      color-mix(in srgb, var(--dc-panel) 78%, transparent)
     );
   background-size: 200% 100%;
   animation: daily-cockpit-skeleton 1.4s ease-in-out infinite;
@@ -457,115 +422,57 @@
   outline-offset: 2px;
 }
 
-@media (max-width: 980px) {
+@media (max-width: 860px) {
   .daily-cockpit-shell {
-    grid-template-columns: 1fr;
     padding: 16px;
   }
 
-  .daily-cockpit-nav {
-    position: relative;
-    top: auto;
-  }
-
-  .daily-cockpit-nav-list {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .daily-cockpit-header {
+  .daily-cockpit-header,
+  .daily-cockpit-workspace {
     grid-template-columns: 1fr;
   }
 
-  .daily-cockpit-capture {
-    grid-template-columns: 1fr;
+  .daily-cockpit-panel-subtle {
+    padding-left: 0;
+    border-left: 0;
+    border-top: 1px solid var(--dc-border);
+    padding-top: 14px;
+  }
+
+  .daily-cockpit-intent-footer,
+  .daily-cockpit-export {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .daily-cockpit-primary,
+  .daily-cockpit-action {
+    width: 100%;
+  }
+
+  .daily-cockpit-intent-footer span {
+    white-space: normal;
   }
 }
 
-@media (max-width: 640px) {
+@container (max-width: 760px) {
   .daily-cockpit-shell {
-    padding: 10px;
-    gap: 14px;
-  }
-
-  .daily-cockpit-nav {
-    padding: 12px;
-  }
-
-  .daily-cockpit-nav-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 14px;
   }
 
   .daily-cockpit-header,
-  .daily-cockpit-lane,
-  .daily-cockpit-export,
-  .daily-cockpit-loading {
-    padding: 14px;
+  .daily-cockpit-workspace {
+    grid-template-columns: 1fr;
   }
 
   .daily-cockpit-intro h1 {
     font-size: 26px;
   }
 
-  .daily-cockpit-card {
-    grid-template-columns: 1fr;
-  }
-
-  .daily-cockpit-card-actions {
-    justify-content: flex-start;
-    max-width: none;
-  }
-
-  .daily-cockpit-overview {
-    grid-template-columns: 1fr;
-  }
-
-  .daily-cockpit-error {
-    align-items: stretch;
-    flex-direction: column;
-  }
-}
-
-@container (max-width: 900px) {
-  .daily-cockpit-shell {
-    grid-template-columns: 1fr;
-    padding: 14px;
-    gap: 14px;
-  }
-
-  .daily-cockpit-nav {
-    position: relative;
-    top: auto;
-    padding: 12px;
-  }
-
-  .daily-cockpit-nav-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .daily-cockpit-header {
-    grid-template-columns: 1fr;
-    padding: 16px;
-  }
-
-  .daily-cockpit-intro h1 {
-    font-size: 28px;
-    max-width: 100%;
-  }
-
-  .daily-cockpit-capture {
-    grid-template-columns: 1fr;
-  }
-
-  .daily-cockpit-card {
-    grid-template-columns: 1fr;
-  }
-
-  .daily-cockpit-card-actions {
-    justify-content: flex-start;
-    max-width: none;
-  }
-
-  .daily-cockpit-overview {
-    grid-template-columns: 1fr;
+  .daily-cockpit-panel-subtle {
+    padding-left: 0;
+    border-left: 0;
+    border-top: 1px solid var(--dc-border);
+    padding-top: 14px;
   }
 }

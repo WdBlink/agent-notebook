@@ -1,89 +1,136 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { dailyNotePath } from "../src/export";
-import { captureItem, countByState, createEmptyData, moveItem, normalizeData } from "../src/state";
-import { fullTodayData, seededData } from "./fixtures";
+import {
+  addPlanFromModelTasks,
+  createEmptyData,
+  normalizeData,
+  selectedHotStartTasks,
+  toggleHotStartTask
+} from "../src/state";
 
-test("new captures default to inbox and preserve Chinese text", () => {
-  const result = captureItem(createEmptyData(), {
-    body: "突然想到一个快速捕捉入口，先不要打断今天。",
-    context: "灵感"
-  }, "2026-07-02T12:00:00.000Z");
-
-  assert.equal(result.ok, true);
-  if (!result.ok) return;
-  assert.equal(result.data.items[0]?.state, "inbox");
-  assert.match(result.data.items[0]?.title ?? "", /突然想到/);
-  assert.equal(result.data.items[0]?.context, "灵感");
-});
-
-test("today lane is capped at five items", () => {
-  const data = fullTodayData();
-  assert.equal(countByState(data, "today"), 5);
-
-  const result = moveItem(data, "seed-d", "today", "2026-07-02T12:00:00.000Z");
-  assert.equal(result.ok, false);
-  if (result.ok) return;
-  assert.equal(result.error.code, "TODAY_LIMIT_REACHED");
-});
-
-test("now lane keeps exactly one item and demotes previous now to today", () => {
-  const data = seededData();
-  const result = moveItem(data, "seed-d", "now", "2026-07-02T12:00:00.000Z");
-
-  assert.equal(result.ok, true);
-  if (!result.ok) return;
-  assert.equal(countByState(result.data, "now"), 1);
-  assert.equal(result.data.items.find((item) => item.id === "seed-d")?.state, "now");
-  assert.equal(result.data.items.find((item) => item.id === "seed-b")?.state, "today");
-});
-
-test("invalid item id returns a recoverable error", () => {
-  const result = moveItem(seededData(), "missing-item-id-404", "today");
-  assert.equal(result.ok, false);
-  if (result.ok) return;
-  assert.equal(result.error.code, "ITEM_NOT_FOUND");
-  assert.equal(result.error.message, "没有找到这条记录，它可能已经被移动或删除。");
-});
-
-test("normalizeData survives invalid persisted input", () => {
-  const normalized = normalizeData({
-    schemaVersion: 1,
-    settings: { dailyNoteFolder: "Daily Cockpit", todayLimit: 5 },
-    items: [
+test("model tasks become a new active plan", () => {
+  const result = addPlanFromModelTasks(
+    createEmptyData(),
+    "明天研究一个项目，先查概念和代码结构。",
+    [
       {
-        id: "bad-state",
-        title: "未知状态",
-        body: "应该回到 inbox。",
-        state: "unknown",
-        createdAt: "2026-07-02T12:00:00.000Z",
-        updatedAt: "2026-07-02T12:00:00.000Z"
+        title: "梳理项目核心概念",
+        detail: "读 README、论文和 docs，列出关键术语。",
+        category: "research",
+        priority: "P0",
+        warmStart: "提前读取项目文档并生成概念表。",
+        selectedForHotStart: true
+      }
+    ],
+    "local-model",
+    "test",
+    "2026-07-03T08:00:00.000Z"
+  );
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.data.plans.length, 1);
+  assert.equal(result.data.plans[0]?.tasks[0]?.selectedForHotStart, true);
+  assert.equal(selectedHotStartTasks(result.data).length, 1);
+});
+
+test("empty intent is rejected before model tasks are stored", () => {
+  const result = addPlanFromModelTasks(createEmptyData(), "  ", [{ title: "x", detail: "x" }]);
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.error.code, "EMPTY_INTENT");
+});
+
+test("hot start selection can be toggled by task id", () => {
+  const created = addPlanFromModelTasks(
+    createEmptyData(),
+    "明天分析实验。",
+    [{ title: "跑 baseline", detail: "先跑现有实验。", selectedForHotStart: false }],
+    "local-model",
+    undefined,
+    "2026-07-03T08:00:00.000Z"
+  );
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+  const taskId = created.data.plans[0]?.tasks[0]?.id ?? "";
+
+  const updated = toggleHotStartTask(created.data, taskId, true, "2026-07-03T08:10:00.000Z");
+  assert.equal(updated.ok, true);
+  if (!updated.ok) return;
+  assert.equal(selectedHotStartTasks(updated.data).length, 1);
+});
+
+test("hot start toggle only updates the plan containing the task", () => {
+  const first = addPlanFromModelTasks(
+    createEmptyData(),
+    "第一个计划。",
+    [{ title: "第一个任务", detail: "先做 A。", selectedForHotStart: false }],
+    "local-model",
+    undefined,
+    "2026-07-03T08:00:00.000Z"
+  );
+  assert.equal(first.ok, true);
+  if (!first.ok) return;
+
+  const second = addPlanFromModelTasks(
+    first.data,
+    "第二个计划。",
+    [{ title: "第二个任务", detail: "先做 B。", selectedForHotStart: false }],
+    "local-model",
+    undefined,
+    "2026-07-03T08:01:00.000Z"
+  );
+  assert.equal(second.ok, true);
+  if (!second.ok) return;
+
+  const untouchedPlan = second.data.plans[1];
+  const taskId = second.data.plans[0]?.tasks[0]?.id ?? "";
+  const updated = toggleHotStartTask(second.data, taskId, true, "2026-07-03T08:10:00.000Z");
+  assert.equal(updated.ok, true);
+  if (!updated.ok) return;
+
+  assert.equal(updated.data.plans[1]?.updatedAt, untouchedPlan?.updatedAt);
+});
+
+test("missing task id returns recoverable error", () => {
+  const result = toggleHotStartTask(createEmptyData(), "missing-task", true);
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.error.code, "TASK_NOT_FOUND");
+});
+
+test("normalizeData repairs corrupted settings and task fields", () => {
+  const normalized = normalizeData({
+    schemaVersion: 2,
+    settings: { dailyNoteFolder: 42, llmEndpoint: "", llmModel: "" },
+    plans: [
+      {
+        id: "plan-a",
+        intent: "研究项目",
+        createdAt: "2026-07-03T08:00:00.000Z",
+        updatedAt: "2026-07-03T08:00:00.000Z",
+        tasks: [
+          {
+            id: "task-a",
+            title: "任务",
+            detail: "细节",
+            category: "bad",
+            priority: "urgent",
+            warmStart: "准备资料",
+            selectedForHotStart: true,
+            createdAt: "2026-07-03T08:00:00.000Z",
+            updatedAt: "2026-07-03T08:00:00.000Z"
+          }
+        ]
       }
     ]
   });
 
-  assert.equal(normalized.items[0]?.state, "inbox");
-});
-
-test("normalizeData repairs corrupted settings before export path generation", () => {
-  const normalized = normalizeData({
-    schemaVersion: 1,
-    settings: { dailyNoteFolder: 42, todayLimit: "many" },
-    items: []
-  });
-
   assert.equal(normalized.settings.dailyNoteFolder, "Daily Cockpit");
-  assert.equal(normalized.settings.todayLimit, 5);
-  assert.equal(dailyNotePath(normalized, new Date("2026-07-02T00:00:00.000Z")), "Daily Cockpit/2026-07-02.md");
-});
-
-test("moving a today item to now is allowed when today is full and another now item is demoted", () => {
-  const data = fullTodayData();
-  const result = moveItem(data, "seed-a", "now", "2026-07-02T12:00:00.000Z");
-
-  assert.equal(result.ok, true);
-  if (!result.ok) return;
-  assert.equal(countByState(result.data, "today"), 5);
-  assert.equal(result.data.items.find((item) => item.id === "seed-a")?.state, "now");
-  assert.equal(result.data.items.find((item) => item.id === "seed-b")?.state, "today");
+  assert.equal(normalized.settings.llmEndpoint, "http://127.0.0.1:11434/v1/chat/completions");
+  assert.equal(normalized.settings.llmModel, "qwen2.5:7b");
+  assert.equal(normalized.plans[0]?.tasks[0]?.category, "other");
+  assert.equal(normalized.plans[0]?.tasks[0]?.priority, "P1");
+  assert.equal(dailyNotePath(normalized, new Date("2026-07-03T00:00:00.000Z")), "Daily Cockpit/2026-07-03.md");
 });

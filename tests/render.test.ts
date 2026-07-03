@@ -5,57 +5,51 @@ import { renderCockpit } from "../src/render";
 import { createEmptyData, createSeedData } from "../src/state";
 import type { RendererActions, RendererState } from "../src/types";
 
-test("renderer shows Chinese empty and pressure-control copy", () => {
+test("renderer shows intent decomposition form", () => {
   const dom = new JSDOM("<main id=\"root\"></main>");
   globalThis.document = dom.window.document;
   const root = dom.window.document.querySelector("#root") as HTMLElement;
   const state: RendererState = {
     data: createEmptyData(),
-    activeSection: "inbox",
-    loading: false
+    processing: false
   };
 
   renderCockpit(root, state, noopActions());
-  assert.ok(root.textContent?.includes("收纳箱不是债务"));
+  assert.ok(root.textContent?.includes("把一句话拆成明天可启动的待办"));
   const textarea = root.querySelector("textarea");
-  assert.equal(textarea?.getAttribute("placeholder"), "把闪过的想法先放这里，今天不一定要处理。");
+  assert.equal(textarea?.getAttribute("aria-label"), "待拆解的自然语言意图");
+  assert.ok(root.textContent?.includes("拆成待办"));
 });
 
-test("renderer exposes recoverable error state", () => {
+test("renderer shows selected hot starts and recoverable error state", () => {
   const dom = new JSDOM("<main id=\"root\"></main>");
   globalThis.document = dom.window.document;
   const root = dom.window.document.querySelector("#root") as HTMLElement;
   const state: RendererState = {
     data: createSeedData(),
-    activeSection: "today",
-    loading: false,
+    processing: false,
     error: {
-      code: "ITEM_NOT_FOUND",
-      message: "没有找到这条记录，它可能已经被移动或删除。"
+      code: "LLM_FAILED",
+      message: "本地模型没有响应。"
     }
   };
 
   renderCockpit(root, state, noopActions());
   assert.ok(root.querySelector('[role="alert"]'));
-  assert.ok(root.textContent?.includes("知道了"));
+  assert.ok(root.textContent?.includes("热启动"));
+  assert.ok(root.textContent?.includes("读取原始想法"));
 });
 
 function noopActions(): RendererActions {
   return {
-    async capture() {
+    async decompose() {
       return { ok: true, data: createEmptyData() };
     },
-    async move() {
-      return { ok: true, data: createEmptyData() };
-    },
-    async complete() {
-      return { ok: true, data: createEmptyData() };
-    },
-    async archive() {
+    async toggleHotStart() {
       return { ok: true, data: createEmptyData() };
     },
     async exportDailyNote() {
-      return { ok: true, data: { path: "Daily Cockpit/2026-07-02.md" } };
+      return { ok: true, data: { path: "Daily Cockpit/2026-07-03.md" } };
     },
     clearError() {}
   };
