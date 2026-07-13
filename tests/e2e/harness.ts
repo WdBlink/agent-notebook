@@ -70,6 +70,7 @@ const controller = renderCockpit(root, state, {
       date: "2026-07-02",
       generatedAt: "2026-07-03T08:06:00.000Z",
       sources: ["playwright"],
+      warnings: [],
       sessions: [
         {
           id: "playwright-codex-session",
@@ -79,6 +80,7 @@ const controller = renderCockpit(root, state, {
           path: "~/.codex/archived_sessions/playwright.jsonl",
           updatedAt: "2026-07-02T18:30:00.000Z",
           resumeHint: "codex resume playwright-codex-session",
+          resumable: true,
           artifacts: [],
           status: "completed"
         }
@@ -86,6 +88,10 @@ const controller = renderCockpit(root, state, {
     });
     update({ data, processing: false });
     return { ok: true, data };
+  },
+  async copyResumeCommand(command) {
+    (window as Window & { dailyCockpitCopiedResumeCommand?: string }).dailyCockpitCopiedResumeCommand = command;
+    return true;
   },
   async exportDailyNote() {
     const path = "Daily Cockpit/2026-07-03.md";

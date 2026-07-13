@@ -20,6 +20,7 @@ import {
   VIEW_TYPE_DAILY_COCKPIT
 } from "./constants";
 import { loadAgentWorkSnapshot } from "./agent-sessions";
+import { createCliSessionSummarizer } from "./agent-summary";
 import { buildDailyMarkdown, dailyNotePath, isDailyCockpitMarkdown } from "./export";
 import { requestTaskDecomposition } from "./llm";
 import {
@@ -87,7 +88,6 @@ export default class DailyCockpitPlugin extends Plugin {
       }
     });
 
-    void this.refreshWorkSessions(false);
   }
 
   onunload(): void {
@@ -144,22 +144,26 @@ export default class DailyCockpitPlugin extends Plugin {
   }
 
   async refreshWorkSessions(showNotice = true): Promise<CockpitResult<CockpitData>> {
-    return this.enqueueWrite(async () => {
-      try {
-        const snapshot = await loadAgentWorkSnapshot(this.data.settings);
+    try {
+      const settings = this.data.settings;
+      const snapshot = await loadAgentWorkSnapshot(settings, {
+        summarizer: createCliSessionSummarizer()
+      });
+      return this.enqueueWrite(async () => {
         const result = await this.commit({ ok: true, data: setWorkSessionSnapshot(this.data, snapshot) });
         if (result.ok && showNotice) {
-          new Notice(`已刷新昨日工作会话：${snapshot.sessions.length} 条`);
+          const warningSuffix = snapshot.warnings.length > 0 ? `，${snapshot.warnings.length} 个总结警告` : "";
+          new Notice(`已刷新昨日工作会话：${snapshot.sessions.length} 条${warningSuffix}`);
         }
         return result;
-      } catch (error) {
-        console.error(`[${PLUGIN_ID}] session scan failed`, error);
-        return {
-          ok: false,
-          error: { code: "SESSION_SCAN_FAILED", message: "读取昨日工作会话失败。请检查扫描目录是否存在且可读。" }
-        };
-      }
-    });
+      });
+    } catch (error) {
+      console.error(`[${PLUGIN_ID}] session scan failed`, error);
+      return {
+        ok: false,
+        error: { code: "SESSION_SCAN_FAILED", message: "读取昨日工作会话失败。请检查扫描目录和 Agent CLI 设置。" }
+      };
+    }
   }
 
   private async exportDailyNoteLocked(): Promise<CockpitResult<{ path: string }>> {
@@ -335,6 +339,7 @@ class DailyCockpitView extends ItemView {
         this.refreshingSessions = false;
         return this.handleResult(result);
       },
+      copyResumeCommand: async (command: string) => copyTextToClipboard(command),
       exportDailyNote: async () => {
         const result = await this.plugin.exportDailyNote();
         if (result.ok) {
@@ -367,6 +372,47 @@ class DailyCockpitView extends ItemView {
     }
     this.render();
     return result;
+  }
+}
+
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    const clipboard = globalThis.navigator?.clipboard;
+    if (clipboard?.writeText) {
+      await clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Obsidian desktop may expose Electron clipboard even when the web API is unavailable.
+  }
+
+  try {
+    const runtimeWindow = globalThis.window as Window & {
+      require?: (id: string) => { clipboard?: { writeText(value: string): void } };
+    };
+    const electron = runtimeWindow.require?.("electron");
+    const clipboard = electron?.clipboard;
+    if (clipboard) {
+      clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fall through to the DOM copy path.
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  textarea.select();
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    textarea.remove();
   }
 }
 
@@ -463,7 +509,7 @@ class DailyCockpitSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("工作会话扫描目录")
-      .setDesc("一行一个本机路径。默认读取 Codex、Claude 和 Minimax 的本地会话记录。")
+      .setDesc("一行一个本机路径。这里只读取 ID、时间、工作目录和会话文件位置，正文总结交给对应 Agent。")
       .addTextArea((text) => {
         text.inputEl.rows = 5;
         text.setValue(this.plugin.data.settings.sessionScanRoots.join("\n"));
@@ -474,6 +520,38 @@ class DailyCockpitSettingTab extends PluginSettingTab {
               .map((line) => line.trim())
               .filter(Boolean)
           });
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("昨日会话总结")
+      .setDesc("平台 CLI 模式会在点击刷新时，让 Codex 总结 Codex 会话、Claude Code 总结 Claude 会话；不会在启动时自动调用。")
+      .addDropdown((dropdown) => {
+        dropdown.addOption("native", "平台 CLI 总结");
+        dropdown.addOption("metadata", "仅显示元数据");
+        dropdown.setValue(this.plugin.data.settings.sessionSummaryMode);
+        dropdown.onChange((value) => {
+          void this.plugin.updateSettings({ sessionSummaryMode: value === "metadata" ? "metadata" : "native" });
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Codex CLI")
+      .setDesc("可执行文件名或绝对路径。macOS GUI 会自动补充 ~/.local/bin、Homebrew 和系统 PATH。")
+      .addText((text) => {
+        text.setValue(this.plugin.data.settings.codexCliPath);
+        text.onChange((value) => {
+          void this.plugin.updateSettings({ codexCliPath: value });
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Claude Code CLI")
+      .setDesc("可执行文件名或绝对路径。留作对应 Claude Code 会话的只读总结。")
+      .addText((text) => {
+        text.setValue(this.plugin.data.settings.claudeCliPath);
+        text.onChange((value) => {
+          void this.plugin.updateSettings({ claudeCliPath: value });
         });
       });
   }

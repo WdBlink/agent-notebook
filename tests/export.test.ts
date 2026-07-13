@@ -51,7 +51,7 @@ test("daily markdown includes prior agent sessions before intent", () => {
   const markdown = buildDailyMarkdown(seededData(), new Date("2026-07-03T00:00:00.000Z"));
   assert.ok(markdown.indexOf("## 昨日工作会话") < markdown.indexOf("## 原始意图"));
   assert.ok(markdown.includes("实现每日看板热启动原型"));
-  assert.ok(markdown.includes("resume: codex resume seed-codex-session"));
+  assert.ok(markdown.includes('resume: cd "$HOME/Documents/new day board" && codex resume seed-codex-session'));
 });
 
 test("empty export still writes structured note", () => {

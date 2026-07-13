@@ -25,7 +25,7 @@ if (manifest.isDesktopOnly !== true) {
 }
 
 const installedMain = await fs.readFile(path.join(pluginDir, "main.js"), "utf8");
-for (const snippet of ["refresh-work-sessions", ".codex/archived_sessions", ".minimax/plans", "workSessionSnapshot"]) {
+for (const snippet of ["refresh-work-sessions", ".codex/sessions", ".claude/projects", ".minimax/plans", "workSessionSnapshot"]) {
   if (!installedMain.includes(snippet)) {
     throw new Error(`installed main.js missing latest feature snippet: ${snippet}`);
   }
@@ -40,7 +40,12 @@ const data = JSON.parse(await fs.readFile(path.join(pluginDir, "data.json"), "ut
 if (!data || data.schemaVersion !== 2 || !Array.isArray(data.plans)) {
   throw new Error("data.json does not contain CockpitData schemaVersion 2");
 }
-if (!Array.isArray(data.settings?.sessionScanRoots) || !data.settings.sessionScanRoots.includes("~/.minimax/plans")) {
+if (
+  !Array.isArray(data.settings?.sessionScanRoots) ||
+  !data.settings.sessionScanRoots.includes("~/.codex/sessions") ||
+  !data.settings.sessionScanRoots.includes("~/.claude/projects") ||
+  !data.settings.sessionScanRoots.includes("~/.minimax/plans")
+) {
   throw new Error("data.json has not been migrated with latest sessionScanRoots");
 }
 if (!data.workSessionSnapshot || !Array.isArray(data.workSessionSnapshot.sessions)) {

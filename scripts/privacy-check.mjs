@@ -31,7 +31,7 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log("privacy-check: model endpoint defaults to localhost and no public LLM host or API key is hardcoded");
+console.log("privacy-check: task endpoint defaults to localhost; provider summaries use explicit local CLI commands; no public LLM host or API key is hardcoded");
 
 async function walk(dir) {
   const entries = await fs.readdir(dir, { withFileTypes: true });

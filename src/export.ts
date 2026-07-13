@@ -1,4 +1,5 @@
 import { CATEGORY_LABELS } from "./constants";
+import { buildResumeCommand } from "./resume";
 import { activePlan, selectedHotStartTasks } from "./state";
 import type { AgentWorkSession, CockpitData, DecomposedTask } from "./types";
 
@@ -82,8 +83,14 @@ function formatWorkSession(session: AgentWorkSession): string {
     `  - path: ${escapeMarkdown(session.path)}`,
     `  - id: ${escapeMarkdown(session.id)}`
   ];
-  if (session.projectPath) lines.push(`  - project: ${escapeMarkdown(session.projectPath)}`);
-  if (session.resumeHint) lines.push(`  - resume: ${escapeMarkdown(session.resumeHint)}`);
+  if (session.worktreePath) lines.push(`  - worktree: ${escapeMarkdown(session.worktreePath)}`);
+  if (session.projectPath && !session.worktreePath) lines.push(`  - cwd: ${escapeMarkdown(session.projectPath)}`);
+  if (session.repositoryPath && session.repositoryPath !== session.projectPath) {
+    lines.push(`  - repository: ${escapeMarkdown(session.repositoryPath)}`);
+  }
+  if (session.branch) lines.push(`  - branch: ${escapeMarkdown(session.branch)}`);
+  const resumeCommand = buildResumeCommand(session);
+  if (resumeCommand) lines.push(`  - resume: ${escapeMarkdown(resumeCommand)}`);
   return lines.join("\n");
 }
 

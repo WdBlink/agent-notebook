@@ -43,8 +43,8 @@ const pluginState = await page.evaluate(async (id) => {
 if (!pluginState.hasRefreshWorkSessions) {
   throw new Error("loaded Daily Cockpit plugin is stale: refreshWorkSessions is missing");
 }
-if (!pluginState.scanRoots.includes("~/.minimax/plans")) {
-  throw new Error("loaded Daily Cockpit settings are stale: ~/.minimax/plans scan root missing");
+if (!pluginState.scanRoots.includes("~/.codex/sessions") || !pluginState.scanRoots.includes("~/.claude/projects")) {
+  throw new Error("loaded Daily Cockpit settings are stale: active Codex/Claude session roots missing");
 }
 if (pluginState.leaves < 1) {
   throw new Error("Daily Cockpit view did not open in Obsidian");
@@ -59,6 +59,18 @@ await page.waitForFunction(
   { timeout: 20000 }
 );
 
+const originalSummaryMode = await page.evaluate(async (id) => {
+  const plugin = globalThis.app.plugins.plugins[id];
+  const mode = plugin.data.settings.sessionSummaryMode;
+  await plugin.updateSettings({ sessionSummaryMode: "metadata" });
+  return mode;
+}, pluginId);
+
+const snapshotGeneratedAt = await page.evaluate(
+  (id) => globalThis.app.plugins.plugins[id].data.workSessionSnapshot.generatedAt,
+  pluginId
+);
+
 const clickedRefresh = await page.evaluate(() => {
   const buttons = Array.from(document.querySelectorAll("button"));
   const button = buttons.find(
@@ -71,7 +83,51 @@ const clickedRefresh = await page.evaluate(() => {
 if (!clickedRefresh) {
   throw new Error("Could not click the real Obsidian refresh button");
 }
-await page.waitForTimeout(1500);
+await page.waitForFunction(
+  ({ id, before }) => globalThis.app.plugins.plugins[id].data.workSessionSnapshot.generatedAt !== before,
+  { id: pluginId, before: snapshotGeneratedAt },
+  { timeout: 60000 }
+);
+
+const resumeSession = await page.evaluate((id) => {
+  const sessions = globalThis.app.plugins.plugins[id].data.workSessionSnapshot.sessions;
+  return sessions.find(
+    (session) =>
+      session.resumable === true &&
+      (session.platform === "codex" || session.platform === "claude") &&
+      typeof session.id === "string" &&
+      session.id.length > 0
+  );
+}, pluginId);
+
+if (!resumeSession) {
+  throw new Error("Real local refresh returned no resumable Codex or Claude Code session for yesterday");
+}
+await fs.access(expandHome(resumeSession.path));
+const expectedResumeCommand = buildExpectedResumeCommand(resumeSession);
+
+await execFileAsync("osascript", ["-e", 'set the clipboard to "daily-cockpit-e2e-sentinel"']);
+let copiedResumeCommand = "";
+let clickedResume = false;
+try {
+  const sessionCard = page.locator(".daily-cockpit-session").filter({ hasText: `id: ${resumeSession.id}` }).first();
+  const resumeButton = sessionCard.locator(".daily-cockpit-resume");
+  await resumeButton.click();
+  clickedResume = true;
+  await resumeButton.filter({ hasText: "已复制" }).waitFor({ state: "visible", timeout: 5000 });
+  const clipboardResult = await execFileAsync("pbpaste");
+  copiedResumeCommand = clipboardResult.stdout.trim();
+} finally {
+  await page.evaluate(async ({ id, mode }) => {
+    await globalThis.app.plugins.plugins[id].updateSettings({ sessionSummaryMode: mode });
+  }, { id: pluginId, mode: originalSummaryMode });
+}
+
+if (!clickedResume || copiedResumeCommand !== expectedResumeCommand) {
+  throw new Error(
+    `Resume command clipboard mismatch: expected ${JSON.stringify(expectedResumeCommand)}, got ${JSON.stringify(copiedResumeCommand)}`
+  );
+}
 
 await fs.mkdir(path.dirname(screenshotPath), { recursive: true });
 await page.screenshot({ path: screenshotPath, fullPage: true });
@@ -101,12 +157,41 @@ const result = {
   pageUrl: page.url(),
   pluginState,
   clickedRefresh,
+  clickedResume,
+  copiedResumeCommand,
+  resumeSession: {
+    id: resumeSession.id,
+    platform: resumeSession.platform,
+    projectPath: resumeSession.projectPath,
+    worktreePath: resumeSession.worktreePath,
+    path: resumeSession.path
+  },
   exportPath,
   screenshotPath,
   observedText: ["昨日工作会话", "刷新", "热启动"],
   requiredHeadings
 };
 process.stdout.write(`${JSON.stringify(result, null, 2)}\n`, () => process.exit(0));
+
+function buildExpectedResumeCommand(session) {
+  const workspace = session.worktreePath ?? session.projectPath;
+  const resume = session.platform === "codex" ? `codex resume ${shellArgument(session.id)}` : `claude --resume ${shellArgument(session.id)}`;
+  return workspace ? `cd ${shellPath(workspace)} && ${resume}` : resume;
+}
+
+function shellPath(value) {
+  if (value === "~") return '"$HOME"';
+  if (value.startsWith("~/")) return '"$HOME/' + value.slice(2).replace(/([\\"$`])/g, "\\$1") + '"';
+  return shellArgument(value);
+}
+
+function shellArgument(value) {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+function expandHome(value) {
+  return value === "~" || value.startsWith("~/") ? `${process.env.HOME}${value.slice(1)}` : value;
+}
 
 async function resolveVault(cliArgs) {
   const explicit = readArg(cliArgs, "--vault") ?? process.env.OBSIDIAN_VAULT;

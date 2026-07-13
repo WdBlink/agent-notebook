@@ -4,9 +4,9 @@ import process from "node:process";
 
 const pluginId = "daily-cockpit";
 const defaultSessionScanRoots = [
+  "~/.codex/sessions",
   "~/.codex/archived_sessions",
-  "~/.codex/memories/rollout_summaries",
-  "~/.claude/tasks",
+  "~/.claude/projects",
   "~/.minimax/plans"
 ];
 
@@ -32,7 +32,10 @@ const seedData = () => ({
     llmEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
     llmModel: "qwen2.5:7b",
     llmApiKey: "",
-    sessionScanRoots: defaultSessionScanRoots
+    sessionScanRoots: defaultSessionScanRoots,
+    sessionSummaryMode: "native",
+    codexCliPath: "codex",
+    claudeCliPath: "claude"
   },
   workSessionSnapshot: emptyWorkSessionSnapshot(),
   activePlanId: "local-smoke-plan",
@@ -107,7 +110,10 @@ function migrateData(data) {
           : "http://127.0.0.1:11434/v1/chat/completions",
       llmModel: typeof settings.llmModel === "string" && settings.llmModel.trim() ? settings.llmModel : "qwen2.5:7b",
       llmApiKey: typeof settings.llmApiKey === "string" ? settings.llmApiKey : "",
-      sessionScanRoots: roots
+      sessionScanRoots: roots,
+      sessionSummaryMode: settings.sessionSummaryMode === "metadata" ? "metadata" : "native",
+      codexCliPath: typeof settings.codexCliPath === "string" && settings.codexCliPath.trim() ? settings.codexCliPath : "codex",
+      claudeCliPath: typeof settings.claudeCliPath === "string" && settings.claudeCliPath.trim() ? settings.claudeCliPath : "claude"
     },
     workSessionSnapshot: normalizeSnapshot(data.workSessionSnapshot)
   };
@@ -121,7 +127,8 @@ function normalizeSnapshot(snapshot) {
     date: typeof snapshot.date === "string" && snapshot.date.trim() ? snapshot.date : previousDate(),
     generatedAt: typeof snapshot.generatedAt === "string" && snapshot.generatedAt.trim() ? snapshot.generatedAt : new Date().toISOString(),
     sessions: snapshot.sessions,
-    sources: Array.isArray(snapshot.sources) ? snapshot.sources.filter((source) => typeof source === "string") : []
+    sources: Array.isArray(snapshot.sources) ? snapshot.sources.filter((source) => typeof source === "string") : [],
+    warnings: Array.isArray(snapshot.warnings) ? snapshot.warnings.filter((warning) => typeof warning === "string").slice(0, 8) : []
   };
 }
 
@@ -130,7 +137,8 @@ function emptyWorkSessionSnapshot() {
     date: previousDate(),
     generatedAt: new Date().toISOString(),
     sessions: [],
-    sources: []
+    sources: [],
+    warnings: []
   };
 }
 

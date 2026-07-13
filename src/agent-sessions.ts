@@ -24,7 +24,28 @@ export interface SessionScanOptions {
   maxSessions?: number;
   maxDepth?: number;
   maxEntries?: number;
+  summarizer?: AgentSessionSummarizer;
 }
+
+export interface GeneratedSessionSummary {
+  id: string;
+  platform: "codex" | "claude";
+  title: string;
+  summary: string;
+  artifacts: string[];
+  status: AgentSessionStatus;
+}
+
+export interface SessionSummaryBatch {
+  summaries: GeneratedSessionSummary[];
+  warnings: string[];
+}
+
+export type AgentSessionSummarizer = (request: {
+  date: string;
+  sessions: AgentWorkSession[];
+  settings: CockpitSettings;
+}) => Promise<SessionSummaryBatch>;
 
 interface CandidateFile {
   path: string;
@@ -36,6 +57,13 @@ interface CandidateFile {
 interface ParsedText {
   records: unknown[];
   plainText?: string;
+}
+
+interface ActivityWindow {
+  start: number;
+  targetEnd: number;
+  end: number;
+  stamp: string;
 }
 
 const DEFAULT_MAX_FILES = 90;
@@ -56,16 +84,16 @@ export async function loadAgentWorkSnapshot(
   }
 
   const homeDir = options.homeDir ?? runtimeHomeDir();
-  const day = dayWindow(date);
+  const day = dayWindow(date, now);
   const candidates: CandidateFile[] = [];
   const maxFiles = options.maxFiles ?? DEFAULT_MAX_FILES;
+  const maxFilesPerRoot = Math.max(12, Math.ceil(maxFiles / Math.max(sources.length, 1)));
 
   for (const source of sources) {
-    if (candidates.length >= maxFiles) break;
     const root = expandHome(source, homeDir);
     const platform = inferPlatform(root);
     const found = await collectCandidateFiles(root, platform, day, fs, {
-      maxFiles: maxFiles - candidates.length,
+      maxFiles: maxFilesPerRoot,
       maxDepth: options.maxDepth ?? DEFAULT_MAX_DEPTH,
       maxEntries: options.maxEntries ?? DEFAULT_MAX_ENTRIES
     });
@@ -75,24 +103,58 @@ export async function loadAgentWorkSnapshot(
   const sessions: AgentWorkSession[] = [];
   const seen = new Set<string>();
   const maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
-  const sorted = candidates.sort((a, b) => b.sortTime - a.sortTime);
+  const sorted = candidates.sort((a, b) => b.sortTime - a.sortTime).slice(0, maxFiles);
 
   for (const candidate of sorted) {
     if (sessions.length >= maxSessions) break;
-    const session = await readSession(candidate, fs);
+    const session = await readSession(candidate, fs, day);
     if (!session) continue;
-    const key = session.platform === "minimax" ? `${session.platform}:${session.id}` : `${session.platform}:${session.id}:${session.path}`;
+    const key = session.resumable ? `${session.platform}:${session.id}` : `${session.platform}:${session.id}:${session.path}`;
     if (seen.has(key)) continue;
     seen.add(key);
     sessions.push(session);
+  }
+
+  let mergedSessions = sessions;
+  let warnings: string[] = [];
+  if (options.summarizer && sessions.length > 0) {
+    try {
+      const batch = await options.summarizer({ date, sessions, settings });
+      mergedSessions = mergeSessionSummaries(sessions, batch.summaries);
+      warnings = batch.warnings.slice(0, 8);
+    } catch (error) {
+      warnings = [`Agent 总结失败：${errorMessage(error)}`];
+    }
   }
 
   return {
     date,
     generatedAt: now.toISOString(),
     sources,
-    sessions
+    sessions: mergedSessions,
+    warnings
   };
+}
+
+export function mergeSessionSummaries(
+  sessions: AgentWorkSession[],
+  summaries: GeneratedSessionSummary[]
+): AgentWorkSession[] {
+  const byKey = new Map(summaries.map((summary) => [`${summary.platform}:${summary.id}`, summary]));
+  return sessions.map((session) => {
+    const summary = byKey.get(`${session.platform}:${session.id}`);
+    if (!summary) return session;
+    return {
+      ...session,
+      title: truncateOneLine(summary.title, 120),
+      summary: truncateOneLine(summary.summary, 600),
+      artifacts: Array.from(
+        new Set(summary.artifacts.map((artifact) => truncateOneLine(artifact, 260)).filter(Boolean))
+      ).slice(0, 12),
+      status: summary.status,
+      summarySource: summary.platform
+    };
+  });
 }
 
 export function extractWorkSessionFromText(
@@ -102,14 +164,21 @@ export function extractWorkSessionFromText(
   updatedAt: string
 ): AgentWorkSession | null {
   const parsed = parseSessionText(content);
-  const pathPlanId = planIdFromPath(path);
-  const id =
-    firstUsefulText(collectStringsByKeys(parsed.records, ["session_id", "thread_id", "conversationId", "plan_id", "id"])) ??
-    pathPlanId ??
-    basenameStem(path);
+  const identity = extractSessionIdentity(parsed.records, path, platform);
+  const id = identity.id;
   const title =
     firstUsefulText(
-      collectStringsByKeys(parsed.records, ["subject", "title", "activeForm", "prompt", "intent", "request", "task_id", "plan_id"])
+      collectStringsByKeys(parsed.records, [
+        "aiTitle",
+        "subject",
+        "title",
+        "activeForm",
+        "prompt",
+        "intent",
+        "request",
+        "task_id",
+        "plan_id"
+      ])
     ) ??
     firstUsefulText(collectRoleTexts(parsed.records, "user")) ??
     titleFromPlainText(parsed.plainText) ??
@@ -119,25 +188,29 @@ export function extractWorkSessionFromText(
     firstUsefulText(collectRoleTexts(parsed.records, "assistant").reverse()) ??
     summaryFromPlainText(parsed.plainText) ??
     "未读到摘要，打开本地路径查看原始会话。";
-  const projectPath = firstUsefulText(collectStringsByKeys(parsed.records, ["cwd", "projectPath", "workspace", "root"]));
+  const projectPath = extractCanonicalProjectPath(parsed.records, platform);
+  const branch = extractCanonicalBranch(parsed.records, platform);
   const startedAt = firstUsefulText(collectStringsByKeys(parsed.records, ["timestamp", "createdAt", "startedAt"]));
   const artifacts = collectArtifacts(parsed.records, projectPath).slice(0, 12);
   const status = normalizeStatus(firstUsefulText(collectStringsByKeys(parsed.records, ["status", "state", "phase"])));
-  const resumeHint = resumeCommand(platform, id);
+  const resumeHint = identity.resumable ? resumeCommand(platform, id) : undefined;
 
   const session: AgentWorkSession = {
-    id: truncateOneLine(id, 96),
+    id,
     platform,
     title: truncateOneLine(title, 88),
     summary: truncateOneLine(summary, 220),
     path,
     updatedAt,
     artifacts,
-    status
+    status,
+    resumable: identity.resumable,
+    summarySource: "metadata"
   };
 
   if (startedAt && isIsoLike(startedAt)) session.startedAt = startedAt;
-  if (projectPath) session.projectPath = truncateOneLine(projectPath, 180);
+  if (projectPath) session.projectPath = projectPath;
+  if (branch) session.branch = truncateOneLine(branch, 160);
   if (resumeHint) session.resumeHint = resumeHint;
   return session;
 }
@@ -182,7 +255,12 @@ async function collectCandidateFiles(
       }
 
       if (stat.isDirectory()) {
-        const shouldDescend = depth === 0 || isInTargetDay(stat, day) || fullPath.includes(day.stamp);
+        const shouldDescend =
+          depth === 0 ||
+          isInTargetDay(stat, day) ||
+          fullPath.includes(day.stamp) ||
+          (platform === "codex" &&
+            (isCodexDateDirectory(fullPath, day.stamp) || isCodexDateHierarchyDirectory(fullPath)));
         if (shouldDescend) await walk(fullPath, depth + 1);
       } else if (stat.isFile()) {
         const filePlatform = inferPlatform(fullPath, platform);
@@ -203,13 +281,124 @@ async function collectCandidateFiles(
   return files;
 }
 
-async function readSession(candidate: CandidateFile, fs: RuntimeFileSystem): Promise<AgentWorkSession | null> {
+async function readSession(
+  candidate: CandidateFile,
+  fs: RuntimeFileSystem,
+  day: ActivityWindow
+): Promise<AgentWorkSession | null> {
   try {
     const content = await fs.readFile(candidate.path, "utf8");
-    return extractWorkSessionFromText(content, candidate.path, candidate.platform, candidate.updatedAt);
+    if (hasTargetDayActivity(content, day) === false) return null;
+    const session = extractWorkSessionFromText(content, candidate.path, candidate.platform, candidate.updatedAt);
+    if (session) await enrichWorkspaceMetadata(session, fs);
+    return session;
   } catch {
     return null;
   }
+}
+
+async function enrichWorkspaceMetadata(session: AgentWorkSession, fs: RuntimeFileSystem): Promise<void> {
+  const workspace = session.projectPath;
+  if (!workspace || workspace.startsWith("~") || /[\r\n\0]/.test(workspace)) return;
+  const marker = joinPath(workspace, ".git");
+  try {
+    const stat = await fs.stat(marker);
+    if (stat.isDirectory()) {
+      session.repositoryPath = workspace;
+      return;
+    }
+    if (!stat.isFile()) return;
+    const content = await fs.readFile(marker, "utf8");
+    const gitDir = content.match(/^gitdir:\s*(.+)$/m)?.[1]?.trim();
+    session.worktreePath = workspace;
+    if (!gitDir) return;
+    const normalized = gitDir.replace(/\\/g, "/");
+    const markerIndex = normalized.lastIndexOf("/.git/worktrees/");
+    if (markerIndex > 0) session.repositoryPath = normalized.slice(0, markerIndex);
+  } catch {
+    // A valid session can point at a deleted project or worktree; keep it resumable.
+  }
+}
+
+function extractSessionIdentity(
+  records: unknown[],
+  path: string,
+  platform: AgentPlatform
+): { id: string; resumable: boolean } {
+  let canonicalId: string | undefined;
+
+  if (platform === "codex") {
+    for (const value of records) {
+      const record = asRecord(value);
+      if (stringField(record, "type") !== "session_meta") continue;
+      const payload = asRecord(recordField(record, "payload"));
+      canonicalId = firstUsefulText([stringField(payload, "id") ?? "", stringField(payload, "session_id") ?? ""]);
+      if (canonicalId) break;
+    }
+  } else if (platform === "claude") {
+    for (const value of records) {
+      canonicalId = firstUsefulText([
+        stringField(value, "sessionId") ?? "",
+        stringField(value, "session_id") ?? "",
+        stringField(value, "conversationId") ?? ""
+      ]);
+      if (canonicalId) break;
+    }
+  }
+
+  canonicalId ??= resumableIdFromPath(path);
+  if (canonicalId && (platform === "codex" || platform === "claude")) {
+    return { id: canonicalId, resumable: true };
+  }
+
+  const fallback =
+    firstUsefulText(collectStringsByKeys(records, ["plan_id", "task_id", "id"])) ??
+    planIdFromPath(path) ??
+    basenameStem(path);
+  return { id: fallback, resumable: false };
+}
+
+function extractCanonicalProjectPath(records: unknown[], platform: AgentPlatform): string | undefined {
+  if (platform === "codex") {
+    for (const value of records) {
+      const record = asRecord(value);
+      if (stringField(record, "type") !== "session_meta") continue;
+      const payload = recordField(record, "payload");
+      const cwd = stringField(payload, "cwd");
+      if (cwd?.trim()) return cleanOneLine(cwd);
+    }
+    return undefined;
+  } else if (platform === "claude") {
+    for (const value of records) {
+      const cwd = stringField(value, "cwd");
+      if (cwd?.trim()) return cleanOneLine(cwd);
+    }
+    return undefined;
+  }
+  return firstUsefulText(collectStringsByKeys(records, ["projectPath", "workspace", "root"]));
+}
+
+function extractCanonicalBranch(records: unknown[], platform: AgentPlatform): string | undefined {
+  if (platform === "codex") {
+    for (const value of records) {
+      const record = asRecord(value);
+      if (stringField(record, "type") !== "session_meta") continue;
+      const payload = recordField(record, "payload");
+      const git = recordField(payload, "git");
+      const branch = stringField(git, "branch");
+      if (branch?.trim()) return cleanOneLine(branch);
+    }
+  } else if (platform === "claude") {
+    for (const value of records) {
+      const branch = stringField(value, "gitBranch");
+      if (branch?.trim()) return cleanOneLine(branch);
+    }
+  }
+  return undefined;
+}
+
+function resumableIdFromPath(path: string): string | undefined {
+  return path.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)?.[1];
 }
 
 function parseSessionText(content: string): ParsedText {
@@ -241,13 +430,39 @@ function parseSessionText(content: string): ParsedText {
   return { records: [], plainText: trimmed };
 }
 
+function hasTargetDayActivity(content: string, day: ActivityWindow): boolean | undefined {
+  let sawCanonicalTimestamp = false;
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    try {
+      const record = JSON.parse(trimmed) as unknown;
+      const timestamp = recordField(record, "timestamp");
+      if (typeof timestamp !== "string" && typeof timestamp !== "number") continue;
+      const instant =
+        typeof timestamp === "number"
+          ? timestamp > 9_999_999_999
+            ? timestamp
+            : timestamp * 1000
+          : Date.parse(timestamp);
+      if (!Number.isFinite(instant)) continue;
+      sawCanonicalTimestamp = true;
+      if (instant >= day.start && instant < day.targetEnd) return true;
+    } catch {
+      // Malformed event lines are ignored; metadata fallback remains available.
+    }
+  }
+  return sawCanonicalTimestamp ? false : undefined;
+}
+
 function collectRoleTexts(records: unknown[], role: "user" | "assistant"): string[] {
   const out: string[] = [];
   for (const record of records) {
     const payload = readPayload(record);
-    const candidateRole = stringField(payload, "role") ?? stringField(record, "role");
+    const message = recordField(record, "message");
+    const candidateRole = stringField(payload, "role") ?? stringField(record, "role") ?? stringField(message, "role");
     if (candidateRole !== role) continue;
-    const content = recordField(payload, "content") ?? recordField(record, "content");
+    const content = recordField(payload, "content") ?? recordField(record, "content") ?? recordField(message, "content");
     out.push(...collectTextFragments(content));
   }
   return out;
@@ -349,6 +564,7 @@ function summaryFromPlainText(value: string | undefined): string | undefined {
 function normalizeStatus(value: string | undefined): AgentSessionStatus {
   const status = value?.toLowerCase() ?? "";
   if (/complete|completed|done|success|finished/.test(status)) return "completed";
+  if (/blocked|failed|error/.test(status)) return "blocked";
   if (/active|running|pending|in_progress|started/.test(status)) return "active";
   return "unknown";
 }
@@ -417,20 +633,34 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
 }
 
-function dayWindow(stamp: string): { start: number; end: number; stamp: string } {
+function dayWindow(stamp: string, now: Date): ActivityWindow {
   const [yearText, monthText, dayText] = stamp.split("-");
   const year = Number(yearText);
   const month = Number(monthText);
   const day = Number(dayText);
   const start = new Date(year, month - 1, day, 0, 0, 0, 0).getTime();
-  const end = new Date(year, month - 1, day + 1, 0, 0, 0, 0).getTime();
-  return { start, end, stamp };
+  const targetEnd = new Date(year, month - 1, day + 1, 0, 0, 0, 0).getTime();
+  // Include files updated after midnight today so a cross-midnight session is
+  // inspected; canonical event timestamps then keep only target-day activity.
+  const end = Math.max(targetEnd, now.getTime() + 1);
+  return { start, targetEnd, end, stamp };
 }
 
 function isInTargetDay(stat: RuntimeFileStat, day: { start: number; end: number }): boolean {
   const mtime = stat.mtime.getTime();
   const ctime = stat.ctime?.getTime() ?? 0;
   return (mtime >= day.start && mtime < day.end) || (ctime >= day.start && ctime < day.end);
+}
+
+function isCodexDateDirectory(path: string, stamp: string): boolean {
+  const [year, month, day] = stamp.split("-");
+  const normalized = path.replace(/\\/g, "/").replace(/\/$/, "");
+  return [year, `${year}/${month}`, `${year}/${month}/${day}`].some((suffix) => normalized.endsWith(`/${suffix}`));
+}
+
+function isCodexDateHierarchyDirectory(path: string): boolean {
+  const normalized = path.replace(/\\/g, "/").replace(/\/$/, "");
+  return /\/(?:20\d{2}|20\d{2}\/\d{2}|20\d{2}\/\d{2}\/\d{2})$/.test(normalized);
 }
 
 function inferPlatform(path: string, fallback: AgentPlatform = "other"): AgentPlatform {
@@ -483,6 +713,9 @@ function isNoiseText(value: string): boolean {
     value.startsWith("<environment_context>") ||
     value.startsWith("<permissions instructions>") ||
     value.startsWith("<collaboration_mode>") ||
+    value.startsWith("<recommended_plugins>") ||
+    value.startsWith("<apps_instructions>") ||
+    value.startsWith("<plugins_instructions>") ||
     value.startsWith("# AGENTS.md instructions") ||
     value.includes("You are Codex, a coding agent") ||
     value.includes("Filesystem sandboxing defines which files")
@@ -491,4 +724,9 @@ function isNoiseText(value: string): boolean {
 
 function isIsoLike(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}T/.test(value);
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) return truncateOneLine(error.message, 180);
+  return "未知错误";
 }

@@ -317,6 +317,15 @@
   scrollbar-gutter: stable;
 }
 
+.daily-cockpit-session-warning {
+  padding: 7px 9px;
+  border-left: 2px solid var(--text-warning, var(--dc-accent));
+  color: var(--dc-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .daily-cockpit-session {
   display: grid;
   gap: 6px;
@@ -371,6 +380,19 @@
   line-height: 1.45;
   overflow-wrap: anywhere;
   white-space: normal;
+}
+
+.daily-cockpit-session-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+.daily-cockpit-resume {
+  min-width: 76px;
+  color: var(--dc-accent-strong);
+  border-color: color-mix(in srgb, var(--dc-accent) 42%, var(--dc-border));
+  font-weight: 700;
 }
 
 .daily-cockpit-intent-source {

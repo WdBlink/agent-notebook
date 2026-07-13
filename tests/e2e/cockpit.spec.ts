@@ -19,11 +19,24 @@ for (const width of [320, 768, 1024, 1440]) {
 test("shows and refreshes yesterday agent work sessions", async ({ page }) => {
   await page.goto(harnessUrl);
   await expect(page.getByText("实现每日看板热启动原型")).toBeVisible();
-  await expect(page.getByText("codex resume seed-codex-session")).toBeVisible();
+  await expect(page.getByRole("button", { name: "续上会话：实现每日看板热启动原型" })).toBeVisible();
 
   await page.getByRole("button", { name: "刷新昨日工作会话" }).click();
   await expect(page.getByText("Playwright 刷新出来的昨日会话")).toBeVisible();
-  await expect(page.getByText("codex resume playwright-codex-session")).toBeVisible();
+  await expect(page.getByRole("button", { name: "续上会话：Playwright 刷新出来的昨日会话" })).toBeVisible();
+});
+
+test("copies a project-aware resume command", async ({ page }) => {
+  await page.goto(harnessUrl);
+  const session = page.locator(".daily-cockpit-session").filter({ hasText: "实现每日看板热启动原型" });
+  const button = session.locator(".daily-cockpit-resume");
+
+  await button.click();
+  await expect(button).toHaveText("已复制");
+  const command = await page.evaluate(
+    () => (window as Window & { dailyCockpitCopiedResumeCommand?: string }).dailyCockpitCopiedResumeCommand
+  );
+  expect(command).toBe('cd "$HOME/Documents/new day board" && codex resume seed-codex-session');
 });
 
 test("decomposes intent into tasks and selected hot starts", async ({ page }) => {

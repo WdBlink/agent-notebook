@@ -219,12 +219,23 @@ export function normalizeSettings(input: unknown): CockpitSettings {
   }
 
   const settings = input as Partial<CockpitSettings>;
+  const storedRoots = cleanSessionScanRoots(settings.sessionScanRoots);
+  const hasCurrentSessionSettings =
+    settings.sessionSummaryMode === "native" ||
+    settings.sessionSummaryMode === "metadata" ||
+    typeof settings.codexCliPath === "string" ||
+    typeof settings.claudeCliPath === "string";
   return {
     dailyNoteFolder: cleanFolder(settings.dailyNoteFolder),
     llmEndpoint: cleanEndpoint(settings.llmEndpoint),
     llmModel: cleanModel(settings.llmModel),
     llmApiKey: typeof settings.llmApiKey === "string" ? settings.llmApiKey.trim() : "",
-    sessionScanRoots: cleanSessionScanRoots(settings.sessionScanRoots)
+    sessionScanRoots: hasCurrentSessionSettings
+      ? storedRoots
+      : Array.from(new Set([...storedRoots, ...DEFAULT_SESSION_SCAN_ROOTS])).slice(0, 12),
+    sessionSummaryMode: settings.sessionSummaryMode === "metadata" ? "metadata" : "native",
+    codexCliPath: cleanCommand(settings.codexCliPath, DEFAULT_SETTINGS.codexCliPath),
+    claudeCliPath: cleanCommand(settings.claudeCliPath, DEFAULT_SETTINGS.claudeCliPath)
   };
 }
 
@@ -233,7 +244,8 @@ export function createEmptyWorkSessionSnapshot(date = previousLocalDateString(),
     date,
     generatedAt: timestamp,
     sessions: [],
-    sources: []
+    sources: [],
+    warnings: []
   };
 }
 
@@ -287,6 +299,7 @@ function createSeedWorkSessionSnapshot(): AgentWorkSnapshot {
     date: "2026-07-02",
     generatedAt: "2026-07-03T08:00:00.000Z",
     sources: ["~/.codex/archived_sessions", "~/.claude/tasks"],
+    warnings: [],
     sessions: [
       {
         id: "seed-codex-session",
@@ -297,6 +310,8 @@ function createSeedWorkSessionSnapshot(): AgentWorkSnapshot {
         updatedAt: "2026-07-02T22:20:00.000Z",
         projectPath: "~/Documents/new day board",
         resumeHint: "codex resume seed-codex-session",
+        resumable: true,
+        summarySource: "codex",
         artifacts: ["src/render.ts", "src/state.ts", "styles.css"],
         status: "completed"
       },
@@ -308,6 +323,8 @@ function createSeedWorkSessionSnapshot(): AgentWorkSnapshot {
         path: "~/.claude/tasks/seed/1.json",
         updatedAt: "2026-07-02T19:10:00.000Z",
         resumeHint: "claude --resume seed-claude-task",
+        resumable: true,
+        summarySource: "claude",
         artifacts: ["LLM-Wiki/raw/notes/2026-07-02 每日看板的idea.md"],
         status: "completed"
       }
@@ -329,7 +346,10 @@ function normalizeWorkSessionSnapshot(input: unknown): AgentWorkSnapshot {
     date: cleanText(source.date, previousLocalDateString()),
     generatedAt: cleanText(source.generatedAt, nowIso()),
     sessions: sessions.slice(0, 30),
-    sources: cleanSessionScanRoots(source.sources)
+    sources: cleanSessionScanRoots(source.sources),
+    warnings: Array.isArray(source.warnings)
+      ? source.warnings.map((warning) => cleanText(warning, "")).filter(Boolean).slice(0, 8)
+      : []
   };
 }
 
@@ -351,14 +371,22 @@ function normalizeWorkSession(session: unknown): AgentWorkSession | null {
     artifacts: Array.isArray(source.artifacts)
       ? source.artifacts.map((artifact) => cleanText(artifact, "")).filter(Boolean).slice(0, 12)
       : [],
-    status: normalizeSessionStatus(source.status)
+    status: normalizeSessionStatus(source.status),
+    resumable: source.resumable === true,
+    summarySource: normalizeSummarySource(source.summarySource)
   };
 
   const startedAt = cleanText(source.startedAt, "");
   const projectPath = cleanText(source.projectPath, "");
+  const repositoryPath = cleanText(source.repositoryPath, "");
+  const worktreePath = cleanText(source.worktreePath, "");
+  const branch = cleanText(source.branch, "");
   const resumeHint = cleanText(source.resumeHint, "");
   if (startedAt) normalized.startedAt = startedAt;
   if (projectPath) normalized.projectPath = projectPath;
+  if (repositoryPath) normalized.repositoryPath = repositoryPath;
+  if (worktreePath) normalized.worktreePath = worktreePath;
+  if (branch) normalized.branch = branch;
   if (resumeHint) normalized.resumeHint = resumeHint;
   return normalized;
 }
@@ -397,6 +425,10 @@ function cleanModel(value: unknown): string {
   return typeof value === "string" && value.trim() ? value.trim() : DEFAULT_SETTINGS.llmModel;
 }
 
+function cleanCommand(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() && !value.includes("\0") ? value.trim() : fallback;
+}
+
 function cleanSessionScanRoots(value: unknown): string[] {
   const values = Array.isArray(value)
     ? value
@@ -416,7 +448,11 @@ function normalizePlatform(value: unknown): AgentPlatform {
 }
 
 function normalizeSessionStatus(value: unknown): AgentSessionStatus {
-  return value === "active" || value === "completed" || value === "unknown" ? value : "unknown";
+  return value === "active" || value === "blocked" || value === "completed" || value === "unknown" ? value : "unknown";
+}
+
+function normalizeSummarySource(value: unknown): "codex" | "claude" | "metadata" {
+  return value === "codex" || value === "claude" || value === "metadata" ? value : "metadata";
 }
 
 function fallbackSessionId(path: string): string {

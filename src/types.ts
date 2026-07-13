@@ -2,12 +2,17 @@ export type TaskPriority = "P0" | "P1" | "P2";
 
 export type TaskCategory = "research" | "build" | "write" | "analysis" | "admin" | "other";
 
+export type SessionSummaryMode = "native" | "metadata";
+
 export interface CockpitSettings {
   dailyNoteFolder: string;
   llmEndpoint: string;
   llmModel: string;
   llmApiKey?: string;
   sessionScanRoots: string[];
+  sessionSummaryMode: SessionSummaryMode;
+  codexCliPath: string;
+  claudeCliPath: string;
 }
 
 export interface IntentInput {
@@ -39,7 +44,7 @@ export interface IntentPlan {
 
 export type AgentPlatform = "codex" | "claude" | "minimax" | "other";
 
-export type AgentSessionStatus = "active" | "completed" | "unknown";
+export type AgentSessionStatus = "active" | "blocked" | "completed" | "unknown";
 
 export interface AgentWorkSession {
   id: string;
@@ -50,7 +55,12 @@ export interface AgentWorkSession {
   updatedAt: string;
   startedAt?: string;
   projectPath?: string;
+  repositoryPath?: string;
+  worktreePath?: string;
+  branch?: string;
   resumeHint?: string;
+  resumable?: boolean;
+  summarySource?: "codex" | "claude" | "metadata";
   artifacts: string[];
   status: AgentSessionStatus;
 }
@@ -60,6 +70,7 @@ export interface AgentWorkSnapshot {
   generatedAt: string;
   sessions: AgentWorkSession[];
   sources: string[];
+  warnings: string[];
 }
 
 export interface CockpitData {
@@ -113,6 +124,7 @@ export interface RendererActions {
   decompose(input: IntentInput): Promise<CockpitResult<CockpitData>>;
   toggleHotStart(taskId: string, selected: boolean): Promise<CockpitResult<CockpitData>>;
   refreshWorkSessions(): Promise<CockpitResult<CockpitData>>;
+  copyResumeCommand(command: string): Promise<boolean>;
   exportDailyNote(): Promise<CockpitResult<{ path: string }>>;
   clearError(): void;
 }

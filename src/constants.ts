@@ -9,9 +9,9 @@ export const COMMAND_EXPORT_DAILY_NOTE = "export-daily-note";
 export const COMMAND_REFRESH_WORK_SESSIONS = "refresh-work-sessions";
 
 export const DEFAULT_SESSION_SCAN_ROOTS = [
+  "~/.codex/sessions",
   "~/.codex/archived_sessions",
-  "~/.codex/memories/rollout_summaries",
-  "~/.claude/tasks",
+  "~/.claude/projects",
   "~/.minimax/plans"
 ];
 
@@ -20,7 +20,10 @@ export const DEFAULT_SETTINGS: CockpitSettings = {
   llmEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
   llmModel: "qwen2.5:7b",
   llmApiKey: "",
-  sessionScanRoots: DEFAULT_SESSION_SCAN_ROOTS
+  sessionScanRoots: DEFAULT_SESSION_SCAN_ROOTS,
+  sessionSummaryMode: "native",
+  codexCliPath: "codex",
+  claudeCliPath: "claude"
 };
 
 export const TASK_CATEGORIES: TaskCategory[] = ["research", "build", "write", "analysis", "admin", "other"];

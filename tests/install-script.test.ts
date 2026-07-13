@@ -46,7 +46,11 @@ test("install-local migrates existing plugin data to latest session fields", asy
   await execFileAsync("node", ["scripts/install-local.mjs", "--vault", vault], { cwd: process.cwd() });
 
   const data = JSON.parse(await fs.readFile(path.join(pluginDir, "data.json"), "utf8"));
-  assert.ok(data.settings.sessionScanRoots.includes("~/.codex/archived_sessions"));
+  assert.ok(data.settings.sessionScanRoots.includes("~/.codex/sessions"));
+  assert.ok(data.settings.sessionScanRoots.includes("~/.claude/projects"));
   assert.ok(data.settings.sessionScanRoots.includes("~/.minimax/plans"));
+  assert.equal(data.settings.sessionSummaryMode, "native");
+  assert.equal(data.settings.codexCliPath, "codex");
+  assert.equal(data.settings.claudeCliPath, "claude");
   assert.equal(Array.isArray(data.workSessionSnapshot.sessions), true);
 });

@@ -1,4 +1,5 @@
 import { CATEGORY_LABELS } from "./constants";
+import { buildResumeCommand } from "./resume";
 import { activePlan, selectedHotStartTasks } from "./state";
 import type { AgentWorkSession, DecomposedTask, IntentInput, RenderController, RendererActions, RendererState } from "./types";
 
@@ -160,6 +161,13 @@ function createWorkSessions(state: RendererState, actions: RendererActions): HTM
   header.append(title, button);
   section.append(header);
 
+  if (snapshot.warnings.length > 0) {
+    const warning = createEl("div", "daily-cockpit-session-warning");
+    warning.setAttribute("role", "status");
+    warning.textContent = snapshot.warnings.join(" ");
+    section.append(warning);
+  }
+
   if (snapshot.sessions.length === 0) {
     section.append(createEmpty("还没有读到昨天的 agent 工作会话。检查扫描目录，或先点击刷新。"));
     return section;
@@ -167,13 +175,13 @@ function createWorkSessions(state: RendererState, actions: RendererActions): HTM
 
   const list = createEl("div", "daily-cockpit-session-list");
   for (const session of snapshot.sessions) {
-    list.append(createWorkSession(session));
+    list.append(createWorkSession(session, actions));
   }
   section.append(list);
   return section;
 }
 
-function createWorkSession(session: AgentWorkSession): HTMLElement {
+function createWorkSession(session: AgentWorkSession, actions: RendererActions): HTMLElement {
   const article = createEl("article", "daily-cockpit-session");
   article.dataset.platform = session.platform;
 
@@ -182,10 +190,51 @@ function createWorkSession(session: AgentWorkSession): HTMLElement {
   article.append(head, textEl("p", session.summary));
 
   const meta = createEl("div", "daily-cockpit-session-meta");
-  meta.append(textEl("code", `path: ${session.path}`));
   if (session.id) meta.append(textEl("code", `id: ${session.id}`));
-  if (session.projectPath) meta.append(textEl("code", `project: ${session.projectPath}`));
-  if (session.resumeHint) meta.append(textEl("code", `resume: ${session.resumeHint}`));
+  if (session.worktreePath) {
+    meta.append(textEl("code", `worktree: ${session.worktreePath}`));
+  } else if (session.projectPath) {
+    meta.append(textEl("code", `cwd: ${session.projectPath}`));
+  }
+  if (session.repositoryPath && session.repositoryPath !== session.projectPath) {
+    meta.append(textEl("code", `repository: ${session.repositoryPath}`));
+  }
+  if (session.branch) meta.append(textEl("code", `branch: ${session.branch}`));
+  meta.append(textEl("code", `session: ${session.path}`));
+
+  const resumeCommand = buildResumeCommand(session);
+  if (resumeCommand) {
+    const footer = createEl("div", "daily-cockpit-session-actions");
+    const button = createEl("button", "daily-cockpit-action daily-cockpit-action-small daily-cockpit-resume");
+    button.type = "button";
+    button.textContent = "续上会话";
+    button.setAttribute("aria-label", `续上会话：${session.title}`);
+    button.setAttribute("aria-live", "polite");
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      button.textContent = "复制中";
+      let copied = false;
+      try {
+        copied = await actions.copyResumeCommand(resumeCommand);
+      } catch {
+        copied = false;
+      }
+      button.textContent = copied ? "已复制" : "复制失败";
+      button.setAttribute(
+        "aria-label",
+        copied ? `已复制续上会话命令：${session.title}` : `复制续上会话命令失败：${session.title}`
+      );
+      button.disabled = false;
+      setTimeout(() => {
+        if (button.isConnected) {
+          button.textContent = "续上会话";
+          button.setAttribute("aria-label", `续上会话：${session.title}`);
+        }
+      }, 1400);
+    });
+    footer.append(button);
+    article.append(footer);
+  }
   article.append(meta);
   return article;
 }

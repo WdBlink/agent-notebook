@@ -130,10 +130,34 @@ test("normalizeData repairs corrupted settings and task fields", () => {
   assert.equal(normalized.settings.dailyNoteFolder, "Daily Cockpit");
   assert.equal(normalized.settings.llmEndpoint, "http://127.0.0.1:11434/v1/chat/completions");
   assert.equal(normalized.settings.llmModel, "qwen2.5:7b");
-  assert.ok(normalized.settings.sessionScanRoots.includes("~/.codex/archived_sessions"));
+  assert.ok(normalized.settings.sessionScanRoots.includes("~/.codex/sessions"));
+  assert.ok(normalized.settings.sessionScanRoots.includes("~/.claude/projects"));
+  assert.equal(normalized.settings.sessionSummaryMode, "native");
   assert.equal(normalized.plans[0]?.tasks[0]?.category, "other");
   assert.equal(normalized.plans[0]?.tasks[0]?.priority, "P1");
   assert.equal(dailyNotePath(normalized, new Date("2026-07-03T00:00:00.000Z")), "Daily Cockpit/2026-07-03.md");
+});
+
+test("legacy settings gain active session roots once while current custom roots stay intact", () => {
+  const legacy = normalizeData({
+    schemaVersion: 2,
+    settings: { sessionScanRoots: ["~/.codex/archived_sessions"] },
+    plans: []
+  });
+  assert.ok(legacy.settings.sessionScanRoots.includes("~/.codex/sessions"));
+  assert.ok(legacy.settings.sessionScanRoots.includes("~/.claude/projects"));
+
+  const current = normalizeData({
+    schemaVersion: 2,
+    settings: {
+      sessionScanRoots: ["/custom/session-root"],
+      sessionSummaryMode: "metadata",
+      codexCliPath: "codex",
+      claudeCliPath: "claude"
+    },
+    plans: []
+  });
+  assert.deepEqual(current.settings.sessionScanRoots, ["/custom/session-root"]);
 });
 
 test("work session snapshots are normalized and capped", () => {
