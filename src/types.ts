@@ -26,8 +26,7 @@ export interface DecomposedTask {
   detail: string;
   category: TaskCategory;
   priority: TaskPriority;
-  warmStart: string;
-  selectedForHotStart: boolean;
+  completed: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -35,6 +34,7 @@ export interface DecomposedTask {
 export interface IntentPlan {
   id: string;
   intent: string;
+  targetDate: string;
   createdAt: string;
   updatedAt: string;
   tasks: DecomposedTask[];
@@ -74,7 +74,7 @@ export interface AgentWorkSnapshot {
 }
 
 export interface CockpitData {
-  schemaVersion: 2;
+  schemaVersion: 3;
   settings: CockpitSettings;
   plans: IntentPlan[];
   workSessionSnapshot: AgentWorkSnapshot;
@@ -111,8 +111,6 @@ export interface ModelTask {
   detail: string;
   category?: string;
   priority?: string;
-  warmStart?: string;
-  selectedForHotStart?: boolean;
 }
 
 export interface ModelDecomposition {
@@ -122,9 +120,10 @@ export interface ModelDecomposition {
 
 export interface RendererActions {
   decompose(input: IntentInput): Promise<CockpitResult<CockpitData>>;
-  toggleHotStart(taskId: string, selected: boolean): Promise<CockpitResult<CockpitData>>;
+  toggleTaskCompletion(taskId: string, completed: boolean): Promise<CockpitResult<CockpitData>>;
   refreshWorkSessions(): Promise<CockpitResult<CockpitData>>;
   copyResumeCommand(command: string): Promise<boolean>;
+  openLocalPath(path: string, reveal?: boolean): Promise<boolean>;
   exportDailyNote(): Promise<CockpitResult<{ path: string }>>;
   clearError(): void;
 }

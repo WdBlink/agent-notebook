@@ -24,7 +24,7 @@ export async function requestTaskDecomposition(settings: CockpitSettings, intent
           {
             role: "system",
             content:
-              "你是一个每日热启动待办拆解器。只返回 JSON，不要解释。JSON 形状必须是 {\"tasks\":[{\"title\":\"\",\"detail\":\"\",\"category\":\"research|build|write|analysis|admin|other\",\"priority\":\"P0|P1|P2\",\"warmStart\":\"\",\"selectedForHotStart\":false}]}"
+              "你是一个每日待办拆解器。只返回 JSON，不要解释。JSON 形状必须是 {\"tasks\":[{\"title\":\"\",\"detail\":\"\",\"category\":\"research|build|write|analysis|admin|other\",\"priority\":\"P0|P1|P2\"}]}"
           },
           {
             role: "user",

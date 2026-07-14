@@ -1,34 +1,33 @@
 import { CATEGORY_LABELS } from "./constants";
 import { buildResumeCommand } from "./resume";
-import { activePlan, selectedHotStartTasks } from "./state";
+import { activePlan } from "./state";
 import type { AgentWorkSession, CockpitData, DecomposedTask } from "./types";
 
 const DAILY_COCKPIT_SOURCE = "source: daily-cockpit";
 
 export function dailyNotePath(data: CockpitData, date = new Date()): string {
-  const day = formatDate(date);
+  const day = activePlan(data)?.targetDate ?? formatDate(date);
   const folder = data.settings.dailyNoteFolder.replace(/^\/+|\/+$/g, "") || "Daily Cockpit";
   return `${folder}/${day}.md`;
 }
 
 export function buildDailyMarkdown(data: CockpitData, date = new Date()): string {
-  const day = formatDate(date);
   const plan = activePlan(data);
-  const selected = selectedHotStartTasks(data);
+  const day = plan?.targetDate ?? formatDate(date);
   const lines: string[] = [
     "---",
     DAILY_COCKPIT_SOURCE,
     `date: ${day}`,
     "---",
     "",
-    `# 每日热启动 ${day}`,
+    `# Daily Cockpit ${day}`,
     "",
-    "## 昨日工作会话",
+    "## 昨日工作",
     ""
   ];
 
   if (data.workSessionSnapshot.sessions.length === 0) {
-    lines.push("- 暂无昨日工作会话。", "");
+    lines.push("- 暂无昨日工作。", "");
   } else {
     for (const session of data.workSessionSnapshot.sessions) {
       lines.push(formatWorkSession(session), "");
@@ -36,20 +35,13 @@ export function buildDailyMarkdown(data: CockpitData, date = new Date()): string
   }
 
   lines.push(
-    "## 原始意图",
+    "## 明日意图",
     "",
-    plan ? blockquote(plan.intent) : "> 还没有拆解过今天的意图。",
-    "",
-    "## 选定热启动",
-    "",
-    selected.length > 0 ? "" : "- 还没有选定热启动待办。"
+    plan ? blockquote(plan.intent) : "> 还没有拆解过明日意图。",
+    ""
   );
 
-  for (const task of selected) {
-    lines.push(formatTask(task), "");
-  }
-
-  lines.push("## 全部待办候选", "");
+  lines.push("## 待办事项", "");
   if (!plan || plan.tasks.length === 0) {
     lines.push("- 暂无。", "");
   } else {
@@ -89,19 +81,21 @@ function formatWorkSession(session: AgentWorkSession): string {
     lines.push(`  - repository: ${escapeMarkdown(session.repositoryPath)}`);
   }
   if (session.branch) lines.push(`  - branch: ${escapeMarkdown(session.branch)}`);
+  if (session.artifacts.length > 0) {
+    lines.push(`  - artifacts: ${session.artifacts.map(escapeMarkdown).join(", ")}`);
+  }
   const resumeCommand = buildResumeCommand(session);
   if (resumeCommand) lines.push(`  - resume: ${escapeMarkdown(resumeCommand)}`);
   return lines.join("\n");
 }
 
 function formatTask(task: DecomposedTask): string {
-  const marker = task.selectedForHotStart ? "x" : " ";
+  const marker = task.completed ? "x" : " ";
   const lines = [
     `- [${marker}] **${escapeMarkdown(task.title)}**`,
     `  - priority: ${task.priority}`,
     `  - category: ${CATEGORY_LABELS[task.category]}`,
-    `  - detail: ${escapeMarkdown(task.detail)}`,
-    `  - warm-start: ${escapeMarkdown(task.warmStart)}`
+    `  - detail: ${escapeMarkdown(task.detail)}`
   ];
   return lines.join("\n");
 }

@@ -6,11 +6,20 @@ import fs from "node:fs/promises";
 const args = process.argv.slice(2);
 const vault = await resolveVault(args);
 const port = readArg(args, "--port");
+const model = readArg(args, "--model");
+const endpoint = readArg(args, "--endpoint");
 
 await run("npm", ["run", "build"]);
 await run("node", ["scripts/install-local.mjs", "--vault", vault]);
 await run("node", ["scripts/verify-local.mjs", "--vault", vault]);
-await run("node", ["scripts/e2e-obsidian.mjs", "--vault", vault, ...(port ? ["--port", port] : [])]);
+await run("node", [
+  "scripts/e2e-obsidian.mjs",
+  "--vault",
+  vault,
+  ...(port ? ["--port", port] : []),
+  ...(model ? ["--model", model] : []),
+  ...(endpoint ? ["--endpoint", endpoint] : [])
+]);
 
 async function resolveVault(cliArgs) {
   const explicit = readArg(cliArgs, "--vault") ?? process.env.OBSIDIAN_VAULT;

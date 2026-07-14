@@ -28,7 +28,7 @@ import {
   normalizeData,
   setLastExportPath,
   setWorkSessionSnapshot,
-  toggleHotStartTask,
+  toggleTaskCompletion,
   touchOpened
 } from "./state";
 import { renderCockpit } from "./render";
@@ -52,13 +52,13 @@ export default class DailyCockpitPlugin extends Plugin {
     this.registerView(VIEW_TYPE_DAILY_COCKPIT, (leaf) => new DailyCockpitView(leaf, this));
     this.addSettingTab(new DailyCockpitSettingTab(this.app, this));
 
-    this.addRibbonIcon("list-checks", "打开每日热启动", () => {
+    this.addRibbonIcon("list-checks", "打开 Daily Cockpit", () => {
       void this.activateView();
     });
 
     this.addCommand({
       id: COMMAND_OPEN_COCKPIT,
-      name: "打开每日热启动",
+      name: "打开 Daily Cockpit",
       callback: () => {
         void this.activateView();
       }
@@ -74,7 +74,7 @@ export default class DailyCockpitPlugin extends Plugin {
 
     this.addCommand({
       id: COMMAND_EXPORT_DAILY_NOTE,
-      name: "导出热启动清单",
+      name: "导出每日简报",
       callback: () => {
         void this.exportDailyNote();
       }
@@ -122,8 +122,8 @@ export default class DailyCockpitPlugin extends Plugin {
     });
   }
 
-  async toggleHotStart(taskId: string, selected: boolean): Promise<CockpitResult<CockpitData>> {
-    return this.enqueueWrite(() => this.commit(toggleHotStartTask(this.data, taskId, selected)));
+  async toggleTaskCompletion(taskId: string, completed: boolean): Promise<CockpitResult<CockpitData>> {
+    return this.enqueueWrite(() => this.commit(toggleTaskCompletion(this.data, taskId, completed)));
   }
 
   async updateSettings(settings: Partial<CockpitSettings>): Promise<void> {
@@ -192,7 +192,7 @@ export default class DailyCockpitPlugin extends Plugin {
       await this.saveCockpitData(nextData);
       this.data = nextData;
       this.refreshViews();
-      new Notice(`已导出热启动清单：${path}`);
+      new Notice(`已导出每日简报：${path}`);
       return { ok: true, data: { path } };
     } catch (error) {
       console.error(`[${PLUGIN_ID}] export failed`, error);
@@ -296,7 +296,7 @@ class DailyCockpitView extends ItemView {
   }
 
   getDisplayText(): string {
-    return "每日热启动";
+    return "Daily Cockpit";
   }
 
   getIcon(): string {
@@ -329,8 +329,8 @@ class DailyCockpitView extends ItemView {
         this.processing = false;
         return this.handleResult(result);
       },
-      toggleHotStart: async (taskId: string, selected: boolean) =>
-        this.handleResult(await this.plugin.toggleHotStart(taskId, selected)),
+      toggleTaskCompletion: async (taskId: string, completed: boolean) =>
+        this.handleResult(await this.plugin.toggleTaskCompletion(taskId, completed)),
       refreshWorkSessions: async () => {
         this.refreshingSessions = true;
         this.error = undefined;
@@ -340,6 +340,7 @@ class DailyCockpitView extends ItemView {
         return this.handleResult(result);
       },
       copyResumeCommand: async (command: string) => copyTextToClipboard(command),
+      openLocalPath: async (path: string, reveal = false) => openLocalPath(path, reveal),
       exportDailyNote: async () => {
         const result = await this.plugin.exportDailyNote();
         if (result.ok) {
@@ -413,6 +414,31 @@ async function copyTextToClipboard(text: string): Promise<boolean> {
     return false;
   } finally {
     textarea.remove();
+  }
+}
+
+async function openLocalPath(path: string, reveal: boolean): Promise<boolean> {
+  try {
+    const runtimeWindow = globalThis.window as Window & {
+      require?: (id: string) => {
+        homedir?: () => string;
+        shell?: {
+          openPath(value: string): Promise<string>;
+          showItemInFolder(value: string): void;
+        };
+      };
+    };
+    const os = runtimeWindow.require?.("os");
+    const resolved = path === "~" || path.startsWith("~/") ? `${os?.homedir?.() ?? ""}${path.slice(1)}` : path;
+    const shell = runtimeWindow.require?.("electron")?.shell;
+    if (!shell || !resolved || /[\r\n\0]/.test(resolved)) return false;
+    if (reveal) {
+      shell.showItemInFolder(resolved);
+      return true;
+    }
+    return (await shell.openPath(resolved)) === "";
+  } catch {
+    return false;
   }
 }
 
@@ -499,7 +525,7 @@ class DailyCockpitSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("导出文件夹")
-      .setDesc("热启动清单写入的 vault 内文件夹。")
+      .setDesc("每日简报写入的 vault 内文件夹。")
       .addText((text) => {
         text.setValue(this.plugin.data.settings.dailyNoteFolder);
         text.onChange((value) => {

@@ -1,9 +1,9 @@
 {
   "id": "daily-cockpit",
   "name": "Daily Cockpit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "minAppVersion": "1.5.0",
-  "description": "Local agent-session recovery and local-model hot-start planning for Obsidian.",
+  "description": "Review yesterday's local Agent work, resume verified sessions, and plan tomorrow in Obsidian.",
   "author": "WdBlink",
   "authorUrl": "https://github.com/WdBlink",
   "isDesktopOnly": true

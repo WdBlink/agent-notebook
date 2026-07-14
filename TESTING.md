@@ -1,29 +1,30 @@
 # Testing Daily Cockpit
 
-Daily Cockpit has four verification layers: TypeScript tests, browser harness tests, local Obsidian vault installation checks, and a real Obsidian desktop E2E.
+Daily Cockpit has four verification layers: TypeScript tests, Playwright browser tests, installation integrity checks, and a real Obsidian desktop E2E.
 
-## Environment Setup
+## Prerequisites
 
 ```bash
 npm install
 npm run build
+ollama serve
+ollama pull qwen2.5:7b
 ```
 
-The plugin uses Node.js 22 during development and targets Obsidian's Electron runtime.
+Real recovery verification also requires an authenticated `codex` CLI and at least one canonical Codex session with activity on the previous local calendar day.
 
-## Feature Inventory
+## Feature Contract
 
-| Feature | Command or entry point | Expected behavior |
+| Feature | Entry point | Expected behavior |
 | --- | --- | --- |
-| Full-window hot-start view | `打开每日热启动` | Opens `daily-cockpit-view` |
-| Ribbon action | List-check icon | Opens the same full-window view |
-| Yesterday work sessions | `刷新昨日工作会话` | Indexes canonical local metadata and, in provider CLI mode, asks each platform to summarize only its own sessions |
-| Session recovery | `续上会话` | Copies a shell-safe command containing the verified cwd/worktree and real session ID |
-| Quick decomposition | `快速拆解待办` | Sends one intent to the configured model and stores a task plan |
-| Model settings | Plugin settings | Stores endpoint, model, API key, export folder, and session scan roots |
-| Hot-start selection | Task checkbox | Adds or removes a generated todo from the hot-start list |
-| Markdown export | `导出热启动清单` | Writes `Daily Cockpit/YYYY-MM-DD.md` with sessions and hot starts |
-| Local persistence | Obsidian plugin data | Data survives reload through `data.json` |
+| Continuity board | `打开 Daily Cockpit` | Opens `daily-cockpit-view` with previous work before the composer |
+| Session index | `刷新昨日工作会话` | Reads canonical Codex and Claude metadata for the previous local day |
+| Session Recovery | `续上会话` | Copies a quoted command containing the verified workspace and session ID |
+| Artifact access | Session and project actions | Opens an artifact, reveals a transcript, or opens a project directory |
+| Intent decomposition | `快速拆解待办` or the inline form | Calls the configured model and stores a target-dated task plan |
+| Task completion | Task checkbox | Changes only the user's completion state |
+| Markdown export | `导出每日简报` | Writes previous work, tomorrow's intent, and tasks |
+| Local persistence | Obsidian plugin data | Migrates to schema version 3 and survives reload |
 
 ## Automated Checks
 
@@ -31,51 +32,56 @@ The plugin uses Node.js 22 during development and targets Obsidian's Electron ru
 npm run lint
 npm test
 npm run test:e2e
-npm run test:obsidian -- --vault "$HOME/Knowledge/Obsidian"
+npm run check
 ```
 
-`npm run lint` includes type checking, README asset checks, and a privacy check that rejects hardcoded public LLM hosts or API keys.
+- `npm run lint` performs type checking, privacy checks, and README asset checks.
+- `npm test` covers dates, migration, canonical provider metadata, summary isolation, recovery quoting, project grouping, export, installation, and renderer state restoration.
+- `npm run test:e2e` verifies responsive layout, internal long-list scrolling, project refresh, task completion, clipboard behavior, and preservation of scroll, focus, selection, and drafts.
 
-`npm test` covers task decomposition state, hot-start selection, current Codex/Claude metadata formats, provider prompt isolation, generated-ID rejection, resume command quoting, export formatting, renderer states, install behavior, and Obsidian registration source checks.
+## Real Obsidian E2E
 
-`npm run test:e2e` builds a deterministic browser harness and verifies responsive layout, session refresh, and scroll containment at 320px, 768px, 1024px, and 1440px.
+```bash
+npm run test:obsidian -- \
+  --vault "$HOME/Knowledge/Obsidian" \
+  --model qwen2.5:7b
+```
 
-`npm run test:obsidian` is the real local Obsidian E2E. It builds and installs the plugin, restarts Obsidian with a remote debugging port, temporarily selects metadata-only mode, clicks the real `刷新` button, requires a real yesterday Codex/Claude transcript, clicks that session's `续上会话` button, verifies the exact macOS clipboard value, restores the prior summary mode, exports Markdown, and writes `test-results/obsidian-daily-cockpit.png`.
+The script:
 
-## Local Obsidian Check
+1. Builds and installs the current plugin.
+2. Verifies installed file hashes and schema version without manufacturing a Markdown result.
+3. Restarts the actual Obsidian desktop app over a debugging port.
+4. Clicks the real previous-work refresh control in metadata mode.
+5. Requires a canonical Codex session from the previous local day.
+6. Clicks `续上会话` and compares the macOS clipboard with the command derived from local metadata.
+7. Runs `codex exec resume <id>` in the recorded workspace and requires the same thread ID plus a returned marker.
+8. Submits the real inline form to the configured Ollama model and requires a dated task plan.
+9. Clicks the real export button and validates the written Markdown headings.
+10. Saves `test-results/obsidian-daily-cockpit.png`, restores the original plugin data, and removes the temporary export folder.
+
+## Manual Acceptance
 
 ```bash
 npm run install:local -- --vault "$HOME/Knowledge/Obsidian"
 npm run verify:local -- --vault "$HOME/Knowledge/Obsidian"
-npm run test:obsidian -- --vault "$HOME/Knowledge/Obsidian"
 open -a Obsidian
 ```
 
-In Obsidian:
-
-1. Open the command palette.
-2. Run `打开每日热启动`.
-3. Confirm `昨日工作会话` is visible. If there are no local session files from yesterday, confirm the empty state appears instead.
-4. Run `刷新昨日工作会话` and confirm each summarized card keeps a real `id`, session file, and cwd/worktree. A CLI failure should appear as a compact warning without hiding resumable sessions.
-5. Click `续上会话`, run `pbpaste`, and confirm the clipboard has `cd <quoted path> && codex resume <id>` or `cd <quoted path> && claude --resume <id>`.
-6. Paste that command into a terminal. Confirm the provider displays the prior conversation, correct working directory, and the same session ID before exiting.
-7. Enter one Chinese paragraph describing today's goal.
-8. Click `拆成待办`.
-9. Confirm generated todos appear. If no local model is running, confirm the recoverable model error appears instead.
-10. Select at least one todo as hot start.
-11. Run `导出热启动清单`.
-12. Confirm `Daily Cockpit/YYYY-MM-DD.md` contains `## 昨日工作会话`, `## 原始意图`, `## 选定热启动`, and `## 全部待办候选`.
+1. Run `打开 Daily Cockpit` and confirm the previous-work board is the primary surface.
+2. Confirm sessions are grouped by project or worktree, while Codex and Claude appear as source labels.
+3. Use `打开目录`, `查看产物`, and `查看过程` on paths that exist.
+4. Click `续上会话`, run `pbpaste`, and confirm the command contains the exact quoted directory and session ID.
+5. Execute the command in a terminal and confirm the provider resumes the same conversation.
+6. Enter one paragraph for tomorrow, click `拆成待办`, and confirm only ordinary tasks appear.
+7. Scroll a long task list, edit the input draft, toggle a task, and confirm position and draft remain intact.
+8. Run `导出每日简报` and confirm the filename uses the plan's `targetDate`.
+9. Confirm the note contains `## 昨日工作`, `## 明日意图`, and `## 待办事项`.
 
 ## Cleanup
 
-Remove the development install:
+Remove the development install only when needed:
 
 ```bash
 rm -rf "$HOME/Knowledge/Obsidian/.obsidian/plugins/daily-cockpit"
-```
-
-If needed, remove `daily-cockpit` from:
-
-```text
-$HOME/Knowledge/Obsidian/.obsidian/community-plugins.json
 ```

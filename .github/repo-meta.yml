@@ -1,4 +1,4 @@
-description: "Obsidian cockpit that restores yesterday's local agent sessions and turns today's intent into selectable AI hot-start tasks."
+description: "Obsidian cockpit for reviewing yesterday's local Agent work, resuming verified sessions, and planning tomorrow."
 homepage: "https://github.com/WdBlink/daily-cockpit"
 topics:
   - obsidian
@@ -7,4 +7,4 @@ topics:
   - local-ai
   - agent-sessions
   - task-decomposition
-  - hot-start
+  - session-resume

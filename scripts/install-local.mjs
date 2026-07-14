@@ -6,9 +6,9 @@ const pluginId = "daily-cockpit";
 const defaultSessionScanRoots = [
   "~/.codex/sessions",
   "~/.codex/archived_sessions",
-  "~/.claude/projects",
-  "~/.minimax/plans"
+  "~/.claude/projects"
 ];
+const retiredSessionScanRoots = ["~/.codex/memories/rollout_summaries", "~/.claude/tasks", "~/.minimax/plans"];
 
 const vault = parseVault(process.argv.slice(2));
 const repo = process.cwd();
@@ -26,7 +26,7 @@ await fs.copyFile(path.join(repo, "manifest.json"), path.join(pluginDir, "manife
 
 const dataPath = path.join(pluginDir, "data.json");
 const seedData = () => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   settings: {
     dailyNoteFolder: "Daily Cockpit",
     llmEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
@@ -42,7 +42,8 @@ const seedData = () => ({
   plans: [
     {
       id: "local-smoke-plan",
-      intent: "明天研究一个项目，先让模型拆出待办，再选几条适合热启动。",
+      intent: "明天研究一个项目，先让模型拆出可执行待办。",
+      targetDate: nextDate(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       model: "install-local",
@@ -54,8 +55,7 @@ const seedData = () => ({
           detail: "检查 endpoint 和 model 是否指向本机大模型服务。",
           category: "admin",
           priority: "P0",
-          warmStart: "启动本地模型服务并跑一次待办拆解。",
-          selectedForHotStart: true,
+          completed: false,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         }
@@ -67,7 +67,7 @@ const seedData = () => ({
 try {
   const raw = await fs.readFile(dataPath, "utf8");
   const data = JSON.parse(raw);
-  if (!data || data.schemaVersion !== 2 || !Array.isArray(data.plans)) {
+  if (!data || ![2, 3].includes(data.schemaVersion) || !Array.isArray(data.plans)) {
     await fs.copyFile(dataPath, `${dataPath}.v1.bak`);
     await fs.writeFile(dataPath, JSON.stringify(seedData(), null, 2));
   } else {
@@ -97,11 +97,18 @@ function parseVault(args) {
 function migrateData(data) {
   const settings = data.settings && typeof data.settings === "object" ? data.settings : {};
   const roots = Array.isArray(settings.sessionScanRoots)
-    ? Array.from(new Set([...settings.sessionScanRoots.filter((root) => typeof root === "string" && root.trim()), ...defaultSessionScanRoots]))
+    ? Array.from(
+        new Set([
+          ...settings.sessionScanRoots.filter(
+            (root) => typeof root === "string" && root.trim() && !retiredSessionScanRoots.includes(root)
+          ),
+          ...defaultSessionScanRoots
+        ])
+      )
     : defaultSessionScanRoots;
   return {
     ...data,
-    schemaVersion: 2,
+    schemaVersion: 3,
     settings: {
       dailyNoteFolder: typeof settings.dailyNoteFolder === "string" && settings.dailyNoteFolder.trim() ? settings.dailyNoteFolder : "Daily Cockpit",
       llmEndpoint:
@@ -115,7 +122,38 @@ function migrateData(data) {
       codexCliPath: typeof settings.codexCliPath === "string" && settings.codexCliPath.trim() ? settings.codexCliPath : "codex",
       claudeCliPath: typeof settings.claudeCliPath === "string" && settings.claudeCliPath.trim() ? settings.claudeCliPath : "claude"
     },
-    workSessionSnapshot: normalizeSnapshot(data.workSessionSnapshot)
+    workSessionSnapshot: normalizeSnapshot(data.workSessionSnapshot),
+    plans: data.plans.map(normalizePlan).filter(Boolean)
+  };
+}
+
+function normalizePlan(plan) {
+  if (!plan || typeof plan !== "object" || !Array.isArray(plan.tasks)) return null;
+  const createdAt = typeof plan.createdAt === "string" ? plan.createdAt : new Date().toISOString();
+  return {
+    id: typeof plan.id === "string" ? plan.id : `plan-${Date.now()}`,
+    intent: typeof plan.intent === "string" ? plan.intent : "",
+    targetDate: /^\d{4}-\d{2}-\d{2}$/.test(plan.targetDate ?? "") ? plan.targetDate : nextDate(new Date(createdAt)),
+    createdAt,
+    updatedAt: typeof plan.updatedAt === "string" ? plan.updatedAt : createdAt,
+    tasks: plan.tasks.map(normalizeTask).filter(Boolean),
+    ...(typeof plan.model === "string" ? { model: plan.model } : {}),
+    ...(typeof plan.source === "string" ? { source: plan.source } : {})
+  };
+}
+
+function normalizeTask(task) {
+  if (!task || typeof task !== "object" || typeof task.title !== "string") return null;
+  const createdAt = typeof task.createdAt === "string" ? task.createdAt : new Date().toISOString();
+  return {
+    id: typeof task.id === "string" ? task.id : `task-${Date.now()}`,
+    title: task.title,
+    detail: typeof task.detail === "string" ? task.detail : task.title,
+    category: typeof task.category === "string" ? task.category : "other",
+    priority: typeof task.priority === "string" ? task.priority : "P1",
+    completed: task.completed === true,
+    createdAt,
+    updatedAt: typeof task.updatedAt === "string" ? task.updatedAt : createdAt
   };
 }
 
@@ -145,6 +183,12 @@ function emptyWorkSessionSnapshot() {
 function previousDate() {
   const date = new Date();
   date.setDate(date.getDate() - 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function nextDate(now = new Date()) {
+  const date = new Date(now);
+  date.setDate(date.getDate() + 1);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 

@@ -3,13 +3,12 @@ import type { CockpitError, CockpitResult, ModelDecomposition, ModelTask } from 
 
 export function buildUserPrompt(intent: string): string {
   return [
-    "把下面这段自然语言意图拆成明天可执行的待办候选。",
+    "把下面这段自然语言意图拆成明天可执行的待办。",
     "",
     "拆解规则：",
     "- 不要做通用任务管理，不要创造 inbox/today/now 等状态。",
     "- 每条待办必须能独立执行。",
-    "- warmStart 写成睡前可让 AI 先做的准备动作。",
-    "- selectedForHotStart 只有在非常适合后台预研/跑实验/读资料时才设为 true。",
+    "- 只描述用户明天需要推进的工作，不启动 Agent，不安排后台执行。",
     "- P0 表示明天必须接上的关键任务，P1 表示重要但可调整，P2 表示可选。",
     "",
     "用户意图：",

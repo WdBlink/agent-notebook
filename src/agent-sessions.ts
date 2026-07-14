@@ -148,9 +148,7 @@ export function mergeSessionSummaries(
       ...session,
       title: truncateOneLine(summary.title, 120),
       summary: truncateOneLine(summary.summary, 600),
-      artifacts: Array.from(
-        new Set(summary.artifacts.map((artifact) => truncateOneLine(artifact, 260)).filter(Boolean))
-      ).slice(0, 12),
+      artifacts: normalizeGeneratedArtifacts(summary.artifacts, session),
       status: summary.status,
       summarySource: summary.platform
     };
@@ -202,7 +200,7 @@ export function extractWorkSessionFromText(
     summary: truncateOneLine(summary, 220),
     path,
     updatedAt,
-    artifacts,
+    artifacts: [],
     status,
     resumable: identity.resumable,
     summarySource: "metadata"
@@ -212,6 +210,7 @@ export function extractWorkSessionFromText(
   if (projectPath) session.projectPath = projectPath;
   if (branch) session.branch = truncateOneLine(branch, 160);
   if (resumeHint) session.resumeHint = resumeHint;
+  session.artifacts = normalizeGeneratedArtifacts(artifacts, session);
   return session;
 }
 
@@ -346,7 +345,6 @@ function extractSessionIdentity(
     }
   }
 
-  canonicalId ??= resumableIdFromPath(path);
   if (canonicalId && (platform === "codex" || platform === "claude")) {
     return { id: canonicalId, resumable: true };
   }
@@ -397,18 +395,18 @@ function extractCanonicalBranch(records: unknown[], platform: AgentPlatform): st
   return undefined;
 }
 
-function resumableIdFromPath(path: string): string | undefined {
-  return path.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)?.[1];
-}
-
 function parseSessionText(content: string): ParsedText {
   const trimmed = content.trim();
   if (!trimmed) return { records: [], plainText: "" };
 
   const records: unknown[] = [];
-  const jsonlLines = trimmed.split(/\r?\n/).filter((line) => line.trim().startsWith("{"));
+  const allJsonlLines = trimmed.split(/\r?\n/).filter((line) => line.trim().startsWith("{"));
+  const jsonlLines =
+    allJsonlLines.length <= 2000
+      ? allJsonlLines
+      : [...allJsonlLines.slice(0, 100), ...allJsonlLines.slice(-1900)];
   if (jsonlLines.length > 1) {
-    for (const line of jsonlLines.slice(0, 800)) {
+    for (const line of jsonlLines) {
       try {
         records.push(JSON.parse(line) as unknown);
       } catch {
@@ -530,6 +528,28 @@ function collectArtifacts(records: unknown[], projectPath?: string): string[] {
         .filter((value) => /[\\/]/.test(value) || /\.[A-Za-z0-9]{1,8}$/.test(value))
     )
   );
+}
+
+function normalizeGeneratedArtifacts(artifacts: string[], session: AgentWorkSession): string[] {
+  const rejected = new Set(
+    [session.id, session.path, session.projectPath, session.repositoryPath, session.worktreePath]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => cleanOneLine(value))
+  );
+  return Array.from(
+    new Set(
+      artifacts
+        .map((artifact) => truncateOneLine(artifact, 260))
+        .filter(Boolean)
+        .filter((artifact) => !rejected.has(artifact))
+        .filter((artifact) => artifact !== ".git" && !artifact.endsWith("/.git"))
+        .filter((artifact) => !/\.jsonl$/i.test(artifact))
+        .filter((artifact) => !artifact.split(/[\\/]/).some((segment) => segment.startsWith(".")))
+        .filter((artifact) => !/(?:^|[\\/])[0-9a-f]{8}-[0-9a-f-]{27,}(?:\.[a-z0-9]+)?$/i.test(artifact))
+        .filter((artifact) => !/[\\/](?:\.codex[\\/]sessions|\.claude[\\/]projects)[\\/]/i.test(artifact))
+        .filter((artifact) => /[\\/]/.test(artifact) || /^[^.][^\\/]*\.[A-Za-z0-9]{1,8}$/.test(artifact))
+    )
+  ).slice(0, 12);
 }
 
 function firstUsefulText(values: string[]): string | undefined {
@@ -672,9 +692,8 @@ function inferPlatform(path: string, fallback: AgentPlatform = "other"): AgentPl
 }
 
 function isCandidateSessionFile(path: string, platform: AgentPlatform): boolean {
-  if (!/\.(jsonl|json|md|txt)$/i.test(path)) return false;
-  if (platform !== "minimax") return true;
-  return !/[\\/]state[\\/]/.test(path) && !/[\\/]decision[^\\/]*\.json$/i.test(path);
+  if (platform === "codex" || platform === "claude") return /\.jsonl$/i.test(path);
+  return false;
 }
 
 function expandHome(path: string, homeDir: string): string {
