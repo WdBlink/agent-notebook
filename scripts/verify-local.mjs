@@ -25,7 +25,7 @@ if (manifest.isDesktopOnly !== true) {
 }
 
 const installedMain = await fs.readFile(path.join(pluginDir, "main.js"), "utf8");
-for (const snippet of ["refresh-work-sessions", ".codex/sessions", ".claude/projects", ".minimax/plans", "workSessionSnapshot"]) {
+for (const snippet of ["refresh-work-sessions", ".codex/sessions", ".claude/projects", "workSessionSnapshot", "targetDate"]) {
   if (!installedMain.includes(snippet)) {
     throw new Error(`installed main.js missing latest feature snippet: ${snippet}`);
   }
@@ -37,14 +37,13 @@ if (!Array.isArray(enabled) || !enabled.includes(pluginId)) {
 }
 
 const data = JSON.parse(await fs.readFile(path.join(pluginDir, "data.json"), "utf8"));
-if (!data || data.schemaVersion !== 2 || !Array.isArray(data.plans)) {
-  throw new Error("data.json does not contain CockpitData schemaVersion 2");
+if (!data || data.schemaVersion !== 3 || !Array.isArray(data.plans)) {
+  throw new Error("data.json does not contain CockpitData schemaVersion 3");
 }
 if (
   !Array.isArray(data.settings?.sessionScanRoots) ||
   !data.settings.sessionScanRoots.includes("~/.codex/sessions") ||
-  !data.settings.sessionScanRoots.includes("~/.claude/projects") ||
-  !data.settings.sessionScanRoots.includes("~/.minimax/plans")
+  !data.settings.sessionScanRoots.includes("~/.claude/projects")
 ) {
   throw new Error("data.json has not been migrated with latest sessionScanRoots");
 }
@@ -52,63 +51,11 @@ if (!data.workSessionSnapshot || !Array.isArray(data.workSessionSnapshot.session
   throw new Error("data.json has not been migrated with workSessionSnapshot");
 }
 
-const exportDir = path.join(vault, "Daily Cockpit");
-await fs.mkdir(exportDir, { recursive: true });
-let exportPath = path.join(exportDir, `${formatDate(new Date())}.md`);
-const verifyMarkdown = [
-  "---",
-  "source: daily-cockpit-local-verify",
-  `date: ${formatDate(new Date())}`,
-  "---",
-  "",
-  `# 每日热启动 ${formatDate(new Date())}`,
-  "",
-  "## 昨日工作会话",
-  "",
-  "- 暂无昨日工作会话。",
-  "",
-  "## 原始意图",
-  "",
-  "> 本地验证脚本已确认插件文件安装完成。",
-  "",
-  "## 选定热启动",
-  "",
-  "- [x] **确认本地模型配置**",
-  "  - warm-start: 启动本地模型服务并跑一次待办拆解。",
-  "",
-  "## 全部待办候选",
-  "",
-  "- [x] **确认本地模型配置**",
-  ""
-].join("\n");
-
-try {
-  await fs.access(exportPath);
-} catch {
-  await fs.writeFile(exportPath, verifyMarkdown);
-}
-
-let markdown = await fs.readFile(exportPath, "utf8");
-if (!markdown.includes("source: daily-cockpit") && !markdown.includes("source: daily-cockpit-local-verify")) {
-  const fallbackPath = path.join(exportDir, `${formatDate(new Date())}-daily-cockpit-local-verify.md`);
-  await fs.writeFile(fallbackPath, verifyMarkdown);
-  exportPath = fallbackPath;
-  markdown = verifyMarkdown;
-}
-const requiredHeadings = ["## 昨日工作会话", "## 原始意图", "## 选定热启动", "## 全部待办候选"];
-if (!requiredHeadings.every((heading) => markdown.includes(heading))) {
-  const fallbackPath = path.join(exportDir, `${formatDate(new Date())}-daily-cockpit-local-verify.md`);
-  await fs.writeFile(fallbackPath, verifyMarkdown);
-  exportPath = fallbackPath;
-  markdown = verifyMarkdown;
-}
-
 console.log(
   JSON.stringify(
     {
       ok: true,
       pluginDir,
-      exportPath,
       enabled: true,
       installedMatchesRepo: true,
       hasLatestSessionFields: true,
@@ -144,8 +91,4 @@ async function assertSameHash(source, target) {
 async function fileHash(file) {
   const bytes = await fs.readFile(file);
   return crypto.createHash("sha256").update(bytes).digest("hex");
-}
-
-function formatDate(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }

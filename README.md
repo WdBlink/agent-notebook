@@ -2,65 +2,61 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/logo-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset=".github/logo-light.svg">
-    <img alt="Daily Cockpit" src=".github/logo-light.svg" width="112">
+    <img alt="Daily Cockpit" src=".github/logo-light.svg" width="104">
   </picture>
 
   <h1>Daily Cockpit</h1>
-  <p>Wake up to yesterday's local agent work, then turn today's intent into selectable AI hot-start tasks inside Obsidian.</p>
+  <p><strong>Pick up yesterday's Agent work without reconstructing it from terminal history.</strong></p>
+  <p>An Obsidian desktop plugin for reviewing local Codex and Claude Code sessions, copying verified recovery commands, and turning tomorrow's intent into a short task list.</p>
 </div>
 
 <div align="center">
 
 [![License: MIT][license-shield]][license-url]
-[![Obsidian][obsidian-shield]][obsidian-url]
-[![Local Model][local-model-shield]][local-model-url]
+[![Obsidian Desktop][obsidian-shield]][obsidian-url]
+[![Local-first][local-shield]][local-url]
+[![Tests][tests-shield]][tests-url]
 
 </div>
 
 <div align="center">
   <a href="#quick-start">Quick Start</a> &middot;
-  <a href="#usage">Usage</a> &middot;
+  <a href="#session-recovery">Session Recovery</a> &middot;
   <a href="#local-model">Local Model</a> &middot;
   <a href="#verification">Verification</a>
 </div>
 
 ---
 
-![Daily Cockpit preview](.github/cockpit-preview.svg)
+![Daily Cockpit preview](.github/cockpit-preview.png)
 
-## Why
+## The Loop
 
-Coding agents are useful, but their work often disappears into yesterday's terminal history. Daily Cockpit is a small Obsidian morning board that restores that context: what Codex, Claude, or other local agents did yesterday, where the session lives, and which thread can be resumed.
-
-After that, it stays simple. You write one natural-language intent for today, a local model decomposes it into todos, and you explicitly choose which tasks become Hot Start candidates.
-
-## Features
-
-- **Agent-written yesterday brief**: indexes canonical local metadata, then asks Codex to summarize Codex sessions and Claude Code to summarize Claude sessions with one read-only structured prompt.
-- **Verified resume commands**: shows the real session ID, cwd/repository/worktree, and copies a shell-safe `cd ... && codex resume <id>` or `cd ... && claude --resume <id>` command.
-- **Intent-first planning**: type one rough Chinese or English paragraph instead of maintaining a generic todo board.
-- **Local-model decomposition**: calls an OpenAI-compatible chat endpoint and expects structured JSON tasks.
-- **Selectable Hot Start**: every generated todo has a checkbox; only selected tasks enter the Hot Start list.
-- **Obsidian-native export**: writes `Daily Cockpit/YYYY-MM-DD.md` with yesterday's sessions, the original intent, selected hot starts, and all candidates.
-- **Trust boundary**: model output may supply only title, summary, artifacts, and status. Session IDs and paths always come from local metadata and are never accepted from generated text.
-
-Daily Cockpit borrows one practical idea from [FanBox](https://github.com/alchaincyf/fanbox): agent memory should stay local, visible, and resumable. It does not recreate FanBox's full cockpit, file browser, terminal, or replay system.
-
-## Quick Start
-
-```bash
-npm install
-npm run build
-npm run install:local -- --vault "$HOME/Knowledge/Obsidian"
+```text
+Yesterday's local Agent activity
+        -> grouped by project and status
+        -> inspect artifacts or transcript
+        -> copy a verified resume command
+        -> describe tomorrow in one paragraph
+        -> receive ordinary, completable tasks
 ```
 
-Open Obsidian, then run **打开每日热启动** from the command palette or click the ribbon icon.
+Daily Cockpit is intentionally a continuity layer, not another general task manager. The previous-work board is the primary surface. The intent composer stays compact and secondary.
 
-Codex and Claude Code are optional. When their CLIs are installed and **平台 CLI 总结** is enabled, an explicit refresh lets each provider summarize only its own sessions. Choose **仅显示元数据** to disable those model calls.
+## What It Does
 
-## Install
+- **Project-first morning board** groups sessions by workspace or worktree, with provider shown as a source label.
+- **Status lanes** separate work that needs attention, remains active, is complete, or lacks a reliable status.
+- **Verified recovery commands** copy a shell-safe `cd <workspace> && codex resume <id>` or `cd <workspace> && claude --resume <id>` command.
+- **Artifact and process actions** open local outputs, reveal the transcript, or open the exact project directory.
+- **Provider-authored summaries** let Codex summarize Codex sessions and Claude Code summarize Claude sessions only after an explicit refresh.
+- **Tomorrow planning** sends one natural-language intent to an OpenAI-compatible endpoint and stores a dated list of ordinary tasks.
+- **Stable long-list interaction** keeps internal scroll position, focused control, selection range, and an unsubmitted draft across updates.
+- **Obsidian export** writes one dated Markdown brief containing previous work, tomorrow's intent, and tasks.
 
-Daily Cockpit is currently installed manually as a development/community plugin:
+The current POC does not schedule work, launch Agents, embed a terminal, or provide an infinite canvas.
+
+## Quick Start
 
 ```bash
 git clone https://github.com/WdBlink/daily-cockpit.git
@@ -70,101 +66,112 @@ npm run build
 npm run install:local -- --vault "/path/to/your/vault"
 ```
 
-The install script copies `main.js`, `styles.css`, and `manifest.json` into:
+Open Obsidian and run **打开 Daily Cockpit** from the command palette, or use the ribbon icon.
+
+## Install
+
+The installer copies `main.js`, `styles.css`, and `manifest.json` to:
 
 ```text
 <vault>/.obsidian/plugins/daily-cockpit/
 ```
 
-It also enables `daily-cockpit` in `.obsidian/community-plugins.json` when needed.
+It preserves existing plugin data, migrates it to schema version 3, removes retired non-session roots, and enables the plugin without rewriting malformed Obsidian configuration.
 
 ## Usage
 
-Daily Cockpit adds one view, one ribbon action, and four commands:
-
-| Entry point | What it does |
+| Entry point | Result |
 | --- | --- |
-| `打开每日热启动` | Opens the full-window cockpit |
-| Ribbon icon | Opens the same view |
-| `刷新昨日工作会话` | Indexes yesterday's sessions, optionally asks each provider for a structured summary, then caches the validated result |
-| `快速拆解待办` | Opens a modal for one quick intent |
-| `导出热启动清单` | Writes `Daily Cockpit/YYYY-MM-DD.md` in the current vault |
+| `打开 Daily Cockpit` | Opens the full-window continuity board |
+| `刷新昨日工作会话` | Re-indexes the previous local day and optionally asks each provider for a summary |
+| `快速拆解待办` | Opens a compact intent modal |
+| `导出每日简报` | Writes the active plan's target-date Markdown note |
+| `续上会话` | Copies, but never executes, the verified recovery command |
 
-Basic flow:
+## Session Recovery
 
-1. Open Daily Cockpit and review **昨日工作会话**.
-2. Click **刷新** when you want Codex/Claude to prepare a new yesterday brief. Startup never triggers a paid summary call.
-3. Click **续上会话** to copy the exact terminal command for a session.
-4. Describe today's goal in one paragraph.
-5. Click **拆成待办**.
-6. Check the todos suitable for Hot Start preparation.
-7. Export the Markdown note when you want a durable handoff.
+The plugin separates generated understanding from local identity:
 
-## How Session Summaries Work
-
-```text
-local metadata index
-  -> canonical sessionId + transcript path + cwd/worktree
-  -> one read-only prompt to the matching provider CLI
-  -> strict JSON validation (summary fields only)
-  -> cached Obsidian snapshot + locally generated resume command
+```mermaid
+flowchart LR
+  A["Canonical local transcript"] --> B["Provider adapter"]
+  B --> C["Verified session ID + cwd/worktree"]
+  B --> D["Read-only provider summary"]
+  C --> E["Project board"]
+  D --> E
+  E --> F["Copy resume command"]
 ```
 
-The model is responsible for understanding work. The plugin is responsible for identity, paths, validation, caching, and command safety. Unknown IDs in model output are discarded, one provider failing does not hide the other provider's sessions, and no transcript instruction is treated as an instruction for the summarizer.
+Only canonical platform metadata can authorize recovery. A UUID in a filename or task directory is insufficient. Generated summaries may update title, summary, artifacts, and status; unknown IDs and generated path changes are discarded.
 
-## Local Model
-
-By default, the plugin calls:
-
-```text
-http://127.0.0.1:11434/v1/chat/completions
-```
-
-The default model name is `qwen2.5:7b`. This endpoint is used for today's intent-to-todo decomposition. You can change endpoint, model, API key, export folder, session scan roots, summary mode, and CLI paths in the plugin settings.
-
-The code does not include a public LLM host or hardcoded API key. If you point the endpoint at a remote provider, that is your explicit configuration.
-
-## Session Sources
-
-Default scan roots:
+Default roots:
 
 ```text
 ~/.codex/sessions
 ~/.codex/archived_sessions
-~/.codex/memories/rollout_summaries
 ~/.claude/projects
-~/.claude/tasks
-~/.minimax/plans
 ```
 
-The metadata index is intentionally bounded: it filters to the previous local day, gives each root a fair scan budget, caps the final session count, and tolerates missing or unreadable roots.
+Activity belongs to the previous local calendar day by event timestamp when available. File modification time is only a bounded discovery hint, so a cross-midnight session can still be attributed correctly.
 
-## Privacy
+## Local Model
 
-Metadata-only mode never invokes Codex or Claude Code. In provider CLI mode, clicking refresh lets Codex read the listed Codex transcript files and Claude Code read the listed Claude transcript files. Sessions are never sent across providers. Those CLI calls use your existing provider configuration and may consume tokens; the plugin does not trigger them during startup.
+Tomorrow's intent is decomposed through an OpenAI-compatible chat-completions endpoint. Defaults:
+
+```text
+Endpoint: http://127.0.0.1:11434/v1/chat/completions
+Model:    qwen2.5:7b
+```
+
+The model returns only `title`, `detail`, `category`, and `priority`. Completion state belongs to the user and is never selected by the model.
+
+The default endpoint is loopback and no public host or API key is embedded. Configuring a remote endpoint is an explicit user choice.
+
+## Privacy And Safety
+
+- Startup performs no provider summary call.
+- Metadata-only mode starts no Codex or Claude process.
+- A provider receives only its own transcript manifest.
+- Recovery controls copy commands; they do not launch a terminal or execute anything.
+- Dynamic shell values pass through centralized quoting.
+- Snapshots and task plans remain in Obsidian's local plugin data.
+
+## Development
+
+```bash
+npm run dev
+npm run build
+```
+
+The implementation uses TypeScript, Obsidian's `ItemView`, local Electron filesystem access, and a small DOM renderer with explicit interaction-state restoration.
 
 ## Verification
 
 ```bash
-npm run lint
-npm test
-npm run test:e2e
-npm run test:obsidian -- --vault "$HOME/Knowledge/Obsidian"
-npm run install:local -- --vault "$HOME/Knowledge/Obsidian"
-npm run verify:local -- --vault "$HOME/Knowledge/Obsidian"
+npm run check
+npm run test:obsidian -- --vault "/path/to/your/vault" --model qwen2.5:7b
+npm run verify:local -- --vault "/path/to/your/vault"
 ```
 
-`npm run test:e2e` checks the browser harness at 320px, 768px, 1024px, and 1440px, including long todo lists with internal scroll containers.
+`npm run check` runs type checking, privacy and README checks, 48 unit/integration tests, and 12 Playwright browser tests across 320, 768, 1024, and 1440 pixel widths.
 
-`npm run test:obsidian` is the real desktop E2E: it installs the current build, opens the actual Obsidian runtime, refreshes real local session metadata, selects a resumable session whose transcript exists, clicks its `续上会话` button, verifies the exact macOS clipboard value, exports Markdown, and saves a screenshot under `test-results/`.
+The real Obsidian E2E installs the current build, restarts Obsidian, clicks the actual refresh and export controls, calls an actual local model, verifies the macOS clipboard, and resumes the same real Codex session through `codex exec resume`. It restores the original plugin data afterward.
+
+See [TESTING.md](TESTING.md) for prerequisites and the manual acceptance checklist.
+
+## Acknowledgements
+
+The local, visible, resumable work-memory direction was informed by [FanBox](https://github.com/alchaincyf/fanbox). Daily Cockpit does not reproduce its file manager, terminal, replay system, or broader cockpit.
 
 ## License
 
 MIT
 
-[license-shield]: https://img.shields.io/badge/license-MIT-3f7e6b.svg
+[license-shield]: https://img.shields.io/badge/license-MIT-397664.svg
 [license-url]: LICENSE
-[obsidian-shield]: https://img.shields.io/badge/Obsidian-plugin-3f7e6b.svg
+[obsidian-shield]: https://img.shields.io/badge/Obsidian-desktop-7c3aed.svg
 [obsidian-url]: https://obsidian.md
-[local-model-shield]: https://img.shields.io/badge/model-localhost%20default-3f7e6b.svg
-[local-model-url]: #local-model
+[local-shield]: https://img.shields.io/badge/data-local--first-397664.svg
+[local-url]: #privacy-and-safety
+[tests-shield]: https://img.shields.io/badge/tests-60%20checks-956b22.svg
+[tests-url]: #verification

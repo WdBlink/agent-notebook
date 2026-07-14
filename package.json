@@ -1,7 +1,7 @@
 {
   "name": "daily-cockpit",
-  "version": "0.1.0",
-  "description": "An Obsidian cockpit that restores local agent sessions and decomposes natural language intent into selectable AI hot-start tasks.",
+  "version": "0.2.0",
+  "description": "An Obsidian cockpit for reviewing yesterday's local agent work, resuming verified sessions, and decomposing tomorrow's intent into tasks.",
   "main": "main.js",
   "type": "module",
   "scripts": {
@@ -22,7 +22,7 @@
     "task-decomposition",
     "local-ai",
     "agent-sessions",
-    "hot-start"
+    "session-resume"
   ],
   "author": "WdBlink",
   "license": "MIT",

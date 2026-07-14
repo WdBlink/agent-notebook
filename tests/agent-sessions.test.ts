@@ -115,21 +115,33 @@ test("uses only provider-owned metadata for resume identity and cwd", () => {
 
   assert.equal(claude?.id, "canonical-session");
   assert.equal(claude?.projectPath, "/tmp/trusted-worktree");
-  assert.equal(codex?.id, "019f1111-2222-7333-8444-555555555555");
+  assert.equal(codex?.resumable, false);
+  assert.notEqual(codex?.id, "019f1111-2222-7333-8444-555555555555");
   assert.equal(codex?.projectPath, undefined);
+});
+
+test("a UUID in a Claude task path does not create a resumable session", () => {
+  const session = extractWorkSessionFromText(
+    JSON.stringify({ subject: "旧任务记录", description: "没有平台会话元数据" }),
+    "/tmp/.claude/tasks/019f1111-2222-7333-8444-555555555555/task.jsonl",
+    "claude",
+    "2026-07-02T10:00:00.000Z"
+  );
+  assert.equal(session?.resumable, false);
+  assert.notEqual(session?.id, "019f1111-2222-7333-8444-555555555555");
 });
 
 test("scans yesterday Codex and Claude files from configured local roots", async () => {
   const temp = await mkdtemp(path.join(os.tmpdir(), "daily-cockpit-sessions-"));
   const codexRoot = path.join(temp, "codex");
-  const claudeRoot = path.join(temp, "claude", "tasks");
+  const claudeRoot = path.join(temp, "claude", "projects");
   const targetTime = new Date("2026-07-02T14:30:00.000Z");
 
   try {
     await mkdir(codexRoot, { recursive: true });
-    await mkdir(path.join(claudeRoot, "task-a"), { recursive: true });
+    await mkdir(path.join(claudeRoot, "project-a"), { recursive: true });
     const codexFile = path.join(codexRoot, "rollout-2026-07-02.jsonl");
-    const claudeFile = path.join(claudeRoot, "task-a", "1.json");
+    const claudeFile = path.join(claudeRoot, "project-a", "session.jsonl");
     await writeFile(
       codexFile,
       [
@@ -313,7 +325,7 @@ test("merges model summaries without allowing canonical paths or ids to change",
             platform: "codex",
             title: "Agent 生成标题",
             summary: "Agent 生成摘要",
-            artifacts: ["src/main.ts"],
+            artifacts: ["src/main.ts", "canonical-id", ".git", ".agents", file],
             status: "active"
           }
         ],
@@ -324,6 +336,7 @@ test("merges model summaries without allowing canonical paths or ids to change",
     assert.equal(snapshot.sessions[0]?.title, "Agent 生成标题");
     assert.equal(snapshot.sessions[0]?.id, "canonical-id");
     assert.equal(snapshot.sessions[0]?.projectPath, "/trusted/worktree");
+    assert.deepEqual(snapshot.sessions[0]?.artifacts, ["src/main.ts"]);
   } finally {
     await rm(temp, { recursive: true, force: true });
   }

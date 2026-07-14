@@ -1,4 +1,11 @@
-import { DEFAULT_SESSION_SCAN_ROOTS, DEFAULT_SETTINGS, ERROR_MESSAGES, TASK_CATEGORIES, TASK_PRIORITIES } from "./constants";
+import {
+  DEFAULT_SESSION_SCAN_ROOTS,
+  DEFAULT_SETTINGS,
+  ERROR_MESSAGES,
+  LEGACY_SESSION_SCAN_ROOTS,
+  TASK_CATEGORIES,
+  TASK_PRIORITIES
+} from "./constants";
 import type {
   AgentPlatform,
   AgentSessionStatus,
@@ -26,7 +33,7 @@ export function createId(prefix = "item"): string {
 
 export function createEmptyData(settings: Partial<CockpitSettings> = {}): CockpitData {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     settings: normalizeSettings(settings),
     workSessionSnapshot: createEmptyWorkSessionSnapshot(),
     plans: []
@@ -43,13 +50,12 @@ export function normalizeData(input: unknown): CockpitData {
   const plans = Array.isArray(source.plans)
     ? source.plans.filter(isPartialPlan).map(normalizePlan)
     : [];
-  const activePlanId =
-    typeof source.activePlanId === "string" && plans.some((plan) => plan.id === source.activePlanId)
-      ? source.activePlanId
-      : plans[0]?.id;
+  const today = localDateString();
+  const requestedPlan = plans.find((plan) => plan.id === source.activePlanId && plan.targetDate >= today);
+  const activePlanId = requestedPlan?.id ?? plans.find((plan) => plan.targetDate >= today)?.id;
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     settings,
     plans,
     workSessionSnapshot: normalizeWorkSessionSnapshot(source.workSessionSnapshot),
@@ -63,7 +69,8 @@ export function createSeedData(): CockpitData {
   const timestamp = "2026-07-03T08:00:00.000Z";
   const plan: IntentPlan = {
     id: "seed-plan",
-    intent: "明天想把每日看板做成一个工具：我说一段想法，它调用本地模型拆成待办，我再选择哪些任务热启动。",
+    intent: "明天继续完善每日看板：先核对昨日 Agent 工作，再让本地模型把下一步拆成待办。",
+    targetDate: "2026-07-04",
     createdAt: timestamp,
     updatedAt: timestamp,
     model: DEFAULT_SETTINGS.llmModel,
@@ -75,30 +82,27 @@ export function createSeedData(): CockpitData {
         detail: "从原始 note 中提炼产品主线，避免再次做成通用任务管理器。",
         category: "analysis",
         priority: "P0",
-        warmStart: "读取原始想法，列出输入、模型拆解、热启动选择三段流程。",
-        selectedForHotStart: true,
+        completed: true,
         createdAt: timestamp,
         updatedAt: timestamp
       },
       {
         id: "seed-task-b",
         title: "设计本地模型拆解 prompt",
-        detail: "让模型返回 JSON 待办，每条包含标题、细节、分类、优先级和热启动建议。",
+        detail: "让模型返回 JSON 待办，每条只包含标题、细节、分类和优先级。",
         category: "build",
         priority: "P0",
-        warmStart: "准备一个 OpenAI-compatible 本地模型请求和 JSON 解析器。",
-        selectedForHotStart: true,
+        completed: false,
         createdAt: timestamp,
         updatedAt: timestamp
       },
       {
         id: "seed-task-c",
-        title: "保留热启动选择而不是自动开工",
-        detail: "用户必须显式勾选哪些待办进入热启动，工具不替用户默认推进。",
+        title: "验证跨天会话恢复",
+        detail: "从昨日工作卡片复制真实恢复命令，并确认回到同一工作目录和会话。",
         category: "build",
         priority: "P1",
-        warmStart: "给每条候选待办加 checkbox，并导出被选中的热启动清单。",
-        selectedForHotStart: false,
+        completed: false,
         createdAt: timestamp,
         updatedAt: timestamp
       }
@@ -114,12 +118,7 @@ export function createSeedData(): CockpitData {
 }
 
 export function activePlan(data: CockpitData): IntentPlan | undefined {
-  return data.plans.find((plan) => plan.id === data.activePlanId) ?? data.plans[0];
-}
-
-export function selectedHotStartTasks(data: CockpitData): DecomposedTask[] {
-  const plan = activePlan(data);
-  return plan ? plan.tasks.filter((task) => task.selectedForHotStart) : [];
+  return data.plans.find((plan) => plan.id === data.activePlanId);
 }
 
 export function addPlanFromModelTasks(
@@ -128,7 +127,8 @@ export function addPlanFromModelTasks(
   tasks: ModelTask[],
   model?: string,
   source?: string,
-  timestamp = nowIso()
+  timestamp = nowIso(),
+  targetDate = nextLocalDateString(new Date(timestamp))
 ): CockpitResult<CockpitData> {
   const text = intent.trim();
   if (!text) {
@@ -146,6 +146,7 @@ export function addPlanFromModelTasks(
   const plan: IntentPlan = {
     id: createId("plan"),
     intent: text,
+    targetDate: cleanDate(targetDate, nextLocalDateString(new Date(timestamp))),
     createdAt: timestamp,
     updatedAt: timestamp,
     tasks: normalizedTasks,
@@ -160,10 +161,10 @@ export function addPlanFromModelTasks(
   });
 }
 
-export function toggleHotStartTask(
+export function toggleTaskCompletion(
   data: CockpitData,
   taskId: string,
-  selected: boolean,
+  completed: boolean,
   timestamp = nowIso()
 ): CockpitResult<CockpitData> {
   let found = false;
@@ -175,7 +176,7 @@ export function toggleHotStartTask(
       planChanged = true;
       return {
         ...task,
-        selectedForHotStart: selected,
+        completed,
         updatedAt: timestamp
       };
     });
@@ -219,20 +220,16 @@ export function normalizeSettings(input: unknown): CockpitSettings {
   }
 
   const settings = input as Partial<CockpitSettings>;
-  const storedRoots = cleanSessionScanRoots(settings.sessionScanRoots);
-  const hasCurrentSessionSettings =
-    settings.sessionSummaryMode === "native" ||
-    settings.sessionSummaryMode === "metadata" ||
-    typeof settings.codexCliPath === "string" ||
-    typeof settings.claudeCliPath === "string";
+  const storedRoots = cleanSessionScanRoots(settings.sessionScanRoots).filter(
+    (root) => !LEGACY_SESSION_SCAN_ROOTS.includes(root)
+  );
+  const sessionScanRoots = Array.from(new Set([...storedRoots, ...DEFAULT_SESSION_SCAN_ROOTS])).slice(0, 12);
   return {
     dailyNoteFolder: cleanFolder(settings.dailyNoteFolder),
     llmEndpoint: cleanEndpoint(settings.llmEndpoint),
     llmModel: cleanModel(settings.llmModel),
     llmApiKey: typeof settings.llmApiKey === "string" ? settings.llmApiKey.trim() : "",
-    sessionScanRoots: hasCurrentSessionSettings
-      ? storedRoots
-      : Array.from(new Set([...storedRoots, ...DEFAULT_SESSION_SCAN_ROOTS])).slice(0, 12),
+    sessionScanRoots,
     sessionSummaryMode: settings.sessionSummaryMode === "metadata" ? "metadata" : "native",
     codexCliPath: cleanCommand(settings.codexCliPath, DEFAULT_SETTINGS.codexCliPath),
     claudeCliPath: cleanCommand(settings.claudeCliPath, DEFAULT_SETTINGS.claudeCliPath)
@@ -253,6 +250,7 @@ function normalizePlan(plan: IntentPlan): IntentPlan {
   return {
     id: plan.id,
     intent: plan.intent.trim(),
+    targetDate: cleanDate(plan.targetDate, nextLocalDateString(new Date(plan.createdAt))),
     createdAt: plan.createdAt,
     updatedAt: plan.updatedAt,
     tasks: plan.tasks.map((task) => normalizeTask(task)).filter((task): task is DecomposedTask => task !== null),
@@ -269,8 +267,7 @@ function normalizeTask(task: DecomposedTask): DecomposedTask | null {
     detail: task.detail.trim(),
     category: normalizeCategory(task.category),
     priority: normalizePriority(task.priority),
-    warmStart: task.warmStart.trim(),
-    selectedForHotStart: Boolean(task.selectedForHotStart),
+    completed: task.completed === true,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt
   };
@@ -287,8 +284,7 @@ function normalizeModelTask(task: ModelTask, index: number, timestamp: string): 
     detail: detail || title,
     category: normalizeCategory(task.category),
     priority: normalizePriority(task.priority),
-    warmStart: typeof task.warmStart === "string" && task.warmStart.trim() ? task.warmStart.trim() : detail || title,
-    selectedForHotStart: Boolean(task.selectedForHotStart),
+    completed: false,
     createdAt: timestamp,
     updatedAt: timestamp
   };
@@ -298,14 +294,14 @@ function createSeedWorkSessionSnapshot(): AgentWorkSnapshot {
   return {
     date: "2026-07-02",
     generatedAt: "2026-07-03T08:00:00.000Z",
-    sources: ["~/.codex/archived_sessions", "~/.claude/tasks"],
+    sources: ["~/.codex/archived_sessions", "~/.claude/projects"],
     warnings: [],
     sessions: [
       {
         id: "seed-codex-session",
         platform: "codex",
-        title: "实现每日看板热启动原型",
-        summary: "Codex 已经把一句话拆待办、热启动勾选、Markdown 导出和滚动容器串起来。",
+        title: "实现每日看板连续性原型",
+        summary: "Codex 已经把意图拆解、Markdown 导出和会话恢复串起来。",
         path: "~/.codex/archived_sessions/rollout-2026-07-02-seed.jsonl",
         updatedAt: "2026-07-02T22:20:00.000Z",
         projectPath: "~/Documents/new day board",
@@ -316,13 +312,13 @@ function createSeedWorkSessionSnapshot(): AgentWorkSnapshot {
         status: "completed"
       },
       {
-        id: "seed-claude-task",
+        id: "seed-claude-session",
         platform: "claude",
         title: "补齐原始 idea 的产品语义",
-        summary: "Claude task 记录了原始想法：先看昨日各平台 agent 做了什么，再决定今天哪些待办适合热启动。",
-        path: "~/.claude/tasks/seed/1.json",
+        summary: "Claude 会话核对了原始想法：先看昨日各平台 Agent 做了什么，再决定今天从哪里继续。",
+        path: "~/.claude/projects/seed/session.jsonl",
         updatedAt: "2026-07-02T19:10:00.000Z",
-        resumeHint: "claude --resume seed-claude-task",
+        resumeHint: "claude --resume seed-claude-session",
         resumable: true,
         summarySource: "claude",
         artifacts: ["LLM-Wiki/raw/notes/2026-07-02 每日看板的idea.md"],
@@ -360,19 +356,23 @@ function normalizeWorkSession(session: unknown): AgentWorkSession | null {
   const summary = cleanText(source.summary, "");
   const path = cleanText(source.path, "");
   if (!title || !path) return null;
+  const id = cleanText(source.id, fallbackSessionId(path));
 
   const normalized: AgentWorkSession = {
-    id: cleanText(source.id, fallbackSessionId(path)),
+    id,
     platform: normalizePlatform(source.platform),
     title,
     summary: summary || title,
     path,
     updatedAt: cleanText(source.updatedAt, nowIso()),
     artifacts: Array.isArray(source.artifacts)
-      ? source.artifacts.map((artifact) => cleanText(artifact, "")).filter(Boolean).slice(0, 12)
+      ? source.artifacts
+          .map((artifact) => cleanText(artifact, ""))
+          .filter((artifact) => isUsefulStoredArtifact(artifact, id, path))
+          .slice(0, 12)
       : [],
     status: normalizeSessionStatus(source.status),
-    resumable: source.resumable === true,
+    resumable: source.resumable === true && isTrustedStoredSessionPath(path, source.platform),
     summarySource: normalizeSummarySource(source.summarySource)
   };
 
@@ -439,6 +439,12 @@ function cleanSessionScanRoots(value: unknown): string[] {
   return roots.length > 0 ? Array.from(new Set(roots)).slice(0, 12) : [...DEFAULT_SESSION_SCAN_ROOTS];
 }
 
+function cleanDate(value: unknown, fallback: string): string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return fallback;
+  const parsed = new Date(`${value}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? fallback : value;
+}
+
 function cleanText(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
@@ -455,18 +461,42 @@ function normalizeSummarySource(value: unknown): "codex" | "claude" | "metadata"
   return value === "codex" || value === "claude" || value === "metadata" ? value : "metadata";
 }
 
+function isTrustedStoredSessionPath(path: string, platform: unknown): boolean {
+  if (platform !== "codex" && platform !== "claude") return false;
+  const normalized = path.replace(/\\/g, "/").toLowerCase();
+  if (normalized.includes("/.claude/tasks/") || normalized.includes("/.codex/memories/")) return false;
+  return /\.jsonl$/i.test(normalized);
+}
+
+function isUsefulStoredArtifact(artifact: string, sessionId: string, sessionPath: string): boolean {
+  if (!artifact || artifact === sessionId || artifact === sessionPath || /\.jsonl$/i.test(artifact)) return false;
+  if (artifact.split(/[\\/]/).some((segment) => segment.startsWith("."))) return false;
+  if (/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(artifact)) return false;
+  return /[\\/]/.test(artifact) || /^[^.][^\\/]*\.[A-Za-z0-9]{1,8}$/.test(artifact);
+}
+
 function fallbackSessionId(path: string): string {
   const tail = path.split(/[\\/]/).filter(Boolean).pop() ?? "session";
   return tail.replace(/\.[^.]+$/, "") || "session";
 }
 
+export function localDateString(now = new Date()): string {
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function nextLocalDateString(now = new Date()): string {
+  const date = new Date(now);
+  date.setDate(date.getDate() + 1);
+  return localDateString(date);
+}
+
 function previousLocalDateString(now = new Date()): string {
   const date = new Date(now);
   date.setDate(date.getDate() - 1);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return localDateString(date);
 }
 
 function success<T>(data: T): CockpitResult<T> {

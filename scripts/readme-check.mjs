@@ -1,6 +1,13 @@
 import fs from "node:fs/promises";
 
-const requiredFiles = ["README.md", "LICENSE", ".github/logo-light.svg", ".github/logo-dark.svg", ".github/repo-meta.yml"];
+const requiredFiles = [
+  "README.md",
+  "LICENSE",
+  ".github/logo-light.svg",
+  ".github/logo-dark.svg",
+  ".github/cockpit-preview.png",
+  ".github/repo-meta.yml"
+];
 for (const file of requiredFiles) {
   await assertFile(file);
 }
@@ -13,7 +20,7 @@ const requiredSnippets = [
   "Usage",
   "Verification",
   "Local Model",
-  "Hot Start",
+  "Session Recovery",
   "MIT"
 ];
 

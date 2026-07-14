@@ -11,7 +11,12 @@ export const COMMAND_REFRESH_WORK_SESSIONS = "refresh-work-sessions";
 export const DEFAULT_SESSION_SCAN_ROOTS = [
   "~/.codex/sessions",
   "~/.codex/archived_sessions",
-  "~/.claude/projects",
+  "~/.claude/projects"
+];
+
+export const LEGACY_SESSION_SCAN_ROOTS = [
+  "~/.codex/memories/rollout_summaries",
+  "~/.claude/tasks",
   "~/.minimax/plans"
 ];
 
