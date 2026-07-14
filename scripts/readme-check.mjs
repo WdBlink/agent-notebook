@@ -12,7 +12,8 @@ const requiredSnippets = [
   "Install",
   "Usage",
   "Verification",
-  "Local-first",
+  "Local Model",
+  "Hot Start",
   "MIT"
 ];
 

@@ -1,12 +1,20 @@
 import { renderCockpit } from "../../src/render";
-import { archiveItem, captureItem, completeItem, createSeedData, moveItem, setLastExportPath } from "../../src/state";
-import type { CockpitData, RendererState } from "../../src/types";
+import {
+  addPlanFromModelTasks,
+  createEmptyData,
+  createSeedData,
+  setLastExportPath,
+  setWorkSessionSnapshot,
+  toggleHotStartTask
+} from "../../src/state";
+import type { CockpitData, ModelTask, RendererState } from "../../src/types";
 
-let data: CockpitData = createSeedData();
+let data: CockpitData = new URLSearchParams(window.location.search).get("fixture") === "long"
+  ? createLongListData()
+  : createSeedData();
 let state: RendererState = {
   data,
-  activeSection: "today",
-  loading: false
+  processing: false
 };
 
 const root = document.querySelector("#root");
@@ -15,47 +23,81 @@ if (!(root instanceof HTMLElement)) {
 }
 
 const controller = renderCockpit(root, state, {
-  async capture(input) {
-    const result = captureItem(data, input, "2026-07-02T12:00:00.000Z");
+  async decompose(input) {
+    const result = addPlanFromModelTasks(
+      data,
+      input.text,
+      [
+        {
+          title: "查清项目核心概念",
+          detail: "先读 README、论文和 docs，把关键词列出来。",
+          category: "research",
+          priority: "P0",
+          warmStart: "提前读取项目文档并生成概念表。",
+          selectedForHotStart: true
+        },
+        {
+          title: "尝试跑 demo",
+          detail: "安装依赖，记录能否启动和失败原因。",
+          category: "build",
+          priority: "P1",
+          warmStart: "准备运行命令和失败日志。",
+          selectedForHotStart: false
+        }
+      ],
+      "harness-model",
+      "playwright",
+      "2026-07-03T08:00:00.000Z"
+    );
     if (result.ok) {
       data = result.data;
-      update({ data, activeSection: "inbox", loading: false });
+      update({ data, processing: false });
     } else {
       update({ ...state, error: result.error });
     }
     return result;
   },
-  async move(id, target) {
-    const result = moveItem(data, id, target, "2026-07-02T12:05:00.000Z");
+  async toggleHotStart(taskId, selected) {
+    const result = toggleHotStartTask(data, taskId, selected, "2026-07-03T08:05:00.000Z");
     if (result.ok) {
       data = result.data;
-      update({ data, activeSection: target, loading: false });
-    } else {
-      update({ ...state, error: result.error });
+      update({ data, processing: false });
     }
     return result;
   },
-  async complete(id) {
-    const result = completeItem(data, id, "2026-07-02T12:10:00.000Z");
-    if (result.ok) {
-      data = result.data;
-      update({ data, activeSection: "done", loading: false });
-    }
-    return result;
+  async refreshWorkSessions() {
+    data = setWorkSessionSnapshot(data, {
+      date: "2026-07-02",
+      generatedAt: "2026-07-03T08:06:00.000Z",
+      sources: ["playwright"],
+      warnings: [],
+      sessions: [
+        {
+          id: "playwright-codex-session",
+          platform: "codex",
+          title: "Playwright 刷新出来的昨日会话",
+          summary: "测试刷新按钮会更新本地 agent 工作会话。",
+          path: "~/.codex/archived_sessions/playwright.jsonl",
+          updatedAt: "2026-07-02T18:30:00.000Z",
+          resumeHint: "codex resume playwright-codex-session",
+          resumable: true,
+          artifacts: [],
+          status: "completed"
+        }
+      ]
+    });
+    update({ data, processing: false });
+    return { ok: true, data };
   },
-  async archive(id) {
-    const result = archiveItem(data, id, "2026-07-02T12:15:00.000Z");
-    if (result.ok) {
-      data = result.data;
-      update({ data, activeSection: "archive", loading: false });
-    }
-    return result;
+  async copyResumeCommand(command) {
+    (window as Window & { dailyCockpitCopiedResumeCommand?: string }).dailyCockpitCopiedResumeCommand = command;
+    return true;
   },
   async exportDailyNote() {
-    const path = "Daily Cockpit/2026-07-02.md";
+    const path = "Daily Cockpit/2026-07-03.md";
     data = setLastExportPath(data, path);
-    update({ data, activeSection: "export", loading: false, exportPath: path });
-    return { ok: true, data: { path: "Daily Cockpit/2026-07-02.md" } };
+    update({ data, processing: false, exportPath: path });
+    return { ok: true, data: { path } };
   },
   clearError() {
     const { error: _error, ...withoutError } = state;
@@ -66,4 +108,27 @@ const controller = renderCockpit(root, state, {
 function update(next: RendererState): void {
   state = next;
   controller.update(state);
+}
+
+function createLongListData(): CockpitData {
+  const longPhrase =
+    "这是一个非常长的待办描述，用来模拟用户把复杂任务、背景、约束、验证标准和热启动建议全部说在一起，必须换行且不能撑破屏幕范围。";
+  const tasks: ModelTask[] = Array.from({ length: 18 }, (_, index) => ({
+    title: `长待办 ${index + 1}：${longPhrase} keep-this-unbroken-token-wrapping-without-horizontal-overflow-${index}`,
+    detail: `${longPhrase} 需要继续补充上下文、明确交付物、列出验收方式，并保留足够多的文字来触发滚动区域。${longPhrase}`,
+    category: index % 2 === 0 ? "analysis" : "build",
+    priority: index < 3 ? "P0" : "P1",
+    warmStart: `热启动建议 ${index + 1}：${longPhrase} 明天打开时应该先准备资料、链接、命令和失败日志。${longPhrase}`,
+    selectedForHotStart: index < 12
+  }));
+  const result = addPlanFromModelTasks(
+    createEmptyData(),
+    `${longPhrase} ${longPhrase}`,
+    tasks,
+    "long-fixture-model",
+    "playwright",
+    "2026-07-03T08:00:00.000Z"
+  );
+  if (!result.ok) throw new Error(result.error.message);
+  return result.data;
 }

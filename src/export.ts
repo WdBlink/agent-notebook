@@ -1,8 +1,8 @@
-import { STATE_LABELS } from "./constants";
-import { itemsForState } from "./state";
-import type { CockpitData, CockpitItem, CockpitItemState } from "./types";
+import { CATEGORY_LABELS } from "./constants";
+import { buildResumeCommand } from "./resume";
+import { activePlan, selectedHotStartTasks } from "./state";
+import type { AgentWorkSession, CockpitData, DecomposedTask } from "./types";
 
-const EXPORT_SECTIONS: CockpitItemState[] = ["now", "today", "inbox", "soon", "hold", "done", "archive"];
 const DAILY_COCKPIT_SOURCE = "source: daily-cockpit";
 
 export function dailyNotePath(data: CockpitData, date = new Date()): string {
@@ -13,34 +13,48 @@ export function dailyNotePath(data: CockpitData, date = new Date()): string {
 
 export function buildDailyMarkdown(data: CockpitData, date = new Date()): string {
   const day = formatDate(date);
+  const plan = activePlan(data);
+  const selected = selectedHotStartTasks(data);
   const lines: string[] = [
     "---",
     DAILY_COCKPIT_SOURCE,
     `date: ${day}`,
     "---",
     "",
-    `# 每日启动台 ${day}`,
+    `# 每日热启动 ${day}`,
     "",
-    "> 接住灵感，不丢。守住今天，不乱。到了合适的时候，再提醒你。",
-    "",
-    "## 今日边界",
-    "",
-    `- Today: ${itemsForState(data, "today").length}/${data.settings.todayLimit}`,
-    `- Now: ${itemsForState(data, "now").length}/1`,
-    `- Inbox: ${itemsForState(data, "inbox").length}`,
+    "## 昨日工作会话",
     ""
   ];
 
-  for (const state of EXPORT_SECTIONS) {
-    lines.push(`## ${STATE_LABELS[state]}`, "");
-    const items = itemsForState(data, state);
-    if (items.length === 0) {
-      lines.push(emptyExportLine(state), "");
-      continue;
+  if (data.workSessionSnapshot.sessions.length === 0) {
+    lines.push("- 暂无昨日工作会话。", "");
+  } else {
+    for (const session of data.workSessionSnapshot.sessions) {
+      lines.push(formatWorkSession(session), "");
     }
+  }
 
-    for (const item of items) {
-      lines.push(formatItem(item), "");
+  lines.push(
+    "## 原始意图",
+    "",
+    plan ? blockquote(plan.intent) : "> 还没有拆解过今天的意图。",
+    "",
+    "## 选定热启动",
+    "",
+    selected.length > 0 ? "" : "- 还没有选定热启动待办。"
+  );
+
+  for (const task of selected) {
+    lines.push(formatTask(task), "");
+  }
+
+  lines.push("## 全部待办候选", "");
+  if (!plan || plan.tasks.length === 0) {
+    lines.push("- 暂无。", "");
+  } else {
+    for (const task of plan.tasks) {
+      lines.push(formatTask(task), "");
     }
   }
 
@@ -60,25 +74,43 @@ export function formatDate(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-function formatItem(item: CockpitItem): string {
-  const lines = [`- [${item.state === "done" ? "x" : " "}] **${escapeMarkdown(item.title)}**`];
-  if (item.body.trim()) {
-    lines.push(`  - ${escapeMarkdown(item.body.trim()).replace(/\n/g, "\n  - ")}`);
+function formatWorkSession(session: AgentWorkSession): string {
+  const lines = [
+    `- **${escapeMarkdown(session.title)}**`,
+    `  - platform: ${session.platform}`,
+    `  - updated: ${session.updatedAt}`,
+    `  - summary: ${escapeMarkdown(session.summary)}`,
+    `  - path: ${escapeMarkdown(session.path)}`,
+    `  - id: ${escapeMarkdown(session.id)}`
+  ];
+  if (session.worktreePath) lines.push(`  - worktree: ${escapeMarkdown(session.worktreePath)}`);
+  if (session.projectPath && !session.worktreePath) lines.push(`  - cwd: ${escapeMarkdown(session.projectPath)}`);
+  if (session.repositoryPath && session.repositoryPath !== session.projectPath) {
+    lines.push(`  - repository: ${escapeMarkdown(session.repositoryPath)}`);
   }
-  if (item.context) {
-    lines.push(`  - context: ${escapeMarkdown(item.context)}`);
-  }
-  if (item.source) {
-    lines.push(`  - source: ${escapeMarkdown(item.source)}`);
-  }
+  if (session.branch) lines.push(`  - branch: ${escapeMarkdown(session.branch)}`);
+  const resumeCommand = buildResumeCommand(session);
+  if (resumeCommand) lines.push(`  - resume: ${escapeMarkdown(resumeCommand)}`);
   return lines.join("\n");
 }
 
-function emptyExportLine(state: CockpitItemState): string {
-  if (state === "hold") return "- 这里暂时空着。没有需要惦记的事。";
-  if (state === "today") return "- 今天可以少一点，先守住注意力。";
-  if (state === "inbox") return "- 没有新的灵感需要处理。";
-  return "- 暂无。";
+function formatTask(task: DecomposedTask): string {
+  const marker = task.selectedForHotStart ? "x" : " ";
+  const lines = [
+    `- [${marker}] **${escapeMarkdown(task.title)}**`,
+    `  - priority: ${task.priority}`,
+    `  - category: ${CATEGORY_LABELS[task.category]}`,
+    `  - detail: ${escapeMarkdown(task.detail)}`,
+    `  - warm-start: ${escapeMarkdown(task.warmStart)}`
+  ];
+  return lines.join("\n");
+}
+
+function blockquote(value: string): string {
+  return value
+    .split(/\r?\n/)
+    .map((line) => `> ${line}`)
+    .join("\n");
 }
 
 function escapeMarkdown(value: string): string {

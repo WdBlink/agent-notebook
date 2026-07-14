@@ -1,9 +1,10 @@
-description: "ADHD-friendly external working memory and daily startup cockpit for Obsidian."
+description: "Obsidian cockpit that restores yesterday's local agent sessions and turns today's intent into selectable AI hot-start tasks."
 homepage: "https://github.com/WdBlink/daily-cockpit"
 topics:
   - obsidian
   - obsidian-plugin
   - local-first
-  - adhd
-  - daily-planning
-  - personal-knowledge-management
+  - local-ai
+  - agent-sessions
+  - task-decomposition
+  - hot-start

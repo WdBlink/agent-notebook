@@ -1,8 +1,10 @@
 import {
+  App,
   ItemView,
   Modal,
   Notice,
   Plugin,
+  PluginSettingTab,
   Setting,
   TFile,
   TFolder,
@@ -13,17 +15,28 @@ import {
   COMMAND_EXPORT_DAILY_NOTE,
   COMMAND_OPEN_COCKPIT,
   COMMAND_QUICK_CAPTURE,
+  COMMAND_REFRESH_WORK_SESSIONS,
   PLUGIN_ID,
   VIEW_TYPE_DAILY_COCKPIT
 } from "./constants";
+import { loadAgentWorkSnapshot } from "./agent-sessions";
+import { createCliSessionSummarizer } from "./agent-summary";
 import { buildDailyMarkdown, dailyNotePath, isDailyCockpitMarkdown } from "./export";
-import { archiveItem, captureItem, completeItem, moveItem, normalizeData, setLastExportPath, touchOpened } from "./state";
+import { requestTaskDecomposition } from "./llm";
+import {
+  addPlanFromModelTasks,
+  normalizeData,
+  setLastExportPath,
+  setWorkSessionSnapshot,
+  toggleHotStartTask,
+  touchOpened
+} from "./state";
 import { renderCockpit } from "./render";
 import type {
-  CaptureInput,
   CockpitData,
-  CockpitItemState,
   CockpitResult,
+  CockpitSettings,
+  IntentInput,
   RenderController,
   RendererState
 } from "./types";
@@ -37,14 +50,15 @@ export default class DailyCockpitPlugin extends Plugin {
     await this.saveCockpitData(this.data);
 
     this.registerView(VIEW_TYPE_DAILY_COCKPIT, (leaf) => new DailyCockpitView(leaf, this));
+    this.addSettingTab(new DailyCockpitSettingTab(this.app, this));
 
-    this.addRibbonIcon("layout-dashboard", "打开每日启动台", () => {
+    this.addRibbonIcon("list-checks", "打开每日热启动", () => {
       void this.activateView();
     });
 
     this.addCommand({
       id: COMMAND_OPEN_COCKPIT,
-      name: "打开每日启动台",
+      name: "打开每日热启动",
       callback: () => {
         void this.activateView();
       }
@@ -52,19 +66,28 @@ export default class DailyCockpitPlugin extends Plugin {
 
     this.addCommand({
       id: COMMAND_QUICK_CAPTURE,
-      name: "快速捕捉到灵感收纳箱",
+      name: "快速拆解待办",
       callback: () => {
-        new QuickCaptureModal(this).open();
+        new IntentModal(this).open();
       }
     });
 
     this.addCommand({
       id: COMMAND_EXPORT_DAILY_NOTE,
-      name: "导出今日启动台笔记",
+      name: "导出热启动清单",
       callback: () => {
         void this.exportDailyNote();
       }
     });
+
+    this.addCommand({
+      id: COMMAND_REFRESH_WORK_SESSIONS,
+      name: "刷新昨日工作会话",
+      callback: () => {
+        void this.refreshWorkSessions();
+      }
+    });
+
   }
 
   onunload(): void {
@@ -83,24 +106,64 @@ export default class DailyCockpitPlugin extends Plugin {
     this.app.workspace.revealLeaf(leaf);
   }
 
-  async capture(input: CaptureInput): Promise<CockpitResult<CockpitData>> {
-    return this.enqueueWrite(() => this.commit(captureItem(this.data, input)));
+  async decomposeIntent(input: IntentInput): Promise<CockpitResult<CockpitData>> {
+    return this.enqueueWrite(async () => {
+      const decomposition = await requestTaskDecomposition(this.data.settings, input.text);
+      if (!decomposition.ok) return decomposition;
+      return this.commit(
+        addPlanFromModelTasks(
+          this.data,
+          input.text,
+          decomposition.data.tasks,
+          decomposition.data.model ?? this.data.settings.llmModel,
+          input.source
+        )
+      );
+    });
   }
 
-  async move(id: string, state: CockpitItemState): Promise<CockpitResult<CockpitData>> {
-    return this.enqueueWrite(() => this.commit(moveItem(this.data, id, state)));
+  async toggleHotStart(taskId: string, selected: boolean): Promise<CockpitResult<CockpitData>> {
+    return this.enqueueWrite(() => this.commit(toggleHotStartTask(this.data, taskId, selected)));
   }
 
-  async complete(id: string): Promise<CockpitResult<CockpitData>> {
-    return this.enqueueWrite(() => this.commit(completeItem(this.data, id)));
-  }
-
-  async archive(id: string): Promise<CockpitResult<CockpitData>> {
-    return this.enqueueWrite(() => this.commit(archiveItem(this.data, id)));
+  async updateSettings(settings: Partial<CockpitSettings>): Promise<void> {
+    const nextData = normalizeData({
+      ...this.data,
+      settings: {
+        ...this.data.settings,
+        ...settings
+      }
+    });
+    await this.saveCockpitData(nextData);
+    this.data = nextData;
+    this.refreshViews();
   }
 
   async exportDailyNote(): Promise<CockpitResult<{ path: string }>> {
     return this.enqueueWrite(() => this.exportDailyNoteLocked());
+  }
+
+  async refreshWorkSessions(showNotice = true): Promise<CockpitResult<CockpitData>> {
+    try {
+      const settings = this.data.settings;
+      const snapshot = await loadAgentWorkSnapshot(settings, {
+        summarizer: createCliSessionSummarizer()
+      });
+      return this.enqueueWrite(async () => {
+        const result = await this.commit({ ok: true, data: setWorkSessionSnapshot(this.data, snapshot) });
+        if (result.ok && showNotice) {
+          const warningSuffix = snapshot.warnings.length > 0 ? `，${snapshot.warnings.length} 个总结警告` : "";
+          new Notice(`已刷新昨日工作会话：${snapshot.sessions.length} 条${warningSuffix}`);
+        }
+        return result;
+      });
+    } catch (error) {
+      console.error(`[${PLUGIN_ID}] session scan failed`, error);
+      return {
+        ok: false,
+        error: { code: "SESSION_SCAN_FAILED", message: "读取昨日工作会话失败。请检查扫描目录和 Agent CLI 设置。" }
+      };
+    }
   }
 
   private async exportDailyNoteLocked(): Promise<CockpitResult<{ path: string }>> {
@@ -129,7 +192,7 @@ export default class DailyCockpitPlugin extends Plugin {
       await this.saveCockpitData(nextData);
       this.data = nextData;
       this.refreshViews();
-      new Notice(`已导出每日启动台：${path}`);
+      new Notice(`已导出热启动清单：${path}`);
       return { ok: true, data: { path } };
     } catch (error) {
       console.error(`[${PLUGIN_ID}] export failed`, error);
@@ -137,11 +200,10 @@ export default class DailyCockpitPlugin extends Plugin {
     }
   }
 
-  rendererState(activeSection: RendererState["activeSection"], error?: RendererState["error"]): RendererState {
+  rendererState(processing: boolean, error?: RendererState["error"]): RendererState {
     return {
       data: this.data,
-      activeSection,
-      loading: false,
+      processing,
       ...(error ? { error } : {}),
       ...(this.data.lastExportPath ? { exportPath: this.data.lastExportPath } : {})
     };
@@ -221,7 +283,8 @@ export default class DailyCockpitPlugin extends Plugin {
 
 class DailyCockpitView extends ItemView {
   private controller?: RenderController;
-  private activeSection: RendererState["activeSection"] = "today";
+  private processing = false;
+  private refreshingSessions = false;
   private error?: RendererState["error"];
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: DailyCockpitPlugin) {
@@ -233,11 +296,11 @@ class DailyCockpitView extends ItemView {
   }
 
   getDisplayText(): string {
-    return "每日启动台";
+    return "每日热启动";
   }
 
   getIcon(): string {
-    return "layout-dashboard";
+    return "list-checks";
   }
 
   async onOpen(): Promise<void> {
@@ -253,17 +316,34 @@ class DailyCockpitView extends ItemView {
   }
 
   private render(): void {
-    const state = this.plugin.rendererState(this.activeSection, this.error);
+    const state: RendererState = {
+      ...this.plugin.rendererState(this.processing, this.error),
+      refreshingSessions: this.refreshingSessions
+    };
     const actions = {
-      capture: async (input: CaptureInput) => this.handleResult(await this.plugin.capture(input), "inbox"),
-      move: async (id: string, target: CockpitItemState) => this.handleResult(await this.plugin.move(id, target), target),
-      complete: async (id: string) => this.handleResult(await this.plugin.complete(id), "done"),
-      archive: async (id: string) => this.handleResult(await this.plugin.archive(id), "archive"),
+      decompose: async (input: IntentInput) => {
+        this.processing = true;
+        this.error = undefined;
+        this.render();
+        const result = await this.plugin.decomposeIntent(input);
+        this.processing = false;
+        return this.handleResult(result);
+      },
+      toggleHotStart: async (taskId: string, selected: boolean) =>
+        this.handleResult(await this.plugin.toggleHotStart(taskId, selected)),
+      refreshWorkSessions: async () => {
+        this.refreshingSessions = true;
+        this.error = undefined;
+        this.render();
+        const result = await this.plugin.refreshWorkSessions();
+        this.refreshingSessions = false;
+        return this.handleResult(result);
+      },
+      copyResumeCommand: async (command: string) => copyTextToClipboard(command),
       exportDailyNote: async () => {
         const result = await this.plugin.exportDailyNote();
         if (result.ok) {
           this.error = undefined;
-          this.activeSection = "export";
           this.render();
         } else {
           this.error = result.error;
@@ -284,10 +364,9 @@ class DailyCockpitView extends ItemView {
     }
   }
 
-  private handleResult(result: CockpitResult<CockpitData>, section: RendererState["activeSection"]): CockpitResult<CockpitData> {
+  private handleResult(result: CockpitResult<CockpitData>): CockpitResult<CockpitData> {
     if (result.ok) {
       this.error = undefined;
-      this.activeSection = section;
     } else {
       this.error = result.error;
     }
@@ -296,41 +375,75 @@ class DailyCockpitView extends ItemView {
   }
 }
 
-class QuickCaptureModal extends Modal {
-  private body = "";
-  private context = "";
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    const clipboard = globalThis.navigator?.clipboard;
+    if (clipboard?.writeText) {
+      await clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Obsidian desktop may expose Electron clipboard even when the web API is unavailable.
+  }
+
+  try {
+    const runtimeWindow = globalThis.window as Window & {
+      require?: (id: string) => { clipboard?: { writeText(value: string): void } };
+    };
+    const electron = runtimeWindow.require?.("electron");
+    const clipboard = electron?.clipboard;
+    if (clipboard) {
+      clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fall through to the DOM copy path.
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  textarea.select();
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    textarea.remove();
+  }
+}
+
+class IntentModal extends Modal {
+  private text = "";
 
   constructor(private readonly plugin: DailyCockpitPlugin) {
     super(plugin.app);
   }
 
   onOpen(): void {
-    this.setTitle("快速捕捉到灵感收纳箱");
+    this.setTitle("快速拆解待办");
 
-    new Setting(this.contentEl).setName("内容").addTextArea((text) => {
-      text.inputEl.rows = 5;
-      text.setPlaceholder("先写下来，今天不一定要处理。");
+    new Setting(this.contentEl).setName("你想推进什么").addTextArea((text) => {
+      text.inputEl.rows = 6;
+      text.setPlaceholder("随口说一段目标，本地模型会拆成待办候选。");
       text.onChange((value) => {
-        this.body = value;
-      });
-    });
-
-    new Setting(this.contentEl).setName("上下文").addText((text) => {
-      text.setPlaceholder("项目、文件或会话线索");
-      text.onChange((value) => {
-        this.context = value;
+        this.text = value;
       });
     });
 
     new Setting(this.contentEl).addButton((button) => {
       button
-        .setButtonText("先替我记着")
+        .setButtonText("拆成待办")
         .setCta()
         .onClick(async () => {
-          const result = await this.plugin.capture({ body: this.body, context: this.context });
+          const result = await this.plugin.decomposeIntent({ text: this.text, source: "quick-capture" });
           if (result.ok) {
-            new Notice("已放入灵感收纳箱");
+            new Notice("已拆成待办候选");
             this.close();
+            await this.plugin.activateView();
           } else {
             new Notice(result.error.message);
           }
@@ -340,5 +453,106 @@ class QuickCaptureModal extends Modal {
 
   onClose(): void {
     this.contentEl.empty();
+  }
+}
+
+class DailyCockpitSettingTab extends PluginSettingTab {
+  constructor(app: App, private readonly plugin: DailyCockpitPlugin) {
+    super(app, plugin);
+  }
+
+  display(): void {
+    const { containerEl } = this;
+    containerEl.empty();
+    containerEl.createEl("h2", { text: "Daily Cockpit" });
+
+    new Setting(containerEl)
+      .setName("本地模型 endpoint")
+      .setDesc("OpenAI-compatible chat completions endpoint。默认指向本机 Ollama 兼容接口。")
+      .addText((text) => {
+        text.setValue(this.plugin.data.settings.llmEndpoint);
+        text.onChange((value) => {
+          void this.plugin.updateSettings({ llmEndpoint: value });
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("模型名")
+      .setDesc("例如 qwen2.5:7b、qwen3:8b，或你本地服务暴露的模型名。")
+      .addText((text) => {
+        text.setValue(this.plugin.data.settings.llmModel);
+        text.onChange((value) => {
+          void this.plugin.updateSettings({ llmModel: value });
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("API Key")
+      .setDesc("本地服务通常不需要。若 endpoint 需要鉴权，会以 Bearer token 发送。")
+      .addText((text) => {
+        text.inputEl.type = "password";
+        text.setValue(this.plugin.data.settings.llmApiKey ?? "");
+        text.onChange((value) => {
+          void this.plugin.updateSettings({ llmApiKey: value });
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("导出文件夹")
+      .setDesc("热启动清单写入的 vault 内文件夹。")
+      .addText((text) => {
+        text.setValue(this.plugin.data.settings.dailyNoteFolder);
+        text.onChange((value) => {
+          void this.plugin.updateSettings({ dailyNoteFolder: value });
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("工作会话扫描目录")
+      .setDesc("一行一个本机路径。这里只读取 ID、时间、工作目录和会话文件位置，正文总结交给对应 Agent。")
+      .addTextArea((text) => {
+        text.inputEl.rows = 5;
+        text.setValue(this.plugin.data.settings.sessionScanRoots.join("\n"));
+        text.onChange((value) => {
+          void this.plugin.updateSettings({
+            sessionScanRoots: value
+              .split(/\r?\n/)
+              .map((line) => line.trim())
+              .filter(Boolean)
+          });
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("昨日会话总结")
+      .setDesc("平台 CLI 模式会在点击刷新时，让 Codex 总结 Codex 会话、Claude Code 总结 Claude 会话；不会在启动时自动调用。")
+      .addDropdown((dropdown) => {
+        dropdown.addOption("native", "平台 CLI 总结");
+        dropdown.addOption("metadata", "仅显示元数据");
+        dropdown.setValue(this.plugin.data.settings.sessionSummaryMode);
+        dropdown.onChange((value) => {
+          void this.plugin.updateSettings({ sessionSummaryMode: value === "metadata" ? "metadata" : "native" });
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Codex CLI")
+      .setDesc("可执行文件名或绝对路径。macOS GUI 会自动补充 ~/.local/bin、Homebrew 和系统 PATH。")
+      .addText((text) => {
+        text.setValue(this.plugin.data.settings.codexCliPath);
+        text.onChange((value) => {
+          void this.plugin.updateSettings({ codexCliPath: value });
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Claude Code CLI")
+      .setDesc("可执行文件名或绝对路径。留作对应 Claude Code 会话的只读总结。")
+      .addText((text) => {
+        text.setValue(this.plugin.data.settings.claudeCliPath);
+        text.onChange((value) => {
+          void this.plugin.updateSettings({ claudeCliPath: value });
+        });
+      });
   }
 }
