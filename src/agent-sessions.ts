@@ -1,6 +1,13 @@
-import { DEFAULT_SESSION_SCAN_ROOTS } from "./constants";
+import { DEFAULT_SESSION_PROVIDERS, DEFAULT_SESSION_SCAN_ROOTS } from "./constants";
 import { createEmptyWorkSessionSnapshot } from "./state";
-import type { AgentPlatform, AgentSessionStatus, AgentWorkSession, AgentWorkSnapshot, CockpitSettings } from "./types";
+import type {
+  AgentPlatform,
+  AgentSessionStatus,
+  AgentWorkSession,
+  AgentWorkSnapshot,
+  CockpitSettings,
+  SessionProvider
+} from "./types";
 
 export interface RuntimeFileStat {
   isDirectory(): boolean;
@@ -18,6 +25,7 @@ export interface RuntimeFileSystem {
 export interface SessionScanOptions {
   now?: Date;
   roots?: string[];
+  providers?: SessionProvider[];
   fs?: RuntimeFileSystem;
   homeDir?: string;
   maxFiles?: number;
@@ -77,7 +85,11 @@ export async function loadAgentWorkSnapshot(
 ): Promise<AgentWorkSnapshot> {
   const now = options.now ?? new Date();
   const date = previousLocalDateString(now);
-  const sources = normalizeRoots(options.roots ?? settings.sessionScanRoots);
+  const enabledProviders = new Set(options.providers ?? settings.enabledSessionProviders ?? DEFAULT_SESSION_PROVIDERS);
+  const sourceDescriptors = normalizeRoots(options.roots ?? settings.sessionScanRoots)
+    .map((source) => ({ source, platform: inferPlatform(source) }))
+    .filter(({ platform }) => enabledProviders.has(platform as SessionProvider));
+  const sources = sourceDescriptors.map(({ source }) => source);
   const fs = options.fs ?? createRuntimeFileSystem();
   if (!fs) {
     return { ...createEmptyWorkSessionSnapshot(date, now.toISOString()), sources };
@@ -89,9 +101,8 @@ export async function loadAgentWorkSnapshot(
   const maxFiles = options.maxFiles ?? DEFAULT_MAX_FILES;
   const maxFilesPerRoot = Math.max(12, Math.ceil(maxFiles / Math.max(sources.length, 1)));
 
-  for (const source of sources) {
+  for (const { source, platform } of sourceDescriptors) {
     const root = expandHome(source, homeDir);
-    const platform = inferPlatform(root);
     const found = await collectCandidateFiles(root, platform, day, fs, {
       maxFiles: maxFilesPerRoot,
       maxDepth: options.maxDepth ?? DEFAULT_MAX_DEPTH,

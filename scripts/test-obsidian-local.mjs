@@ -8,18 +8,34 @@ const vault = await resolveVault(args);
 const port = readArg(args, "--port");
 const model = readArg(args, "--model");
 const endpoint = readArg(args, "--endpoint");
+const whiteboardOnly = args.includes("--whiteboard-only");
+const obsidianBin = readArg(args, "--obsidian-bin");
+const evidence = readArg(args, "--evidence");
+const failAfter = readArg(args, "--fail-after");
 
-await run("npm", ["run", "build"]);
-await run("node", ["scripts/install-local.mjs", "--vault", vault]);
-await run("node", ["scripts/verify-local.mjs", "--vault", vault]);
-await run("node", [
-  "scripts/e2e-obsidian.mjs",
-  "--vault",
-  vault,
-  ...(port ? ["--port", port] : []),
-  ...(model ? ["--model", model] : []),
-  ...(endpoint ? ["--endpoint", endpoint] : [])
-]);
+if (whiteboardOnly) {
+  await run("node", [
+    "scripts/e2e-whiteboard-obsidian.mjs",
+    "--vault",
+    vault,
+    ...(port ? ["--port", port] : []),
+    ...(obsidianBin ? ["--obsidian-bin", obsidianBin] : []),
+    ...(evidence ? ["--evidence", evidence] : []),
+    ...(failAfter ? ["--fail-after", failAfter] : [])
+  ]);
+} else {
+  await run("npm", ["run", "build"]);
+  await run("node", ["scripts/install-local.mjs", "--vault", vault]);
+  await run("node", ["scripts/verify-local.mjs", "--vault", vault]);
+  await run("node", [
+    "scripts/e2e-obsidian.mjs",
+    "--vault",
+    vault,
+    ...(port ? ["--port", port] : []),
+    ...(model ? ["--model", model] : []),
+    ...(endpoint ? ["--endpoint", endpoint] : [])
+  ]);
+}
 
 async function resolveVault(cliArgs) {
   const explicit = readArg(cliArgs, "--vault") ?? process.env.OBSIDIAN_VAULT;

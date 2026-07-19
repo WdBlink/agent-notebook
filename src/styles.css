@@ -1,783 +1,3 @@
-/* node_modules/@xyflow/react/dist/style.css */
-.react-flow {
-  direction: ltr;
-  --xy-edge-stroke-default: #b1b1b7;
-  --xy-edge-stroke-width-default: 1;
-  --xy-edge-stroke-selected-default: #555;
-  --xy-connectionline-stroke-default: #b1b1b7;
-  --xy-connectionline-stroke-width-default: 1;
-  --xy-attribution-background-color-default: rgba(255, 255, 255, 0.5);
-  --xy-minimap-background-color-default: #fff;
-  --xy-minimap-mask-background-color-default: rgba(240, 240, 240, 0.6);
-  --xy-minimap-mask-stroke-color-default: transparent;
-  --xy-minimap-mask-stroke-width-default: 1;
-  --xy-minimap-node-background-color-default: #e2e2e2;
-  --xy-minimap-node-stroke-color-default: transparent;
-  --xy-minimap-node-stroke-width-default: 2;
-  --xy-background-color-default: transparent;
-  --xy-background-pattern-dots-color-default: #91919a;
-  --xy-background-pattern-lines-color-default: #eee;
-  --xy-background-pattern-cross-color-default: #e2e2e2;
-  background-color: var(--xy-background-color, var(--xy-background-color-default));
-  --xy-node-color-default: inherit;
-  --xy-node-border-default: 1px solid #1a192b;
-  --xy-node-background-color-default: #fff;
-  --xy-node-group-background-color-default: rgba(240, 240, 240, 0.25);
-  --xy-node-boxshadow-hover-default: 0 1px 4px 1px rgba(0, 0, 0, 0.08);
-  --xy-node-boxshadow-selected-default: 0 0 0 0.5px #1a192b;
-  --xy-node-border-radius-default: 3px;
-  --xy-handle-background-color-default: #1a192b;
-  --xy-handle-border-color-default: #fff;
-  --xy-selection-background-color-default: rgba(0, 89, 220, 0.08);
-  --xy-selection-border-default: 1px dotted rgba(0, 89, 220, 0.8);
-  --xy-controls-button-background-color-default: #fefefe;
-  --xy-controls-button-background-color-hover-default: #f4f4f4;
-  --xy-controls-button-color-default: inherit;
-  --xy-controls-button-color-hover-default: inherit;
-  --xy-controls-button-border-color-default: #eee;
-  --xy-controls-box-shadow-default: 0 0 2px 1px rgba(0, 0, 0, 0.08);
-  --xy-edge-label-background-color-default: #ffffff;
-  --xy-edge-label-color-default: inherit;
-  --xy-resize-background-color-default: #3367d9;
-}
-.react-flow.dark {
-  --xy-edge-stroke-default: #3e3e3e;
-  --xy-edge-stroke-width-default: 1;
-  --xy-edge-stroke-selected-default: #727272;
-  --xy-connectionline-stroke-default: #b1b1b7;
-  --xy-connectionline-stroke-width-default: 1;
-  --xy-attribution-background-color-default: rgba(150, 150, 150, 0.25);
-  --xy-minimap-background-color-default: #141414;
-  --xy-minimap-mask-background-color-default: rgba(60, 60, 60, 0.6);
-  --xy-minimap-mask-stroke-color-default: transparent;
-  --xy-minimap-mask-stroke-width-default: 1;
-  --xy-minimap-node-background-color-default: #2b2b2b;
-  --xy-minimap-node-stroke-color-default: transparent;
-  --xy-minimap-node-stroke-width-default: 2;
-  --xy-background-color-default: #141414;
-  --xy-background-pattern-dots-color-default: #777;
-  --xy-background-pattern-lines-color-default: #777;
-  --xy-background-pattern-cross-color-default: #777;
-  --xy-node-color-default: #f8f8f8;
-  --xy-node-border-default: 1px solid #3c3c3c;
-  --xy-node-background-color-default: #1e1e1e;
-  --xy-node-group-background-color-default: rgba(240, 240, 240, 0.25);
-  --xy-node-boxshadow-hover-default: 0 1px 4px 1px rgba(255, 255, 255, 0.08);
-  --xy-node-boxshadow-selected-default: 0 0 0 0.5px #999;
-  --xy-handle-background-color-default: #bebebe;
-  --xy-handle-border-color-default: #1e1e1e;
-  --xy-selection-background-color-default: rgba(200, 200, 220, 0.08);
-  --xy-selection-border-default: 1px dotted rgba(200, 200, 220, 0.8);
-  --xy-controls-button-background-color-default: #2b2b2b;
-  --xy-controls-button-background-color-hover-default: #3e3e3e;
-  --xy-controls-button-color-default: #f8f8f8;
-  --xy-controls-button-color-hover-default: #fff;
-  --xy-controls-button-border-color-default: #5b5b5b;
-  --xy-controls-box-shadow-default: 0 0 2px 1px rgba(0, 0, 0, 0.08);
-  --xy-edge-label-background-color-default: #141414;
-  --xy-edge-label-color-default: #f8f8f8;
-}
-.react-flow__background {
-  background-color: var(--xy-background-color-props, var(--xy-background-color, var(--xy-background-color-default)));
-  pointer-events: none;
-  z-index: -1;
-}
-.react-flow__container {
-  position: absolute;
-  width: 100%;
-  height: 100%;
-  top: 0;
-  left: 0;
-}
-.react-flow__pane {
-  z-index: 1;
-}
-.react-flow__pane.draggable {
-  cursor: grab;
-}
-.react-flow__pane.dragging {
-  cursor: grabbing;
-}
-.react-flow__pane.selection {
-  cursor: pointer;
-}
-.react-flow__viewport {
-  transform-origin: 0 0;
-  z-index: 2;
-  pointer-events: none;
-}
-.react-flow__renderer {
-  z-index: 4;
-}
-.react-flow__selection {
-  z-index: 6;
-}
-.react-flow__nodesselection-rect:focus,
-.react-flow__nodesselection-rect:focus-visible {
-  outline: none;
-}
-.react-flow__edge-path {
-  stroke: var(--xy-edge-stroke, var(--xy-edge-stroke-default));
-  stroke-width: var(--xy-edge-stroke-width, var(--xy-edge-stroke-width-default));
-  fill: none;
-}
-.react-flow__connection-path {
-  stroke: var(--xy-connectionline-stroke, var(--xy-connectionline-stroke-default));
-  stroke-width: var(--xy-connectionline-stroke-width, var(--xy-connectionline-stroke-width-default));
-  fill: none;
-}
-.react-flow .react-flow__edges {
-  position: absolute;
-}
-.react-flow .react-flow__edges svg {
-  overflow: visible;
-  position: absolute;
-  pointer-events: none;
-}
-.react-flow__edge {
-  pointer-events: visibleStroke;
-}
-.react-flow__edge.selectable {
-  cursor: pointer;
-}
-.react-flow__edge.animated path {
-  stroke-dasharray: 5;
-  animation: dashdraw 0.5s linear infinite;
-}
-.react-flow__edge.animated path.react-flow__edge-interaction {
-  stroke-dasharray: none;
-  animation: none;
-}
-.react-flow__edge.inactive {
-  pointer-events: none;
-}
-.react-flow__edge.selected,
-.react-flow__edge:focus,
-.react-flow__edge:focus-visible {
-  outline: none;
-}
-.react-flow__edge.selected .react-flow__edge-path,
-.react-flow__edge.selectable:focus .react-flow__edge-path,
-.react-flow__edge.selectable:focus-visible .react-flow__edge-path {
-  stroke: var(--xy-edge-stroke-selected, var(--xy-edge-stroke-selected-default));
-}
-.react-flow__edge-textwrapper {
-  pointer-events: all;
-}
-.react-flow__edge .react-flow__edge-text {
-  pointer-events: none;
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  user-select: none;
-}
-.react-flow__arrowhead polyline {
-  stroke: var(--xy-edge-stroke, var(--xy-edge-stroke-default));
-}
-.react-flow__arrowhead polyline.arrowclosed {
-  fill: var(--xy-edge-stroke, var(--xy-edge-stroke-default));
-}
-.react-flow__connection {
-  pointer-events: none;
-}
-.react-flow__connection .animated {
-  stroke-dasharray: 5;
-  animation: dashdraw 0.5s linear infinite;
-}
-svg.react-flow__connectionline {
-  z-index: 1001;
-  overflow: visible;
-  position: absolute;
-}
-.react-flow__nodes {
-  pointer-events: none;
-  transform-origin: 0 0;
-}
-.react-flow__node {
-  position: absolute;
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  user-select: none;
-  pointer-events: all;
-  transform-origin: 0 0;
-  box-sizing: border-box;
-  cursor: default;
-}
-.react-flow__node.selectable {
-  cursor: pointer;
-}
-.react-flow__node.draggable {
-  cursor: grab;
-  pointer-events: all;
-}
-.react-flow__node.draggable.dragging {
-  cursor: grabbing;
-}
-.react-flow__nodesselection {
-  z-index: 3;
-  transform-origin: left top;
-  pointer-events: none;
-}
-.react-flow__nodesselection-rect {
-  position: absolute;
-  pointer-events: all;
-  cursor: grab;
-}
-.react-flow__handle {
-  position: absolute;
-  pointer-events: none;
-  min-width: 5px;
-  min-height: 5px;
-  width: 6px;
-  height: 6px;
-  background-color: var(--xy-handle-background-color, var(--xy-handle-background-color-default));
-  border: 1px solid var(--xy-handle-border-color, var(--xy-handle-border-color-default));
-  border-radius: 100%;
-}
-.react-flow__handle.connectingfrom {
-  pointer-events: all;
-}
-.react-flow__handle.connectionindicator {
-  pointer-events: all;
-  cursor: crosshair;
-}
-.react-flow__handle-bottom {
-  top: auto;
-  left: 50%;
-  bottom: 0;
-  transform: translate(-50%, 50%);
-}
-.react-flow__handle-top {
-  top: 0;
-  left: 50%;
-  transform: translate(-50%, -50%);
-}
-.react-flow__handle-left {
-  top: 50%;
-  left: 0;
-  transform: translate(-50%, -50%);
-}
-.react-flow__handle-right {
-  top: 50%;
-  right: 0;
-  transform: translate(50%, -50%);
-}
-.react-flow__edgeupdater {
-  cursor: move;
-  pointer-events: all;
-}
-.react-flow__pane.selection .react-flow__panel {
-  pointer-events: none;
-}
-.react-flow__panel {
-  position: absolute;
-  z-index: 5;
-  margin: 15px;
-}
-.react-flow__panel.top {
-  top: 0;
-}
-.react-flow__panel.bottom {
-  bottom: 0;
-}
-.react-flow__panel.top.center,
-.react-flow__panel.bottom.center {
-  left: 50%;
-  transform: translateX(-15px) translateX(-50%);
-}
-.react-flow__panel.left {
-  left: 0;
-}
-.react-flow__panel.right {
-  right: 0;
-}
-.react-flow__panel.left.center,
-.react-flow__panel.right.center {
-  top: 50%;
-  transform: translateY(-15px) translateY(-50%);
-}
-.react-flow__attribution {
-  font-size: 10px;
-  background: var(--xy-attribution-background-color, var(--xy-attribution-background-color-default));
-  padding: 2px 3px;
-  margin: 0;
-}
-.react-flow__attribution a {
-  text-decoration: none;
-  color: #999;
-}
-@keyframes dashdraw {
-  from {
-    stroke-dashoffset: 10;
-  }
-}
-.react-flow__edgelabel-renderer {
-  position: absolute;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  user-select: none;
-  left: 0;
-  top: 0;
-}
-.react-flow__viewport-portal {
-  position: absolute;
-  width: 100%;
-  height: 100%;
-  left: 0;
-  top: 0;
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  user-select: none;
-}
-.react-flow__minimap {
-  background: var( --xy-minimap-background-color-props, var(--xy-minimap-background-color, var(--xy-minimap-background-color-default)) );
-}
-.react-flow__minimap-svg {
-  display: block;
-}
-.react-flow__minimap-mask {
-  fill: var( --xy-minimap-mask-background-color-props, var(--xy-minimap-mask-background-color, var(--xy-minimap-mask-background-color-default)) );
-  stroke: var( --xy-minimap-mask-stroke-color-props, var(--xy-minimap-mask-stroke-color, var(--xy-minimap-mask-stroke-color-default)) );
-  stroke-width: var( --xy-minimap-mask-stroke-width-props, var(--xy-minimap-mask-stroke-width, var(--xy-minimap-mask-stroke-width-default)) );
-}
-.react-flow__minimap-node {
-  fill: var( --xy-minimap-node-background-color-props, var(--xy-minimap-node-background-color, var(--xy-minimap-node-background-color-default)) );
-  stroke: var( --xy-minimap-node-stroke-color-props, var(--xy-minimap-node-stroke-color, var(--xy-minimap-node-stroke-color-default)) );
-  stroke-width: var( --xy-minimap-node-stroke-width-props, var(--xy-minimap-node-stroke-width, var(--xy-minimap-node-stroke-width-default)) );
-}
-.react-flow__background-pattern.dots {
-  fill: var( --xy-background-pattern-color-props, var(--xy-background-pattern-color, var(--xy-background-pattern-dots-color-default)) );
-}
-.react-flow__background-pattern.lines {
-  stroke: var( --xy-background-pattern-color-props, var(--xy-background-pattern-color, var(--xy-background-pattern-lines-color-default)) );
-}
-.react-flow__background-pattern.cross {
-  stroke: var( --xy-background-pattern-color-props, var(--xy-background-pattern-color, var(--xy-background-pattern-cross-color-default)) );
-}
-.react-flow__controls {
-  display: flex;
-  flex-direction: column;
-  box-shadow: var(--xy-controls-box-shadow, var(--xy-controls-box-shadow-default));
-}
-.react-flow__controls.horizontal {
-  flex-direction: row;
-}
-.react-flow__controls-button {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 26px;
-  width: 26px;
-  padding: 4px;
-  border: none;
-  background: var(--xy-controls-button-background-color, var(--xy-controls-button-background-color-default));
-  border-bottom: 1px solid var( --xy-controls-button-border-color-props, var(--xy-controls-button-border-color, var(--xy-controls-button-border-color-default)) );
-  color: var( --xy-controls-button-color-props, var(--xy-controls-button-color, var(--xy-controls-button-color-default)) );
-  cursor: pointer;
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  user-select: none;
-}
-.react-flow__controls-button svg {
-  width: 100%;
-  max-width: 12px;
-  max-height: 12px;
-  fill: currentColor;
-}
-.react-flow__edge.updating .react-flow__edge-path {
-  stroke: #777;
-}
-.react-flow__edge-text {
-  font-size: 10px;
-}
-.react-flow__node.selectable:focus,
-.react-flow__node.selectable:focus-visible {
-  outline: none;
-}
-.react-flow__node-input,
-.react-flow__node-default,
-.react-flow__node-output,
-.react-flow__node-group {
-  padding: 10px;
-  border-radius: var(--xy-node-border-radius, var(--xy-node-border-radius-default));
-  width: 150px;
-  font-size: 12px;
-  color: var(--xy-node-color, var(--xy-node-color-default));
-  text-align: center;
-  border: var(--xy-node-border, var(--xy-node-border-default));
-  background-color: var(--xy-node-background-color, var(--xy-node-background-color-default));
-}
-.react-flow__node-input.selectable:hover,
-.react-flow__node-default.selectable:hover,
-.react-flow__node-output.selectable:hover,
-.react-flow__node-group.selectable:hover {
-  box-shadow: var(--xy-node-boxshadow-hover, var(--xy-node-boxshadow-hover-default));
-}
-.react-flow__node-input.selectable.selected,
-.react-flow__node-input.selectable:focus,
-.react-flow__node-input.selectable:focus-visible,
-.react-flow__node-default.selectable.selected,
-.react-flow__node-default.selectable:focus,
-.react-flow__node-default.selectable:focus-visible,
-.react-flow__node-output.selectable.selected,
-.react-flow__node-output.selectable:focus,
-.react-flow__node-output.selectable:focus-visible,
-.react-flow__node-group.selectable.selected,
-.react-flow__node-group.selectable:focus,
-.react-flow__node-group.selectable:focus-visible {
-  box-shadow: var(--xy-node-boxshadow-selected, var(--xy-node-boxshadow-selected-default));
-}
-.react-flow__node-group {
-  background-color: var(--xy-node-group-background-color, var(--xy-node-group-background-color-default));
-}
-.react-flow__nodesselection-rect,
-.react-flow__selection {
-  background: var(--xy-selection-background-color, var(--xy-selection-background-color-default));
-  border: var(--xy-selection-border, var(--xy-selection-border-default));
-}
-.react-flow__nodesselection-rect:focus,
-.react-flow__nodesselection-rect:focus-visible,
-.react-flow__selection:focus,
-.react-flow__selection:focus-visible {
-  outline: none;
-}
-.react-flow__controls-button:hover {
-  background: var( --xy-controls-button-background-color-hover-props, var(--xy-controls-button-background-color-hover, var(--xy-controls-button-background-color-hover-default)) );
-  color: var( --xy-controls-button-color-hover-props, var(--xy-controls-button-color-hover, var(--xy-controls-button-color-hover-default)) );
-}
-.react-flow__controls-button:disabled {
-  pointer-events: none;
-}
-.react-flow__controls-button:disabled svg {
-  fill-opacity: 0.4;
-}
-.react-flow__controls-button:last-child {
-  border-bottom: none;
-}
-.react-flow__controls.horizontal .react-flow__controls-button {
-  border-bottom: none;
-  border-right: 1px solid var( --xy-controls-button-border-color-props, var(--xy-controls-button-border-color, var(--xy-controls-button-border-color-default)) );
-}
-.react-flow__controls.horizontal .react-flow__controls-button:last-child {
-  border-right: none;
-}
-.react-flow__resize-control {
-  position: absolute;
-}
-.react-flow__resize-control.left,
-.react-flow__resize-control.right {
-  cursor: ew-resize;
-}
-.react-flow__resize-control.top,
-.react-flow__resize-control.bottom {
-  cursor: ns-resize;
-}
-.react-flow__resize-control.top.left,
-.react-flow__resize-control.bottom.right {
-  cursor: nwse-resize;
-}
-.react-flow__resize-control.bottom.left,
-.react-flow__resize-control.top.right {
-  cursor: nesw-resize;
-}
-.react-flow__resize-control.handle {
-  width: 5px;
-  height: 5px;
-  border: 1px solid #fff;
-  border-radius: 1px;
-  background-color: var(--xy-resize-background-color, var(--xy-resize-background-color-default));
-  translate: -50% -50%;
-}
-.react-flow__resize-control.handle.left {
-  left: 0;
-  top: 50%;
-}
-.react-flow__resize-control.handle.right {
-  left: 100%;
-  top: 50%;
-}
-.react-flow__resize-control.handle.top {
-  left: 50%;
-  top: 0;
-}
-.react-flow__resize-control.handle.bottom {
-  left: 50%;
-  top: 100%;
-}
-.react-flow__resize-control.handle.top.left {
-  left: 0;
-}
-.react-flow__resize-control.handle.bottom.left {
-  left: 0;
-}
-.react-flow__resize-control.handle.top.right {
-  left: 100%;
-}
-.react-flow__resize-control.handle.bottom.right {
-  left: 100%;
-}
-.react-flow__resize-control.line {
-  border-color: var(--xy-resize-background-color, var(--xy-resize-background-color-default));
-  border-width: 0;
-  border-style: solid;
-}
-.react-flow__resize-control.line.left,
-.react-flow__resize-control.line.right {
-  width: 1px;
-  transform: translate(-50%, 0);
-  top: 0;
-  height: 100%;
-}
-.react-flow__resize-control.line.left {
-  left: 0;
-  border-left-width: 1px;
-}
-.react-flow__resize-control.line.right {
-  left: 100%;
-  border-right-width: 1px;
-}
-.react-flow__resize-control.line.top,
-.react-flow__resize-control.line.bottom {
-  height: 1px;
-  transform: translate(0, -50%);
-  left: 0;
-  width: 100%;
-}
-.react-flow__resize-control.line.top {
-  top: 0;
-  border-top-width: 1px;
-}
-.react-flow__resize-control.line.bottom {
-  border-bottom-width: 1px;
-  top: 100%;
-}
-.react-flow__edge-textbg {
-  fill: var(--xy-edge-label-background-color, var(--xy-edge-label-background-color-default));
-}
-.react-flow__edge-text {
-  fill: var(--xy-edge-label-color, var(--xy-edge-label-color-default));
-}
-
-/* node_modules/@xterm/xterm/css/xterm.css */
-.xterm {
-  cursor: text;
-  position: relative;
-  user-select: none;
-  -ms-user-select: none;
-  -webkit-user-select: none;
-}
-.xterm.focus,
-.xterm:focus {
-  outline: none;
-}
-.xterm .xterm-helpers {
-  position: absolute;
-  top: 0;
-  z-index: 5;
-}
-.xterm .xterm-helper-textarea {
-  padding: 0;
-  border: 0;
-  margin: 0;
-  position: absolute;
-  opacity: 0;
-  left: -9999em;
-  top: 0;
-  width: 0;
-  height: 0;
-  z-index: -5;
-  white-space: nowrap;
-  overflow: hidden;
-  resize: none;
-}
-.xterm .composition-view {
-  background: #000;
-  color: #FFF;
-  display: none;
-  position: absolute;
-  white-space: nowrap;
-  z-index: 1;
-}
-.xterm .composition-view.active {
-  display: block;
-}
-.xterm .xterm-viewport {
-  background-color: #000;
-  overflow-y: scroll;
-  cursor: default;
-  position: absolute;
-  right: 0;
-  left: 0;
-  top: 0;
-  bottom: 0;
-}
-.xterm .xterm-screen {
-  position: relative;
-}
-.xterm .xterm-screen canvas {
-  position: absolute;
-  left: 0;
-  top: 0;
-}
-.xterm-char-measure-element {
-  display: inline-block;
-  visibility: hidden;
-  position: absolute;
-  top: 0;
-  left: -9999em;
-  line-height: normal;
-}
-.xterm.enable-mouse-events {
-  cursor: default;
-}
-.xterm.xterm-cursor-pointer,
-.xterm .xterm-cursor-pointer {
-  cursor: pointer;
-}
-.xterm.column-select.focus {
-  cursor: crosshair;
-}
-.xterm .xterm-accessibility:not(.debug),
-.xterm .xterm-message {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  right: 0;
-  z-index: 10;
-  color: transparent;
-  pointer-events: none;
-}
-.xterm .xterm-accessibility-tree:not(.debug) *::selection {
-  color: transparent;
-}
-.xterm .xterm-accessibility-tree {
-  font-family: monospace;
-  user-select: text;
-  white-space: pre;
-}
-.xterm .xterm-accessibility-tree > div {
-  transform-origin: left;
-  width: fit-content;
-}
-.xterm .live-region {
-  position: absolute;
-  left: -9999px;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-}
-.xterm-dim {
-  opacity: 1 !important;
-}
-.xterm-underline-1 {
-  text-decoration: underline;
-}
-.xterm-underline-2 {
-  text-decoration: double underline;
-}
-.xterm-underline-3 {
-  text-decoration: wavy underline;
-}
-.xterm-underline-4 {
-  text-decoration: dotted underline;
-}
-.xterm-underline-5 {
-  text-decoration: dashed underline;
-}
-.xterm-overline {
-  text-decoration: overline;
-}
-.xterm-overline.xterm-underline-1 {
-  text-decoration: overline underline;
-}
-.xterm-overline.xterm-underline-2 {
-  text-decoration: overline double underline;
-}
-.xterm-overline.xterm-underline-3 {
-  text-decoration: overline wavy underline;
-}
-.xterm-overline.xterm-underline-4 {
-  text-decoration: overline dotted underline;
-}
-.xterm-overline.xterm-underline-5 {
-  text-decoration: overline dashed underline;
-}
-.xterm-strikethrough {
-  text-decoration: line-through;
-}
-.xterm-screen .xterm-decoration-container .xterm-decoration {
-  z-index: 6;
-  position: absolute;
-}
-.xterm-screen .xterm-decoration-container .xterm-decoration.xterm-decoration-top-layer {
-  z-index: 7;
-}
-.xterm-decoration-overview-ruler {
-  z-index: 8;
-  position: absolute;
-  top: 0;
-  right: 0;
-  pointer-events: none;
-}
-.xterm-decoration-top {
-  z-index: 2;
-  position: relative;
-}
-.xterm .xterm-scrollable-element > .scrollbar {
-  cursor: default;
-}
-.xterm .xterm-scrollable-element > .scrollbar > .scra {
-  cursor: pointer;
-  font-size: 11px !important;
-}
-.xterm .xterm-scrollable-element > .visible {
-  opacity: 1;
-  background: rgba(0, 0, 0, 0);
-  transition: opacity 100ms linear;
-  z-index: 11;
-}
-.xterm .xterm-scrollable-element > .invisible {
-  opacity: 0;
-  pointer-events: none;
-}
-.xterm .xterm-scrollable-element > .invisible.fade {
-  transition: opacity 800ms linear;
-}
-.xterm .xterm-scrollable-element > .shadow {
-  position: absolute;
-  display: none;
-}
-.xterm .xterm-scrollable-element > .shadow.top {
-  display: block;
-  top: 0;
-  left: 3px;
-  height: 3px;
-  width: 100%;
-  box-shadow: var(--vscode-scrollbar-shadow, #000) 0 6px 6px -6px inset;
-}
-.xterm .xterm-scrollable-element > .shadow.left {
-  display: block;
-  top: 3px;
-  left: 0;
-  height: 100%;
-  width: 3px;
-  box-shadow: var(--vscode-scrollbar-shadow, #000) 6px 0 6px -6px inset;
-}
-.xterm .xterm-scrollable-element > .shadow.top-left-corner {
-  display: block;
-  top: 0;
-  left: 0;
-  height: 3px;
-  width: 3px;
-}
-.xterm .xterm-scrollable-element > .shadow.top.left {
-  box-shadow: var(--vscode-scrollbar-shadow, #000) 6px 0 6px -6px inset;
-}
-
-/* src/styles.css */
 .daily-cockpit-root {
   --dc-bg: var(--background-primary, #f7f9f8);
   --dc-panel: var(--background-secondary, #eef2f0);
@@ -791,23 +11,9 @@ svg.react-flow__connectionline {
   --dc-on-accent: #ffffff;
   --dc-radius-sm: 6px;
   --dc-radius-md: 8px;
-  --dc-font-heading:
-    ui-sans-serif,
-    "Avenir Next",
-    "PingFang SC",
-    "Microsoft YaHei",
-    sans-serif;
-  --dc-font-body:
-    "PingFang SC",
-    "Microsoft YaHei",
-    ui-sans-serif,
-    system-ui,
-    sans-serif;
-  --dc-font-mono:
-    "SFMono-Regular",
-    "Roboto Mono",
-    "Cascadia Code",
-    monospace;
+  --dc-font-heading: ui-sans-serif, "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --dc-font-body: "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+  --dc-font-mono: "SFMono-Regular", "Roboto Mono", "Cascadia Code", monospace;
   display: block;
   container-type: inline-size;
   height: 100%;
@@ -818,6 +24,7 @@ svg.react-flow__connectionline {
   background: var(--dc-bg);
   font-family: var(--dc-font-body);
 }
+
 .agent-whiteboard-root {
   --aw-bg: var(--background-primary, #f6f8f7);
   --aw-panel: var(--background-secondary, #edf1ef);
@@ -838,11 +45,13 @@ svg.react-flow__connectionline {
   background: var(--aw-bg);
   font-family: var(--font-interface, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif);
 }
+
 .agent-whiteboard-root *,
 .agent-whiteboard-root *::before,
 .agent-whiteboard-root *::after {
   box-sizing: border-box;
 }
+
 .agent-whiteboard-empty,
 .agent-whiteboard-recovery {
   display: grid;
@@ -856,6 +65,7 @@ svg.react-flow__connectionline {
   color: var(--aw-text);
   background: var(--aw-bg);
 }
+
 .agent-whiteboard-empty > div,
 .agent-whiteboard-recovery > div {
   display: grid;
@@ -863,17 +73,20 @@ svg.react-flow__connectionline {
   max-width: min(440px, 100%);
   text-align: center;
 }
+
 .agent-whiteboard-empty svg {
   width: 34px;
   height: 34px;
   color: var(--aw-accent);
 }
+
 .agent-whiteboard-empty h1,
 .agent-whiteboard-recovery h1 {
   margin: 14px 0 6px;
   font-size: 24px;
   letter-spacing: 0;
 }
+
 .agent-whiteboard-empty p,
 .agent-whiteboard-recovery p {
   margin: 0 0 18px;
@@ -882,6 +95,7 @@ svg.react-flow__connectionline {
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
+
 .agent-whiteboard-empty button,
 .agent-whiteboard-recovery button,
 .agent-whiteboard-menu button {
@@ -898,12 +112,15 @@ svg.react-flow__connectionline {
   font-size: 12px;
   cursor: pointer;
 }
+
 .agent-whiteboard-empty button {
   padding: 0 14px;
 }
+
 .agent-whiteboard-recovery button {
   padding: 0 14px;
 }
+
 .agent-whiteboard-empty button svg,
 .agent-whiteboard-menu button svg,
 .agent-whiteboard-node-header svg {
@@ -911,6 +128,7 @@ svg.react-flow__connectionline {
   height: 15px;
   flex: 0 0 auto;
 }
+
 .agent-whiteboard-shell {
   display: grid;
   grid-template-rows: 48px minmax(0, 1fr);
@@ -920,6 +138,7 @@ svg.react-flow__connectionline {
   min-height: 0;
   overflow: hidden;
 }
+
 .agent-whiteboard-toolbar {
   display: flex;
   align-items: center;
@@ -930,6 +149,7 @@ svg.react-flow__connectionline {
   border-bottom: 1px solid var(--aw-border);
   background: var(--aw-bg);
 }
+
 .agent-whiteboard-toolbar strong {
   min-width: 0;
   overflow: hidden;
@@ -939,6 +159,7 @@ svg.react-flow__connectionline {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .agent-whiteboard-save-state,
 .agent-whiteboard-save-error {
   min-width: 0;
@@ -947,6 +168,7 @@ svg.react-flow__connectionline {
   letter-spacing: 0;
   white-space: nowrap;
 }
+
 .agent-whiteboard-conflict {
   display: flex;
   align-items: center;
@@ -957,12 +179,14 @@ svg.react-flow__connectionline {
   color: var(--text-error, #b14c4c);
   font-size: 11px;
 }
+
 .agent-whiteboard-conflict span {
   max-width: min(42vw, 520px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .agent-whiteboard-conflict button {
   min-height: 28px;
   flex: 0 0 auto;
@@ -974,9 +198,11 @@ svg.react-flow__connectionline {
   font: inherit;
   cursor: pointer;
 }
+
 .agent-whiteboard-save-state {
   color: var(--aw-muted);
 }
+
 .agent-whiteboard-save-error {
   min-height: 30px;
   padding: 0 9px;
@@ -988,6 +214,7 @@ svg.react-flow__connectionline {
   font-size: 11px;
   cursor: pointer;
 }
+
 .agent-whiteboard-toolbar .clickable-icon,
 .agent-whiteboard-frame-actions .clickable-icon {
   display: inline-grid;
@@ -1003,17 +230,20 @@ svg.react-flow__connectionline {
   background: transparent;
   cursor: pointer;
 }
+
 .agent-whiteboard-toolbar .clickable-icon svg,
 .agent-whiteboard-frame-actions .clickable-icon svg {
   width: 16px;
   height: 16px;
 }
+
 .agent-whiteboard-toolbar .clickable-icon:hover,
 .agent-whiteboard-frame-actions .clickable-icon:hover,
 .agent-whiteboard-empty button:hover {
   border-color: var(--aw-accent);
   background: color-mix(in srgb, var(--aw-accent) 10%, var(--aw-panel));
 }
+
 .agent-whiteboard-canvas {
   position: relative;
   min-width: 0;
@@ -1021,20 +251,25 @@ svg.react-flow__connectionline {
   overflow: hidden;
   background: var(--aw-bg);
 }
+
 .agent-whiteboard-canvas .react-flow,
 .agent-whiteboard-canvas .react-flow__renderer {
   width: 100%;
   height: 100%;
 }
+
 .agent-whiteboard-canvas .react-flow__background {
   color: color-mix(in srgb, var(--aw-muted) 45%, transparent);
 }
+
 .agent-whiteboard-canvas .react-flow__node {
   border-radius: 7px;
 }
+
 .agent-whiteboard-canvas .react-flow__node-frame {
   z-index: 0 !important;
 }
+
 .agent-whiteboard-frame {
   position: relative;
   display: grid;
@@ -1049,10 +284,12 @@ svg.react-flow__connectionline {
   background: color-mix(in srgb, var(--aw-panel) 72%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--aw-bg) 74%, transparent);
 }
+
 .agent-whiteboard-frame.is-selected {
   border-color: var(--aw-accent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--aw-accent) 28%, transparent);
 }
+
 .agent-whiteboard-frame-header {
   position: relative;
   z-index: 2;
@@ -1068,14 +305,17 @@ svg.react-flow__connectionline {
   background: color-mix(in srgb, var(--aw-bg) 92%, transparent);
   cursor: grab;
 }
+
 .agent-whiteboard-frame-header:active {
   cursor: grabbing;
 }
+
 .agent-whiteboard-frame-header > svg {
   width: 18px;
   height: 18px;
   color: var(--aw-accent);
 }
+
 .agent-whiteboard-frame-header > strong {
   min-width: 0;
   overflow: hidden;
@@ -1085,6 +325,7 @@ svg.react-flow__connectionline {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .agent-whiteboard-frame-header > input {
   width: 100%;
   min-width: 0;
@@ -1094,11 +335,13 @@ svg.react-flow__connectionline {
   font-size: 16px;
   font-weight: 700;
 }
+
 .agent-whiteboard-frame-actions {
   display: flex;
   gap: 4px;
   align-items: center;
 }
+
 .agent-whiteboard-frame-body {
   position: relative;
   z-index: 1;
@@ -1106,6 +349,7 @@ svg.react-flow__connectionline {
   min-height: 0;
   border-radius: 0 0 6px 6px;
 }
+
 .agent-whiteboard-frame-summary {
   position: absolute;
   top: 12px;
@@ -1126,9 +370,11 @@ svg.react-flow__connectionline {
   white-space: nowrap;
   transform-origin: top left;
 }
+
 .agent-whiteboard-frame.is-overview .agent-whiteboard-frame-header {
   visibility: hidden;
 }
+
 .agent-whiteboard-node {
   position: relative;
   display: flex;
@@ -1143,10 +389,12 @@ svg.react-flow__connectionline {
   background: var(--aw-panel);
   box-shadow: 0 2px 8px rgba(16, 28, 23, 0.1);
 }
+
 .agent-whiteboard-node.is-selected {
   border-color: var(--aw-accent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--aw-accent) 24%, transparent), 0 5px 14px rgba(16, 28, 23, 0.13);
 }
+
 .agent-whiteboard-node-header {
   display: flex;
   align-items: center;
@@ -1158,6 +406,7 @@ svg.react-flow__connectionline {
   background: var(--aw-bg);
   cursor: grab;
 }
+
 .agent-whiteboard-node-header > span {
   display: inline-flex;
   align-items: center;
@@ -1169,6 +418,7 @@ svg.react-flow__connectionline {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .agent-whiteboard-node-header button {
   min-height: 25px;
   padding: 0 8px;
@@ -1180,6 +430,7 @@ svg.react-flow__connectionline {
   font-size: 10px;
   cursor: pointer;
 }
+
 .agent-whiteboard-node-overflow {
   position: absolute;
   top: 6px;
@@ -1197,21 +448,26 @@ svg.react-flow__connectionline {
   background: var(--aw-bg);
   cursor: pointer;
 }
+
 .agent-whiteboard-node-overflow svg {
   width: 16px;
   height: 16px;
 }
+
 .agent-whiteboard-provider-codex {
   color: var(--aw-codex);
 }
+
 .agent-whiteboard-provider-claude-code {
   color: var(--aw-claude);
 }
+
 .agent-whiteboard-runtime {
   flex: 0 0 auto;
   color: var(--aw-muted);
   font-weight: 550 !important;
 }
+
 .agent-whiteboard-runtime::before {
   width: 7px;
   height: 7px;
@@ -1219,19 +475,24 @@ svg.react-flow__connectionline {
   background: currentColor;
   content: "";
 }
+
 .agent-whiteboard-runtime-running,
 .agent-whiteboard-runtime-waiting {
   color: var(--color-green, #2f6f5e);
 }
+
 .agent-whiteboard-runtime-starting {
   color: #a87825;
 }
+
 .agent-whiteboard-runtime-failed {
   color: var(--text-error, #b13a32);
 }
+
 .agent-whiteboard-runtime-exited {
   color: var(--text-faint, #8a8f8c);
 }
+
 .agent-whiteboard-agent-node .agent-whiteboard-node-header,
 .agent-whiteboard-terminal-node .agent-whiteboard-node-header {
   min-height: 34px;
@@ -1242,6 +503,7 @@ svg.react-flow__connectionline {
   font-weight: 600;
   letter-spacing: 0;
 }
+
 .agent-whiteboard-runtime-controls {
   display: inline-flex;
   align-items: center;
@@ -1250,6 +512,7 @@ svg.react-flow__connectionline {
   min-width: 0;
   margin-right: 34px;
 }
+
 .agent-whiteboard-runtime-controls button {
   display: inline-grid;
   place-items: center;
@@ -1265,24 +528,29 @@ svg.react-flow__connectionline {
   background: transparent;
   transition: border-color 120ms ease-out, color 120ms ease-out;
 }
+
 .agent-whiteboard-runtime-controls button:hover:not(:disabled),
 .agent-whiteboard-runtime-controls button:focus-visible {
   border-color: var(--aw-accent);
 }
+
 .agent-whiteboard-runtime-controls button:disabled {
   color: var(--text-faint, #8a8f8c);
   cursor: default;
 }
+
 .agent-whiteboard-runtime-controls button svg {
   width: 14px;
   height: 14px;
 }
+
 .agent-whiteboard-agent-body {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   flex: 1 1 auto;
   min-height: 0;
 }
+
 .agent-whiteboard-terminal-surface {
   position: absolute;
   inset: 0;
@@ -1296,6 +564,7 @@ svg.react-flow__connectionline {
   line-height: 1.35;
   letter-spacing: 0;
 }
+
 .agent-whiteboard-runtime-stage {
   position: relative;
   min-width: 0;
@@ -1303,19 +572,23 @@ svg.react-flow__connectionline {
   overflow: hidden;
   background: var(--background-primary, #ffffff);
 }
+
 .agent-whiteboard-terminal-surface:focus-within {
   outline: 2px solid var(--interactive-accent, #315f82);
   outline-offset: -4px;
 }
+
 .agent-whiteboard-terminal-surface .xterm,
 .agent-whiteboard-terminal-surface .xterm-screen,
 .agent-whiteboard-terminal-surface .xterm-viewport {
   width: 100%;
   height: 100%;
 }
+
 .agent-whiteboard-terminal-surface .xterm {
   padding: 7px 8px;
 }
+
 .agent-whiteboard-runtime-error,
 .agent-whiteboard-runtime-summary {
   position: absolute;
@@ -1335,20 +608,24 @@ svg.react-flow__connectionline {
   font-size: 11px;
   line-height: 1.4;
 }
+
 .agent-whiteboard-runtime-error {
   color: var(--text-error, #b13a32);
   pointer-events: auto;
 }
+
 .agent-whiteboard-runtime-summary {
   pointer-events: none;
   background: transparent;
 }
+
 .agent-whiteboard-runtime-error strong,
 .agent-whiteboard-runtime-error p {
   max-width: 100%;
   margin: 0 0 6px;
   overflow-wrap: anywhere;
 }
+
 .agent-whiteboard-runtime-error button {
   min-height: 28px;
   padding: 0 9px;
@@ -1359,10 +636,12 @@ svg.react-flow__connectionline {
   font: inherit;
   cursor: pointer;
 }
+
 .agent-whiteboard-agent-node,
 .agent-whiteboard-terminal-node {
   transition: border-color 120ms ease-out, color 120ms ease-out;
 }
+
 .agent-whiteboard-agent-body footer {
   overflow: hidden;
   padding: 7px 10px;
@@ -1373,6 +652,7 @@ svg.react-flow__connectionline {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .agent-whiteboard-terminal-placeholder {
   display: flex;
   align-items: flex-start;
@@ -1386,22 +666,28 @@ svg.react-flow__connectionline {
   font-family: var(--font-monospace);
   font-size: 11px;
 }
+
 .agent-whiteboard-terminal-placeholder span {
   color: #6dc09b;
 }
+
 .agent-whiteboard-terminal-placeholder p {
   margin: 0;
   overflow-wrap: anywhere;
 }
+
 .agent-whiteboard-note-node {
   background: color-mix(in srgb, #f0c85a 18%, var(--aw-bg));
 }
+
 .agent-whiteboard-node-header {
   cursor: grab;
 }
+
 .agent-whiteboard-node-header:active {
   cursor: grabbing;
 }
+
 .agent-whiteboard-note-node textarea,
 .agent-whiteboard-note-preview {
   width: 100%;
@@ -1420,18 +706,23 @@ svg.react-flow__connectionline {
   font-size: 12px;
   line-height: 1.5;
 }
+
 .agent-whiteboard-note-node textarea:focus {
   box-shadow: inset 0 0 0 1px var(--aw-accent);
 }
+
 .agent-whiteboard-note-preview > :first-child {
   margin-top: 0;
 }
+
 .agent-whiteboard-note-preview > :last-child {
   margin-bottom: 0;
 }
+
 .agent-whiteboard-canvas .react-flow__node-label {
   border-radius: 0;
 }
+
 .agent-whiteboard-label-node {
   position: relative;
   display: flex;
@@ -1442,18 +733,13 @@ svg.react-flow__connectionline {
   min-height: 0;
   overflow: visible;
   background: transparent;
-  font-family:
-    "Iowan Old Style",
-    "Songti SC",
-    STSong,
-    "Noto Serif CJK SC",
-    Georgia,
-    serif;
+  font-family: "Iowan Old Style", "Songti SC", STSong, "Noto Serif CJK SC", Georgia, serif;
   font-size: 56px;
   font-weight: 700;
   letter-spacing: 0;
   line-height: 1.2;
 }
+
 .agent-whiteboard-label-node.is-selected::after {
   position: absolute;
   right: 0;
@@ -1463,6 +749,7 @@ svg.react-flow__connectionline {
   background: color-mix(in srgb, var(--aw-accent) 55%, transparent);
   content: "";
 }
+
 .agent-whiteboard-label-drag-area,
 .agent-whiteboard-label-input {
   width: 100%;
@@ -1480,15 +767,18 @@ svg.react-flow__connectionline {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .agent-whiteboard-label-drag-area {
   display: flex;
   align-items: center;
   cursor: grab;
   user-select: none;
 }
+
 .agent-whiteboard-label-drag-area:active {
   cursor: grabbing;
 }
+
 .agent-whiteboard-label-input {
   height: auto;
   border: 0;
@@ -1496,12 +786,15 @@ svg.react-flow__connectionline {
   box-shadow: none;
   appearance: none;
 }
+
 .agent-whiteboard-label-input:focus {
   box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--aw-accent) 65%, transparent);
 }
+
 .agent-whiteboard-label-input::placeholder {
   color: color-mix(in srgb, currentColor 44%, transparent);
 }
+
 .agent-whiteboard-label-tools {
   position: absolute;
   top: -36px;
@@ -1511,9 +804,11 @@ svg.react-flow__connectionline {
   align-items: center;
   gap: 6px;
 }
+
 .agent-whiteboard-label-tools .agent-whiteboard-node-overflow {
   position: static;
 }
+
 .agent-whiteboard-label-swatch {
   width: 24px;
   height: 24px;
@@ -1524,37 +819,45 @@ svg.react-flow__connectionline {
   box-shadow: 0 0 0 1px var(--aw-border), 0 2px 5px rgba(16, 28, 23, 0.12);
   cursor: pointer;
 }
-.agent-whiteboard-label-swatch[aria-pressed=true] {
+
+.agent-whiteboard-label-swatch[aria-pressed="true"] {
   box-shadow: 0 0 0 3px var(--aw-bg), 0 0 0 5px var(--aw-accent);
 }
+
 .agent-whiteboard-label-swatch:focus-visible {
   outline: 3px solid var(--aw-focus);
   outline-offset: 3px;
 }
+
 .agent-whiteboard-canvas .react-flow__handle {
   width: 10px;
   height: 10px;
   border: 2px solid var(--aw-bg);
   background: var(--aw-accent);
 }
+
 .agent-whiteboard-canvas .react-flow__edge-path {
   stroke: color-mix(in srgb, var(--aw-accent) 72%, var(--aw-muted));
   stroke-width: 1.6;
 }
+
 .agent-whiteboard-canvas .react-flow__controls {
   overflow: hidden;
   border: 1px solid var(--aw-border);
   border-radius: 6px;
   box-shadow: 0 2px 8px rgba(16, 28, 23, 0.1);
 }
+
 .agent-whiteboard-canvas .react-flow__controls-button {
   border-color: var(--aw-border);
   color: var(--aw-text);
   background: var(--aw-bg);
 }
+
 .agent-whiteboard-canvas .react-flow__resize-control.line {
   border-color: var(--aw-accent);
 }
+
 .agent-whiteboard-canvas .react-flow__resize-control.handle {
   width: 9px;
   height: 9px;
@@ -1562,6 +865,7 @@ svg.react-flow__connectionline {
   border-radius: 2px;
   background: var(--aw-accent);
 }
+
 .agent-whiteboard-menu {
   position: fixed;
   z-index: 1000;
@@ -1575,6 +879,7 @@ svg.react-flow__connectionline {
   background: var(--aw-bg);
   box-shadow: 0 8px 24px rgba(16, 28, 23, 0.18);
 }
+
 .agent-whiteboard-menu button {
   justify-content: flex-start;
   width: 100%;
@@ -1587,11 +892,13 @@ svg.react-flow__connectionline {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .agent-whiteboard-menu button:hover,
 .agent-whiteboard-menu button:focus-visible {
   border-color: transparent;
   background: color-mix(in srgb, var(--aw-accent) 12%, var(--aw-panel));
 }
+
 .agent-whiteboard-reassignment-menu {
   top: 64px;
   right: 16px;
@@ -1599,16 +906,19 @@ svg.react-flow__connectionline {
   max-height: min(360px, calc(100vh - 80px));
   overflow-y: auto;
 }
+
 .agent-whiteboard-project-error {
   margin: 8px 0;
   color: var(--text-error, #b34c4c);
   font-size: 12px;
   line-height: 1.45;
 }
+
 .agent-whiteboard-project-actions {
   justify-content: flex-end;
   gap: 8px;
 }
+
 .agent-whiteboard-fixture-alert {
   position: fixed;
   right: 16px;
@@ -1623,6 +933,7 @@ svg.react-flow__connectionline {
   background: var(--background-primary, #f6f8f7);
   font: 12px/1.45 var(--font-interface, system-ui, sans-serif);
 }
+
 .agent-whiteboard-root button:focus-visible,
 .agent-whiteboard-root input:focus-visible,
 .agent-whiteboard-root textarea:focus-visible,
@@ -1631,27 +942,32 @@ svg.react-flow__connectionline {
   outline: 3px solid var(--aw-focus);
   outline-offset: 2px;
 }
+
 @media (max-width: 720px) {
   .agent-whiteboard-toolbar {
     gap: 8px;
     padding-inline: 8px;
   }
+
   .agent-whiteboard-empty,
   .agent-whiteboard-recovery {
     padding: 18px;
   }
 }
+
 .theme-dark .daily-cockpit-root {
   --dc-accent: #72a894;
   --dc-accent-strong: #acd0c2;
   --dc-warning: #d2a24c;
   --dc-on-accent: #14211c;
 }
+
 .daily-cockpit-root *,
 .daily-cockpit-root *::before,
 .daily-cockpit-root *::after {
   box-sizing: border-box;
 }
+
 .daily-cockpit-shell {
   width: 100%;
   max-width: 1280px;
@@ -1661,6 +977,7 @@ svg.react-flow__connectionline {
   padding: 24px 28px;
   overflow: hidden;
 }
+
 .daily-cockpit-main {
   display: flex;
   flex-direction: column;
@@ -1669,6 +986,7 @@ svg.react-flow__connectionline {
   min-height: 0;
   min-width: 0;
 }
+
 .daily-cockpit-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 0.7fr);
@@ -1677,10 +995,12 @@ svg.react-flow__connectionline {
   padding-bottom: 14px;
   border-bottom: 1px solid var(--dc-border);
 }
+
 .daily-cockpit-intro {
   display: grid;
   gap: 5px;
 }
+
 .daily-cockpit-intro p,
 .daily-cockpit-intro h1,
 .daily-cockpit-intro span,
@@ -1688,37 +1008,44 @@ svg.react-flow__connectionline {
 .daily-cockpit-metric dd {
   margin: 0;
 }
+
 .daily-cockpit-intro p {
   color: var(--dc-accent-strong);
   font-family: var(--dc-font-mono);
   font-size: 12px;
   font-weight: 700;
 }
+
 .daily-cockpit-intro h1 {
   font-family: var(--dc-font-heading);
   font-size: 28px;
   line-height: 1.15;
   overflow-wrap: anywhere;
 }
+
 .daily-cockpit-intro span {
   color: var(--dc-muted);
   font-size: 13px;
 }
+
 .daily-cockpit-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin: 0;
 }
+
 .daily-cockpit-metric {
   min-width: 0;
   padding-top: 7px;
   border-top: 2px solid var(--dc-border);
 }
+
 .daily-cockpit-metric dt {
   color: var(--dc-muted);
   font-size: 11px;
 }
+
 .daily-cockpit-metric dd {
   margin-top: 3px;
   overflow: hidden;
@@ -1727,6 +1054,7 @@ svg.react-flow__connectionline {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .daily-cockpit-primary,
 .daily-cockpit-action {
   min-height: 34px;
@@ -1734,11 +1062,9 @@ svg.react-flow__connectionline {
   border-radius: var(--dc-radius-sm);
   font: inherit;
   cursor: pointer;
-  transition:
-    border-color 140ms ease,
-    background-color 140ms ease,
-    transform 140ms ease;
+  transition: border-color 140ms ease, background-color 140ms ease, transform 140ms ease;
 }
+
 .daily-cockpit-primary {
   padding: 0 16px;
   color: var(--dc-on-accent);
@@ -1747,41 +1073,49 @@ svg.react-flow__connectionline {
   font-weight: 700;
   white-space: nowrap;
 }
+
 .daily-cockpit-action {
   padding: 0 12px;
   color: var(--dc-text);
   background: transparent;
   border-color: var(--dc-border);
 }
+
 .daily-cockpit-action:hover,
 .daily-cockpit-primary:hover {
   border-color: var(--dc-accent);
   background-color: color-mix(in srgb, var(--dc-accent) 12%, var(--dc-bg));
 }
+
 .daily-cockpit-primary:hover {
   color: var(--dc-on-accent);
   background-color: var(--dc-accent-strong);
 }
+
 .daily-cockpit-action:active,
 .daily-cockpit-primary:active {
   transform: translateY(1px);
 }
+
 .daily-cockpit-action:disabled,
 .daily-cockpit-primary:disabled {
   cursor: progress;
   opacity: 0.68;
 }
+
 .daily-cockpit-action-small {
   min-height: 29px;
   padding: 0 9px;
   font-size: 11px;
 }
+
 .daily-cockpit-root button:focus-visible,
 .daily-cockpit-root textarea:focus-visible,
 .daily-cockpit-root input:focus-visible {
   outline: 2px solid var(--dc-accent);
   outline-offset: 2px;
 }
+
 .daily-cockpit-section-title {
   display: flex;
   align-items: baseline;
@@ -1790,6 +1124,7 @@ svg.react-flow__connectionline {
   padding-bottom: 7px;
   border-bottom: 1px solid var(--dc-border);
 }
+
 .daily-cockpit-section-title h2,
 .daily-cockpit-export h2 {
   margin: 0;
@@ -1797,16 +1132,19 @@ svg.react-flow__connectionline {
   font-size: 17px;
   overflow-wrap: anywhere;
 }
+
 .daily-cockpit-section-title span {
   color: var(--dc-muted);
   font-size: 11px;
 }
+
 .daily-cockpit-section-title-compact {
   flex: 1 1 auto;
   min-width: 0;
   padding: 0;
   border: 0;
 }
+
 .daily-cockpit-section-toolbar {
   display: flex;
   align-items: center;
@@ -1815,6 +1153,7 @@ svg.react-flow__connectionline {
   padding-bottom: 8px;
   border-bottom: 1px solid var(--dc-border);
 }
+
 .daily-cockpit-sessions {
   display: flex;
   flex: 1 1 auto;
@@ -1824,6 +1163,7 @@ svg.react-flow__connectionline {
   min-width: 0;
   overflow: hidden;
 }
+
 .daily-cockpit-project-board,
 .daily-cockpit-task-list {
   min-height: 0;
@@ -1835,35 +1175,42 @@ svg.react-flow__connectionline {
   scrollbar-width: thin;
   scrollbar-color: var(--dc-muted) transparent;
 }
+
 .daily-cockpit-project-board {
   display: grid;
   flex: 1 1 auto;
   gap: 14px;
 }
+
 .daily-cockpit-project {
   display: grid;
   gap: 10px;
   padding: 0 0 14px;
   border-bottom: 1px solid var(--dc-border);
 }
+
 .daily-cockpit-project-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 12px;
   align-items: center;
 }
+
 .daily-cockpit-project-identity {
   min-width: 0;
 }
+
 .daily-cockpit-project-identity h2,
 .daily-cockpit-project-identity p {
   margin: 0;
 }
+
 .daily-cockpit-project-identity h2 {
   font-family: var(--dc-font-heading);
   font-size: 17px;
   overflow-wrap: anywhere;
 }
+
 .daily-cockpit-project-identity p,
 .daily-cockpit-project-head > span {
   overflow: hidden;
@@ -1873,12 +1220,14 @@ svg.react-flow__connectionline {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .daily-cockpit-status-lanes {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
   gap: 10px;
   align-items: start;
 }
+
 .daily-cockpit-status-lane {
   display: grid;
   gap: 7px;
@@ -1886,24 +1235,30 @@ svg.react-flow__connectionline {
   padding-top: 7px;
   border-top: 2px solid var(--dc-border);
 }
-.daily-cockpit-status-lane[data-status=blocked] {
+
+.daily-cockpit-status-lane[data-status="blocked"] {
   border-color: var(--dc-danger);
 }
-.daily-cockpit-status-lane[data-status=active] {
+
+.daily-cockpit-status-lane[data-status="active"] {
   border-color: var(--dc-warning);
 }
-.daily-cockpit-status-lane[data-status=completed] {
+
+.daily-cockpit-status-lane[data-status="completed"] {
   border-color: var(--dc-accent);
 }
+
 .daily-cockpit-status-lane > h3 {
   margin: 0;
   color: var(--dc-muted);
   font-size: 11px;
 }
+
 .daily-cockpit-session-list {
   display: grid;
   gap: 8px;
 }
+
 .daily-cockpit-session {
   display: grid;
   gap: 7px;
@@ -1913,12 +1268,14 @@ svg.react-flow__connectionline {
   border-radius: var(--dc-radius-sm);
   background: var(--dc-panel);
 }
+
 .daily-cockpit-session-head {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 8px;
   align-items: center;
 }
+
 .daily-cockpit-session-head span {
   min-width: 52px;
   padding: 2px 6px;
@@ -1929,16 +1286,19 @@ svg.react-flow__connectionline {
   font-weight: 700;
   text-align: center;
 }
+
 .daily-cockpit-session h4,
 .daily-cockpit-session p {
   margin: 0;
   overflow-wrap: anywhere;
 }
+
 .daily-cockpit-session h4 {
   font-family: var(--dc-font-heading);
   font-size: 14px;
   line-height: 1.3;
 }
+
 .daily-cockpit-session p {
   display: -webkit-box;
   overflow: hidden;
@@ -1948,6 +1308,7 @@ svg.react-flow__connectionline {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
+
 .daily-cockpit-session-details,
 .daily-cockpit-session-actions,
 .daily-cockpit-task-meta {
@@ -1956,6 +1317,7 @@ svg.react-flow__connectionline {
   gap: 6px;
   align-items: center;
 }
+
 .daily-cockpit-session-details code,
 .daily-cockpit-session-details time,
 .daily-cockpit-task-meta span {
@@ -1963,14 +1325,17 @@ svg.react-flow__connectionline {
   font-family: var(--dc-font-mono);
   font-size: 10px;
 }
+
 .daily-cockpit-session-actions {
   justify-content: flex-end;
 }
+
 .daily-cockpit-resume {
   color: var(--dc-accent-strong);
   border-color: color-mix(in srgb, var(--dc-accent) 46%, var(--dc-border));
   font-weight: 700;
 }
+
 .daily-cockpit-session-warning {
   padding: 7px 9px;
   border-left: 2px solid var(--dc-warning);
@@ -1979,6 +1344,7 @@ svg.react-flow__connectionline {
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
+
 .daily-cockpit-intent {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1989,16 +1355,19 @@ svg.react-flow__connectionline {
   border-radius: var(--dc-radius-md);
   background: var(--dc-panel);
 }
+
 .daily-cockpit-field {
   display: grid;
   gap: 5px;
   min-width: 0;
 }
+
 .daily-cockpit-field > span {
   color: var(--dc-muted);
   font-size: 11px;
   font-weight: 700;
 }
+
 .daily-cockpit-field textarea {
   width: 100%;
   min-width: 0;
@@ -2013,11 +1382,13 @@ svg.react-flow__connectionline {
   line-height: 1.45;
   resize: vertical;
 }
+
 .daily-cockpit-intent-footer {
   display: grid;
   gap: 7px;
   justify-items: end;
 }
+
 .daily-cockpit-intent-footer span {
   max-width: 280px;
   overflow: hidden;
@@ -2026,6 +1397,7 @@ svg.react-flow__connectionline {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .daily-cockpit-tasks {
   display: flex;
   flex: 0 1 28%;
@@ -2035,15 +1407,18 @@ svg.react-flow__connectionline {
   max-height: 280px;
   overflow: hidden;
 }
+
 .daily-cockpit-intent-source {
   display: grid;
   gap: 3px;
   padding: 4px 0;
 }
+
 .daily-cockpit-intent-source strong {
   color: var(--dc-muted);
   font-size: 10px;
 }
+
 .daily-cockpit-intent-source p,
 .daily-cockpit-empty p,
 .daily-cockpit-export p {
@@ -2052,11 +1427,13 @@ svg.react-flow__connectionline {
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
+
 .daily-cockpit-task-list {
   display: grid;
   flex: 1 1 auto;
   gap: 0;
 }
+
 .daily-cockpit-task {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr);
@@ -2064,38 +1441,46 @@ svg.react-flow__connectionline {
   padding: 9px 0;
   border-bottom: 1px solid var(--dc-border);
 }
+
 .daily-cockpit-task input {
   margin-top: 3px;
 }
+
 .daily-cockpit-task-body {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
+
 .daily-cockpit-task h3,
 .daily-cockpit-task p {
   margin: 0;
   overflow-wrap: anywhere;
 }
+
 .daily-cockpit-task h3 {
   font-family: var(--dc-font-heading);
   font-size: 14px;
   line-height: 1.3;
 }
+
 .daily-cockpit-task p {
   color: var(--dc-muted);
   font-size: 12px;
   line-height: 1.45;
 }
-.daily-cockpit-task[data-completed=true] h3,
-.daily-cockpit-task[data-completed=true] p {
+
+.daily-cockpit-task[data-completed="true"] h3,
+.daily-cockpit-task[data-completed="true"] p {
   opacity: 0.64;
   text-decoration: line-through;
 }
+
 .daily-cockpit-empty {
   padding: 14px 0;
   border-bottom: 1px dashed var(--dc-border);
 }
+
 .daily-cockpit-export {
   display: flex;
   align-items: center;
@@ -2104,17 +1489,20 @@ svg.react-flow__connectionline {
   padding-top: 10px;
   border-top: 1px solid var(--dc-border);
 }
+
 .daily-cockpit-export-copy {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
+
 .daily-cockpit-export p {
   overflow: hidden;
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .daily-cockpit-error {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -2124,38 +1512,35 @@ svg.react-flow__connectionline {
   border-left: 3px solid var(--dc-danger);
   background: color-mix(in srgb, var(--dc-danger) 8%, transparent);
 }
+
 .daily-cockpit-error span {
   color: var(--dc-muted);
   overflow-wrap: anywhere;
 }
+
 .daily-cockpit-loading {
   display: grid;
   gap: 7px;
 }
+
 .daily-cockpit-loading h3 {
   margin: 0;
   font-size: 14px;
 }
+
 .daily-cockpit-skeleton {
   height: 32px;
   border-radius: var(--dc-radius-sm);
-  background:
-    linear-gradient(
-      90deg,
-      var(--dc-panel),
-      color-mix(in srgb, var(--dc-accent) 9%, var(--dc-panel)),
-      var(--dc-panel));
+  background: linear-gradient(90deg, var(--dc-panel), color-mix(in srgb, var(--dc-accent) 9%, var(--dc-panel)), var(--dc-panel));
   background-size: 220% 100%;
   animation: daily-cockpit-shimmer 1.4s linear infinite;
 }
+
 @keyframes daily-cockpit-shimmer {
-  from {
-    background-position: 100% 0;
-  }
-  to {
-    background-position: -100% 0;
-  }
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
 }
+
 @media (prefers-reduced-motion: reduce) {
   .daily-cockpit-root * {
     scroll-behavior: auto !important;
@@ -2163,109 +1548,89 @@ svg.react-flow__connectionline {
     animation: none !important;
   }
 }
+
 @container (max-width: 760px) {
   .daily-cockpit-root {
     overflow-y: auto;
   }
+
   .daily-cockpit-shell {
     height: auto;
     min-height: 100%;
     padding: 18px;
     overflow: visible;
   }
+
   .daily-cockpit-main {
     height: auto;
   }
+
   .daily-cockpit-header {
     grid-template-columns: 1fr;
     gap: 14px;
   }
+
   .daily-cockpit-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
   .daily-cockpit-sessions {
     min-height: 360px;
   }
+
   .daily-cockpit-project-board {
     max-height: 62vh;
   }
+
   .daily-cockpit-project-head {
     grid-template-columns: minmax(0, 1fr) auto;
   }
+
   .daily-cockpit-project-head > span {
     display: none;
   }
+
   .daily-cockpit-intent {
     grid-template-columns: 1fr;
   }
+
   .daily-cockpit-intent-footer {
     display: flex;
     align-items: center;
     justify-content: space-between;
   }
+
   .daily-cockpit-tasks {
     min-height: 240px;
     max-height: 46vh;
   }
 }
+
 @container (max-width: 430px) {
   .daily-cockpit-shell {
     padding: 14px;
   }
+
   .daily-cockpit-project-head {
     grid-template-columns: 1fr;
   }
+
   .daily-cockpit-project-head .daily-cockpit-action {
     justify-self: start;
   }
+
   .daily-cockpit-session-actions {
     justify-content: flex-start;
   }
+
   .daily-cockpit-intent-footer,
   .daily-cockpit-export,
   .daily-cockpit-error {
     align-items: stretch;
     flex-direction: column;
   }
+
   .daily-cockpit-error {
     display: flex;
   }
 }
-
-/* src/plugin.css */
-/*! Bundled license information:
-
-@xterm/xterm/css/xterm.css:
-  (**
-   * Copyright (c) 2014 The xterm.js authors. All rights reserved.
-   * Copyright (c) 2012-2013, Christopher Jeffrey (MIT License)
-   * https://github.com/chjj/term.js
-   * @license MIT
-   *
-   * Permission is hereby granted, free of charge, to any person obtaining a copy
-   * of this software and associated documentation files (the "Software"), to deal
-   * in the Software without restriction, including without limitation the rights
-   * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   * copies of the Software, and to permit persons to whom the Software is
-   * furnished to do so, subject to the following conditions:
-   *
-   * The above copyright notice and this permission notice shall be included in
-   * all copies or substantial portions of the Software.
-   *
-   * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-   * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-   * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-   * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-   * THE SOFTWARE.
-   *
-   * Originally forked from (with the author's permission):
-   *   Fabrice Bellard's javascript vt100 for jslinux:
-   *   http://bellard.org/jslinux/
-   *   Copyright (c) 2011 Fabrice Bellard
-   *   The original design remains. The terminal itself
-   *   has been extended to include xterm CSI codes, among
-   *   other features.
-   *)
-*/

@@ -1,0 +1,80 @@
+name: Release macOS
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v-prefixed tag to publish
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Assert native runner architecture
+        run: test "$(node -p process.arch)" = "${{ matrix.arch }}"
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run test:runtime-host
+      - run: npm run release:macos -- --arch "${{ matrix.arch }}"
+      - run: npm run verify:release -- --archive "dist/release/agent-whiteboard-v$(node -p 'require(\"./package.json\").version')-macos-${{ matrix.arch }}.zip" --arch "${{ matrix.arch }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: |
+            dist/release/*.zip
+            dist/release/*.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: macos-*
+          path: dist/upload
+          merge-multiple: true
+      - name: Assemble checksums
+        run: cat dist/upload/*.sha256 | sort > dist/upload/SHA256SUMS.txt
+      - name: Validate release tag
+        run: test "$RELEASE_TAG" = "v$(node -p 'require(\"./package.json\").version')"
+      - name: Create or update release
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/upload/*.zip dist/upload/SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$RELEASE_TAG" --notes-file RELEASE_NOTES.md --title "Agent Whiteboard $RELEASE_TAG" --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" dist/upload/*.zip dist/upload/SHA256SUMS.txt --verify-tag --title "Agent Whiteboard $RELEASE_TAG" --notes-file RELEASE_NOTES.md --repo "$GITHUB_REPOSITORY"
+          fi

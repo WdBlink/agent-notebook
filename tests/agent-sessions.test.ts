@@ -352,3 +352,50 @@ test("missing session roots return an empty snapshot", async () => {
   assert.equal(snapshot.date, "2026-07-02");
   assert.equal(snapshot.sessions.length, 0);
 });
+
+test("provider selection supports both, either provider, and neither", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "daily-cockpit-provider-selection-"));
+  const codexRoot = path.join(temp, ".codex", "sessions");
+  const claudeRoot = path.join(temp, ".claude", "projects", "project-a");
+  const roots = [path.dirname(claudeRoot), codexRoot];
+  const targetTime = new Date("2026-07-02T09:00:00.000Z");
+  try {
+    await mkdir(codexRoot, { recursive: true });
+    await mkdir(claudeRoot, { recursive: true });
+    const codexFile = path.join(codexRoot, "rollout.jsonl");
+    const claudeFile = path.join(claudeRoot, "session.jsonl");
+    await writeFile(codexFile, JSON.stringify({
+      type: "session_meta",
+      payload: { id: "codex-provider-test", cwd: "/tmp/codex-project" }
+    }));
+    await writeFile(claudeFile, JSON.stringify({
+      type: "user",
+      sessionId: "claude-provider-test",
+      cwd: "/tmp/claude-project",
+      message: { role: "user", content: "验证平台选择" }
+    }));
+    await utimes(codexFile, targetTime, targetTime);
+    await utimes(claudeFile, targetTime, targetTime);
+
+    const scan = (providers: Array<"codex" | "claude">) => loadAgentWorkSnapshot(createEmptyData().settings, {
+      now: new Date("2026-07-03T12:00:00.000Z"),
+      roots,
+      providers,
+      fs: fsAdapter
+    });
+    const [both, codexOnly, claudeOnly, neither] = await Promise.all([
+      scan(["codex", "claude"]),
+      scan(["codex"]),
+      scan(["claude"]),
+      scan([])
+    ]);
+
+    assert.deepEqual(new Set(both.sessions.map(({ platform }) => platform)), new Set(["codex", "claude"]));
+    assert.deepEqual(codexOnly.sessions.map(({ platform }) => platform), ["codex"]);
+    assert.deepEqual(claudeOnly.sessions.map(({ platform }) => platform), ["claude"]);
+    assert.deepEqual(neither.sessions, []);
+    assert.deepEqual(neither.sources, []);
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});

@@ -1,18 +1,31 @@
-import type { CockpitSettings, TaskCategory, TaskPriority } from "./types";
+import type { CockpitSettings, SessionProvider, TaskCategory, TaskPriority } from "./types";
 
 export const PLUGIN_ID = "daily-cockpit";
 export const VIEW_TYPE_DAILY_COCKPIT = "daily-cockpit-view";
+export const VIEW_TYPE_AGENT_WHITEBOARD = "agent-whiteboard-view";
 
 export const COMMAND_OPEN_COCKPIT = "open-daily-cockpit";
 export const COMMAND_QUICK_CAPTURE = "quick-capture";
 export const COMMAND_EXPORT_DAILY_NOTE = "export-daily-note";
 export const COMMAND_REFRESH_WORK_SESSIONS = "refresh-work-sessions";
+export const COMMAND_OPEN_AGENT_WHITEBOARD = "open-agent-whiteboard";
 
 export const DEFAULT_SESSION_SCAN_ROOTS = [
   "~/.codex/sessions",
   "~/.codex/archived_sessions",
   "~/.claude/projects"
 ];
+
+export const SESSION_PROVIDER_DEFINITIONS: ReadonlyArray<{
+  id: SessionProvider;
+  label: string;
+  description: string;
+}> = [
+  { id: "codex", label: "Codex", description: "读取 ~/.codex 下的本机会话记录" },
+  { id: "claude", label: "Claude Code", description: "读取 ~/.claude/projects 下的本机会话记录" }
+];
+
+export const DEFAULT_SESSION_PROVIDERS: SessionProvider[] = SESSION_PROVIDER_DEFINITIONS.map(({ id }) => id);
 
 export const LEGACY_SESSION_SCAN_ROOTS = [
   "~/.codex/memories/rollout_summaries",
@@ -26,7 +39,9 @@ export const DEFAULT_SETTINGS: CockpitSettings = {
   llmModel: "qwen2.5:7b",
   llmApiKey: "",
   sessionScanRoots: DEFAULT_SESSION_SCAN_ROOTS,
+  enabledSessionProviders: DEFAULT_SESSION_PROVIDERS,
   sessionSummaryMode: "native",
+  runtimeNodePath: "node",
   codexCliPath: "codex",
   claudeCliPath: "claude"
 };

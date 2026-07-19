@@ -4,13 +4,19 @@ export type TaskCategory = "research" | "build" | "write" | "analysis" | "admin"
 
 export type SessionSummaryMode = "native" | "metadata";
 
+export type SessionProvider = "codex" | "claude";
+
+export type AgentPlatform = SessionProvider | "minimax" | "other";
+
 export interface CockpitSettings {
   dailyNoteFolder: string;
   llmEndpoint: string;
   llmModel: string;
   llmApiKey?: string;
   sessionScanRoots: string[];
+  enabledSessionProviders: SessionProvider[];
   sessionSummaryMode: SessionSummaryMode;
+  runtimeNodePath: string;
   codexCliPath: string;
   claudeCliPath: string;
 }
@@ -42,8 +48,6 @@ export interface IntentPlan {
   source?: string;
 }
 
-export type AgentPlatform = "codex" | "claude" | "minimax" | "other";
-
 export type AgentSessionStatus = "active" | "blocked" | "completed" | "unknown";
 
 export interface AgentWorkSession {
@@ -74,10 +78,11 @@ export interface AgentWorkSnapshot {
 }
 
 export interface CockpitData {
-  schemaVersion: 3;
+  schemaVersion: 4;
   settings: CockpitSettings;
   plans: IntentPlan[];
   workSessionSnapshot: AgentWorkSnapshot;
+  whiteboard: WhiteboardStore;
   activePlanId?: string;
   lastOpenedAt?: string;
   lastExportPath?: string;
@@ -140,3 +145,4 @@ export interface RenderController {
   update(nextState: RendererState): void;
   destroy(): void;
 }
+import type { WhiteboardStore } from "./whiteboard-model";
