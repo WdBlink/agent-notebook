@@ -11,4 +11,5 @@ playwright-report/
 *.log
 coverage/
 dist/
+runtime/process-membership
 /ctx

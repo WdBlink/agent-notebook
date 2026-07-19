@@ -1,5 +1,6 @@
 import {
   App,
+  FileSystemAdapter,
   ItemView,
   Modal,
   Notice,
@@ -11,12 +12,16 @@ import {
   WorkspaceLeaf,
   normalizePath
 } from "obsidian";
+import fs from "node:fs/promises";
 import {
   COMMAND_EXPORT_DAILY_NOTE,
+  COMMAND_OPEN_AGENT_WHITEBOARD,
   COMMAND_OPEN_COCKPIT,
   COMMAND_QUICK_CAPTURE,
   COMMAND_REFRESH_WORK_SESSIONS,
   PLUGIN_ID,
+  SESSION_PROVIDER_DEFINITIONS,
+  VIEW_TYPE_AGENT_WHITEBOARD,
   VIEW_TYPE_DAILY_COCKPIT
 } from "./constants";
 import { loadAgentWorkSnapshot } from "./agent-sessions";
@@ -25,13 +30,30 @@ import { buildDailyMarkdown, dailyNotePath, isDailyCockpitMarkdown } from "./exp
 import { requestTaskDecomposition } from "./llm";
 import {
   addPlanFromModelTasks,
+  CockpitPersistenceCoordinator,
   normalizeData,
+  resolveCanonicalProjectDirectory,
+  SerialTransactionQueue,
   setLastExportPath,
   setWorkSessionSnapshot,
   toggleTaskCompletion,
-  touchOpened
+  touchOpened,
+  WhiteboardCommitChannel,
+  WhiteboardProjectRegistrationWorkflow,
+  type ProjectRegistrationPhase,
+  type WhiteboardCommitListener
 } from "./state";
 import { renderCockpit } from "./render";
+import { registerPluginSurface } from "./plugin-boundary";
+import { WhiteboardProjectConsumer, WhiteboardProjectModalPresenter } from "./project-modal";
+import { renderWhiteboard, type WhiteboardController } from "./whiteboard";
+import { AgentRuntimeGateway } from "./runtime-gateway";
+import { createNodeProcessAdapter } from "./runtime-process-adapter";
+import {
+  WhiteboardMigrationError,
+  type GlobalBoardDocument,
+  type WhiteboardCommitResult
+} from "./whiteboard-model";
 import type {
   CockpitData,
   CockpitResult,
@@ -43,55 +65,61 @@ import type {
 
 export default class DailyCockpitPlugin extends Plugin {
   data: CockpitData = normalizeData(null);
-  private writeQueue: Promise<void> = Promise.resolve();
+  whiteboardMigrationError: WhiteboardMigrationError | undefined;
+  private readonly writeQueue = new SerialTransactionQueue();
+  private persistence!: CockpitPersistenceCoordinator;
+  private projectRegistration!: WhiteboardProjectRegistrationWorkflow;
+  readonly whiteboardCommits = new WhiteboardCommitChannel();
+  runtimeGateway!: AgentRuntimeGateway;
+  private runtimeHostPath = "";
 
   async onload(): Promise<void> {
-    this.data = touchOpened(normalizeData(await this.loadData()));
-    await this.saveCockpitData(this.data);
+    const loaded = await this.loadData();
+    try {
+      this.data = touchOpened(normalizeData(loaded));
+      await this.saveData(this.data);
+    } catch (error) {
+      if (!(error instanceof WhiteboardMigrationError)) throw error;
+      this.whiteboardMigrationError = error;
+      const source = loaded && typeof loaded === "object" ? loaded as Record<string, unknown> : {};
+      this.data = touchOpened(normalizeData({ ...source, whiteboard: undefined, whiteboardRevision: undefined }));
+    }
+    this.persistence = new CockpitPersistenceCoordinator(
+      this.data,
+      (candidate) => this.saveData(candidate),
+      (candidate) => { this.data = candidate; }
+    );
+    this.projectRegistration = new WhiteboardProjectRegistrationWorkflow(
+      resolveProjectDirectory,
+      (rootPath, name, signal, onPhase) => this.persistence.registerProject(rootPath, name, signal, onPhase)
+    );
+    if (this.whiteboardMigrationError) this.persistence.block(this.whiteboardMigrationError);
+    if (!(this.app.vault.adapter instanceof FileSystemAdapter)) {
+      throw new Error("Agent terminal runtime requires a desktop filesystem vault.");
+    }
+    const vaultRoot = this.app.vault.adapter.getBasePath().replace(/\/$/, "");
+    const runtimeRoot = `${vaultRoot}/${this.app.vault.configDir}/plugins/${PLUGIN_ID}/runtime`;
+    this.runtimeHostPath = await resolveInstalledRuntimeHost(runtimeRoot);
+    this.runtimeGateway = this.createRuntimeGateway();
 
-    this.registerView(VIEW_TYPE_DAILY_COCKPIT, (leaf) => new DailyCockpitView(leaf, this));
-    this.addSettingTab(new DailyCockpitSettingTab(this.app, this));
-
-    this.addRibbonIcon("list-checks", "打开 Daily Cockpit", () => {
-      void this.activateView();
-    });
-
-    this.addCommand({
-      id: COMMAND_OPEN_COCKPIT,
-      name: "打开 Daily Cockpit",
-      callback: () => {
-        void this.activateView();
-      }
-    });
-
-    this.addCommand({
-      id: COMMAND_QUICK_CAPTURE,
-      name: "快速拆解待办",
-      callback: () => {
-        new IntentModal(this).open();
-      }
-    });
-
-    this.addCommand({
-      id: COMMAND_EXPORT_DAILY_NOTE,
-      name: "导出每日简报",
-      callback: () => {
-        void this.exportDailyNote();
-      }
-    });
-
-    this.addCommand({
-      id: COMMAND_REFRESH_WORK_SESSIONS,
-      name: "刷新昨日工作会话",
-      callback: () => {
-        void this.refreshWorkSessions();
-      }
+    registerPluginSurface(this, {
+      createDailyView: (leaf) => new DailyCockpitView(leaf, this),
+      createWhiteboardView: (leaf) => new AgentWhiteboardView(leaf, this),
+      settingTab: new DailyCockpitSettingTab(this.app, this),
+      openDaily: () => { void this.activateView(); },
+      openWhiteboard: () => { void this.activateWhiteboard(); },
+      quickCapture: () => new IntentModal(this).open(),
+      exportDaily: () => { void this.exportDailyNote(); },
+      refreshSessions: () => { void this.refreshWorkSessions(); }
     });
 
   }
 
   onunload(): void {
     this.app.workspace.detachLeavesOfType(VIEW_TYPE_DAILY_COCKPIT);
+    this.app.workspace.detachLeavesOfType(VIEW_TYPE_AGENT_WHITEBOARD);
+    // beginDispose synchronously marks the gateway unavailable and sends host shutdown before returning.
+    void this.runtimeGateway?.beginDispose();
   }
 
   async activateView(): Promise<void> {
@@ -106,37 +134,100 @@ export default class DailyCockpitPlugin extends Plugin {
     this.app.workspace.revealLeaf(leaf);
   }
 
+  async activateWhiteboard(): Promise<void> {
+    const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_AGENT_WHITEBOARD)[0];
+    if (existing) {
+      this.app.workspace.revealLeaf(existing);
+      return;
+    }
+    const leaf = this.app.workspace.getLeaf("tab");
+    await leaf.setViewState({ type: VIEW_TYPE_AGENT_WHITEBOARD, active: true });
+    this.app.workspace.revealLeaf(leaf);
+  }
+
+  async registerWhiteboardProject(
+    rootPath: string,
+    name: string,
+    signal?: AbortSignal,
+    onPhase?: (phase: ProjectRegistrationPhase) => void
+  ): Promise<{ ok: true; projectId: string } | { ok: false; message: string }> {
+    try {
+      const registration = await this.projectRegistration.run(rootPath, name, signal, onPhase);
+      if (registration.ok) {
+        this.whiteboardCommits.publish(this.data.whiteboard, this.data.whiteboardRevision);
+      }
+      return registration.ok
+        ? { ok: true, projectId: registration.projectId }
+        : registration;
+    } catch (error) {
+      console.error(`[${PLUGIN_ID}] project registration failed`, error);
+      return { ok: false, message: "无法读取项目路径，请检查权限。" };
+    }
+  }
+
+  async saveWhiteboardDocument(
+    document: GlobalBoardDocument,
+    expectedRevision: number,
+    origin?: WhiteboardCommitListener
+  ): Promise<WhiteboardCommitResult> {
+    const result = await this.persistence.saveWhiteboard(document, expectedRevision);
+    if (result.ok) this.whiteboardCommits.publish(result.document, result.revision, origin);
+    return result;
+  }
+
+  async retryWhiteboardMigration(): Promise<void> {
+    await this.enqueueWrite(async () => {
+      const loaded = await this.loadData();
+      try {
+        await this.persistence.recover(async () => touchOpened(normalizeData(loaded)));
+        this.whiteboardMigrationError = undefined;
+        this.refreshViews();
+      } catch (error) {
+        this.whiteboardMigrationError = error instanceof WhiteboardMigrationError
+          ? error
+          : new WhiteboardMigrationError("白板迁移已验证，但持久化失败；原始数据未被覆盖，请重试。");
+        this.persistence.block(this.whiteboardMigrationError);
+        this.refreshWhiteboardViews();
+      }
+    });
+  }
+
   async decomposeIntent(input: IntentInput): Promise<CockpitResult<CockpitData>> {
     return this.enqueueWrite(async () => {
       const decomposition = await requestTaskDecomposition(this.data.settings, input.text);
       if (!decomposition.ok) return decomposition;
-      return this.commit(
-        addPlanFromModelTasks(
-          this.data,
+      return this.commit((current) => addPlanFromModelTasks(
+          current,
           input.text,
           decomposition.data.tasks,
-          decomposition.data.model ?? this.data.settings.llmModel,
+          decomposition.data.model ?? current.settings.llmModel,
           input.source
-        )
-      );
+        ));
     });
   }
 
   async toggleTaskCompletion(taskId: string, completed: boolean): Promise<CockpitResult<CockpitData>> {
-    return this.enqueueWrite(() => this.commit(toggleTaskCompletion(this.data, taskId, completed)));
+    return this.enqueueWrite(() => this.commit((current) => toggleTaskCompletion(current, taskId, completed)));
   }
 
   async updateSettings(settings: Partial<CockpitSettings>): Promise<void> {
-    const nextData = normalizeData({
-      ...this.data,
-      settings: {
-        ...this.data.settings,
-        ...settings
-      }
+    const runtimeChanged = (
+      (settings.runtimeNodePath !== undefined && settings.runtimeNodePath !== this.data.settings.runtimeNodePath)
+      || (settings.codexCliPath !== undefined && settings.codexCliPath !== this.data.settings.codexCliPath)
+    );
+    await this.enqueueWrite(async () => {
+      await this.commit((current) => ({
+        ok: true,
+        data: normalizeData({
+          ...current,
+          settings: {
+            ...current.settings,
+            ...settings
+          }
+        })
+      }));
     });
-    await this.saveCockpitData(nextData);
-    this.data = nextData;
-    this.refreshViews();
+    if (runtimeChanged) await this.reconfigureRuntimeGateway();
   }
 
   async exportDailyNote(): Promise<CockpitResult<{ path: string }>> {
@@ -150,7 +241,7 @@ export default class DailyCockpitPlugin extends Plugin {
         summarizer: createCliSessionSummarizer()
       });
       return this.enqueueWrite(async () => {
-        const result = await this.commit({ ok: true, data: setWorkSessionSnapshot(this.data, snapshot) });
+        const result = await this.commit((current) => ({ ok: true, data: setWorkSessionSnapshot(current, snapshot) }));
         if (result.ok && showNotice) {
           const warningSuffix = snapshot.warnings.length > 0 ? `，${snapshot.warnings.length} 个总结警告` : "";
           new Notice(`已刷新昨日工作会话：${snapshot.sessions.length} 条${warningSuffix}`);
@@ -188,9 +279,8 @@ export default class DailyCockpitPlugin extends Plugin {
         await this.app.vault.create(path, markdown);
       }
 
-      const nextData = setLastExportPath(this.data, path);
-      await this.saveCockpitData(nextData);
-      this.data = nextData;
+      const saved = await this.commit((current) => ({ ok: true, data: setLastExportPath(current, path) }), false);
+      if (!saved.ok) return { ok: false, error: saved.error };
       this.refreshViews();
       new Notice(`已导出每日简报：${path}`);
       return { ok: true, data: { path } };
@@ -209,13 +299,18 @@ export default class DailyCockpitPlugin extends Plugin {
     };
   }
 
-  private async commit(result: CockpitResult<CockpitData>): Promise<CockpitResult<CockpitData>> {
-    if (!result.ok) return result;
+  private async commit(
+    produce: (current: CockpitData) => CockpitResult<CockpitData>,
+    refresh = true
+  ): Promise<CockpitResult<CockpitData>> {
     try {
-      const nextData = result.data;
-      await this.saveCockpitData(nextData);
-      this.data = nextData;
-      this.refreshViews();
+      const result = await this.persistence.transact<CockpitResult<CockpitData>>((current) => {
+        const candidate = produce(current);
+        return candidate.ok
+          ? { write: true, data: candidate.data, value: candidate }
+          : { write: false, value: candidate };
+      });
+      if (refresh) this.refreshViews();
       return result;
     } catch (error) {
       console.error(`[${PLUGIN_ID}] save failed`, error);
@@ -223,17 +318,8 @@ export default class DailyCockpitPlugin extends Plugin {
     }
   }
 
-  private async saveCockpitData(data: CockpitData): Promise<void> {
-    await this.saveData(normalizeData(data));
-  }
-
-  private async enqueueWrite<T>(operation: () => Promise<CockpitResult<T>>): Promise<CockpitResult<T>> {
-    const run = this.writeQueue.then(operation, operation);
-    this.writeQueue = run.then(
-      () => undefined,
-      () => undefined
-    );
-    return run;
+  private async enqueueWrite<T>(operation: () => Promise<T>): Promise<T> {
+    return this.writeQueue.run(operation);
   }
 
   private refreshViews(): void {
@@ -243,6 +329,34 @@ export default class DailyCockpitPlugin extends Plugin {
         view.refresh();
       }
     }
+    this.refreshWhiteboardViews();
+  }
+
+  private refreshWhiteboardViews(): void {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_AGENT_WHITEBOARD)) {
+      const view = leaf.view;
+      if (view instanceof AgentWhiteboardView) view.refresh();
+    }
+  }
+
+  private createRuntimeGateway(): AgentRuntimeGateway {
+    return new AgentRuntimeGateway({
+      runtimeNodePath: this.data.settings.runtimeNodePath,
+      hostPath: this.runtimeHostPath,
+      codexCliPath: this.data.settings.codexCliPath,
+      processAdapter: createNodeProcessAdapter(),
+      environment: process.env
+    });
+  }
+
+  private async reconfigureRuntimeGateway(): Promise<void> {
+    const previous = this.runtimeGateway;
+    await previous.beginDispose();
+    this.runtimeGateway = this.createRuntimeGateway();
+    const views = this.app.workspace.getLeavesOfType(VIEW_TYPE_AGENT_WHITEBOARD)
+      .map((leaf) => leaf.view)
+      .filter((view): view is AgentWhiteboardView => view instanceof AgentWhiteboardView);
+    await Promise.allSettled(views.map((view) => view.rebindRuntimeGateway()));
   }
 
   private async ensureFolder(folderPath: string): Promise<void> {
@@ -279,6 +393,14 @@ export default class DailyCockpitPlugin extends Plugin {
 
     throw new Error("Could not find an available Daily Cockpit export path");
   }
+}
+
+async function resolveInstalledRuntimeHost(runtimeRoot: string): Promise<string> {
+  const pointer = JSON.parse(await fs.readFile(`${runtimeRoot}/active.json`, "utf8")) as { version?: unknown };
+  if (typeof pointer.version !== "string" || !/^runtime-[a-f0-9]{24}$/.test(pointer.version)) {
+    throw new Error("Installed runtime active pointer is invalid.");
+  }
+  return `${runtimeRoot}/versions/${pointer.version}/pty-host.mjs`;
 }
 
 class DailyCockpitView extends ItemView {
@@ -376,6 +498,117 @@ class DailyCockpitView extends ItemView {
   }
 }
 
+class AgentWhiteboardView extends ItemView implements WhiteboardCommitListener {
+  private controller: WhiteboardController | undefined;
+  private unsubscribeWhiteboard: (() => void) | undefined;
+  private readonly actions = {
+    requestProject: () => new WhiteboardProjectModal(this.plugin).open(),
+    saveDocument: async (document: GlobalBoardDocument, expectedRevision: number) => (
+      this.plugin.saveWhiteboardDocument(document, expectedRevision, this)
+    ),
+    retryMigration: async () => this.plugin.retryWhiteboardMigration()
+  };
+
+  constructor(leaf: WorkspaceLeaf, private readonly plugin: DailyCockpitPlugin) {
+    super(leaf);
+  }
+
+  getViewType(): string {
+    return VIEW_TYPE_AGENT_WHITEBOARD;
+  }
+
+  getDisplayText(): string {
+    return "Agent Whiteboard";
+  }
+
+  getIcon(): string {
+    return "layout-dashboard";
+  }
+
+  async onOpen(): Promise<void> {
+    this.unsubscribeWhiteboard = this.plugin.whiteboardCommits.subscribe(this);
+    this.refresh();
+  }
+
+  async onClose(): Promise<void> {
+    this.unsubscribeWhiteboard?.();
+    this.unsubscribeWhiteboard = undefined;
+    await this.controller?.destroy();
+    this.controller = undefined;
+  }
+
+  async rebindRuntimeGateway(): Promise<void> {
+    try {
+      await this.controller?.destroy();
+    } finally {
+      this.controller = undefined;
+      this.refresh();
+    }
+  }
+
+  refresh(): void {
+    if (!this.controller) {
+      this.controller = renderWhiteboard(
+        this.containerEl,
+        this.plugin.data.whiteboard,
+        this.app,
+        this.plugin,
+        this.actions,
+        this.plugin.runtimeGateway,
+        this.plugin.whiteboardMigrationError,
+        this.plugin.data.whiteboardRevision
+      );
+      return;
+    }
+    this.controller.update(
+      this.plugin.data.whiteboard,
+      this.plugin.whiteboardMigrationError,
+      this.plugin.data.whiteboardRevision
+    );
+  }
+
+  receiveWhiteboardCommit(document: GlobalBoardDocument, revision: number): void {
+    this.controller?.update(document, undefined, revision);
+  }
+
+  focusProject(projectId: string): void {
+    this.controller?.focusProject(projectId);
+  }
+}
+
+class WhiteboardProjectModal extends Modal {
+  private readonly presenter: WhiteboardProjectModalPresenter;
+
+  constructor(private readonly plugin: DailyCockpitPlugin) {
+    super(plugin.app);
+    this.presenter = new WhiteboardProjectModalPresenter(new WhiteboardProjectConsumer({
+      register: (rootPath, name, signal, onPhase) => plugin.registerWhiteboardProject(rootPath, name, signal, onPhase),
+      async publishCommitted(projectId) {
+        await plugin.activateWhiteboard();
+        for (const leaf of plugin.app.workspace.getLeavesOfType(VIEW_TYPE_AGENT_WHITEBOARD)) {
+          if (leaf.view instanceof AgentWhiteboardView) leaf.view.focusProject(projectId);
+        }
+      }
+    }));
+  }
+
+  onOpen(): void {
+    this.presenter.mount(this.contentEl, {
+      setTitle: (title) => this.setTitle(title),
+      requestClose: () => this.close()
+    });
+  }
+
+  close(): void {
+    if (!this.presenter.requestClose().close) return;
+    super.close();
+  }
+
+  onClose(): void {
+    this.presenter.destroy();
+  }
+}
+
 async function copyTextToClipboard(text: string): Promise<boolean> {
   try {
     const clipboard = globalThis.navigator?.clipboard;
@@ -439,6 +672,37 @@ async function openLocalPath(path: string, reveal: boolean): Promise<boolean> {
     return (await shell.openPath(resolved)) === "";
   } catch {
     return false;
+  }
+}
+
+async function resolveProjectDirectory(input: string, signal?: AbortSignal): Promise<string | null> {
+  try {
+    const runtimeWindow = globalThis.window as Window & {
+      require?: (id: string) => unknown;
+    };
+    const os = runtimeWindow.require?.("os") as { homedir(): string } | undefined;
+    const path = runtimeWindow.require?.("path") as { resolve(value: string): string } | undefined;
+    const fs = runtimeWindow.require?.("fs") as {
+      constants?: { R_OK: number; X_OK: number };
+      promises?: {
+        realpath(value: string): Promise<string>;
+        stat(value: string): Promise<{ isDirectory(): boolean }>;
+        access(value: string, mode: number): Promise<void>;
+        readdir(value: string): Promise<unknown[]>;
+      };
+    } | undefined;
+    if (!os || !path || !fs?.promises || !fs.constants) return null;
+    return resolveCanonicalProjectDirectory(input, {
+      homeDirectory: os.homedir(),
+      readableSearchableMode: fs.constants.R_OK | fs.constants.X_OK,
+      resolve: (value) => path.resolve(value),
+      realpath: (value) => fs.promises!.realpath(value),
+      stat: (value) => fs.promises!.stat(value),
+      access: (value, mode) => fs.promises!.access(value, mode),
+      readdir: (value) => fs.promises!.readdir(value)
+    }, signal);
+  } catch {
+    return null;
   }
 }
 
@@ -533,6 +797,31 @@ class DailyCockpitSettingTab extends PluginSettingTab {
         });
       });
 
+    containerEl.createEl("h3", { text: "会话读取来源" });
+    containerEl.createEl("p", {
+      cls: "setting-item-description",
+      text: "各平台独立只读，可以同时启用、只启用一个，或全部关闭。"
+    });
+    for (const provider of SESSION_PROVIDER_DEFINITIONS) {
+      new Setting(containerEl)
+        .setName(provider.label)
+        .setDesc(provider.description)
+        .addToggle((toggle) => {
+          toggle
+            .setValue(this.plugin.data.settings.enabledSessionProviders.includes(provider.id))
+            .onChange(async (enabled) => {
+              const selected = new Set(this.plugin.data.settings.enabledSessionProviders);
+              if (enabled) selected.add(provider.id);
+              else selected.delete(provider.id);
+              await this.plugin.updateSettings({
+                enabledSessionProviders: SESSION_PROVIDER_DEFINITIONS
+                  .map(({ id }) => id)
+                  .filter((id) => selected.has(id))
+              });
+            });
+        });
+    }
+
     new Setting(containerEl)
       .setName("工作会话扫描目录")
       .setDesc("一行一个本机路径。这里只读取 ID、时间、工作目录和会话文件位置，正文总结交给对应 Agent。")
@@ -558,6 +847,16 @@ class DailyCockpitSettingTab extends PluginSettingTab {
         dropdown.setValue(this.plugin.data.settings.sessionSummaryMode);
         dropdown.onChange((value) => {
           void this.plugin.updateSettings({ sessionSummaryMode: value === "metadata" ? "metadata" : "native" });
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("System Node")
+      .setDesc("用于独立 PTY companion 的 Node 可执行文件名或绝对路径。Electron 不会加载原生 PTY 模块。")
+      .addText((text) => {
+        text.setValue(this.plugin.data.settings.runtimeNodePath);
+        text.onChange((value) => {
+          void this.plugin.updateSettings({ runtimeNodePath: value });
         });
       });
 

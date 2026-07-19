@@ -1,4 +1,5 @@
 import {
+  DEFAULT_SESSION_PROVIDERS,
   DEFAULT_SESSION_SCAN_ROOTS,
   DEFAULT_SETTINGS,
   ERROR_MESSAGES,
@@ -21,6 +22,292 @@ import type {
   TaskCategory,
   TaskPriority
 } from "./types";
+import type { SessionProvider } from "./types";
+import {
+  appendProjectFrame,
+  createEmptyGlobalBoardDocument,
+  normalizeGlobalBoardDocument,
+  WhiteboardMigrationError,
+  type GlobalBoardDocument,
+  type WhiteboardCommitResult
+} from "./whiteboard-model";
+
+declare module "./types" {
+  interface CockpitData {
+    whiteboardRevision: number;
+  }
+}
+
+export type ProjectRegistrationResult =
+  | { ok: true; data: CockpitData; projectId: string }
+  | { ok: false; message: string };
+export type ProjectRegistrationOutcome =
+  | { ok: true; projectId: string }
+  | { ok: false; message: string };
+
+export type ProjectRegistrationPhase = "validating" | "queued" | "saving" | "committed";
+
+export function registerCanonicalProject(data: CockpitData, rootPath: string, name: string): ProjectRegistrationResult {
+  if (data.whiteboard.projects.some((project) => project.rootPath === rootPath)) {
+    return { ok: false, message: "这个项目路径已经添加。" };
+  }
+  const whiteboard = appendProjectFrame(data.whiteboard, rootPath, name);
+  const projectId = whiteboard.projects.at(-1)?.id;
+  if (!projectId) return { ok: false, message: "无法创建项目画框。" };
+  return {
+    ok: true,
+    projectId,
+    data: normalizeData({ ...data, whiteboard, whiteboardRevision: data.whiteboardRevision + 1 })
+  };
+}
+
+export interface ProjectDirectoryRuntime {
+  homeDirectory: string;
+  readableSearchableMode: number;
+  resolve(value: string): string;
+  realpath(value: string): Promise<string>;
+  stat(value: string): Promise<{ isDirectory(): boolean }>;
+  access(value: string, mode: number): Promise<void>;
+  readdir(value: string): Promise<unknown[]>;
+}
+
+export async function resolveCanonicalProjectDirectory(
+  input: string,
+  runtime: ProjectDirectoryRuntime,
+  signal?: AbortSignal
+): Promise<string | null> {
+  const value = input.trim();
+  if (!value || /[\r\n\0]/.test(value) || signal?.aborted) return null;
+  try {
+    const expanded = value === "~" || value.startsWith("~/")
+      ? `${runtime.homeDirectory}${value.slice(1)}`
+      : value;
+    const resolved = await runtime.realpath(runtime.resolve(expanded));
+    if (signal?.aborted || !(await runtime.stat(resolved)).isDirectory()) return null;
+    await runtime.access(resolved, runtime.readableSearchableMode);
+    await runtime.readdir(resolved);
+    return signal?.aborted ? null : resolved;
+  } catch {
+    return null;
+  }
+}
+
+export class WhiteboardProjectRegistrationWorkflow {
+  constructor(
+    private readonly resolveDirectory: (input: string, signal?: AbortSignal) => Promise<string | null>,
+    private readonly register: (
+      rootPath: string,
+      name: string,
+      signal?: AbortSignal,
+      onPhase?: (phase: ProjectRegistrationPhase) => void
+    ) => Promise<ProjectRegistrationResult>
+  ) {}
+
+  async run(
+    rootPath: string,
+    name: string,
+    signal?: AbortSignal,
+    onPhase?: (phase: ProjectRegistrationPhase) => void
+  ): Promise<ProjectRegistrationResult> {
+    onPhase?.("validating");
+    const resolvedRoot = await this.resolveDirectory(rootPath, signal);
+    if (signal?.aborted) return { ok: false, message: "已取消添加项目。" };
+    if (!resolvedRoot) return { ok: false, message: "项目路径不存在，或不是可读取的文件夹。" };
+    onPhase?.("queued");
+    return this.register(resolvedRoot, name, signal, onPhase);
+  }
+}
+
+export class WhiteboardProjectModalSession {
+  private readonly abortController = new AbortController();
+  phase: ProjectRegistrationPhase | undefined;
+  pending = false;
+  completed = false;
+
+  constructor(
+    private readonly runRegistration: (
+      rootPath: string,
+      name: string,
+      signal: AbortSignal,
+      onPhase: (phase: ProjectRegistrationPhase) => void
+    ) => Promise<ProjectRegistrationOutcome>
+  ) {}
+
+  async submit(rootPath: string, name: string): Promise<ProjectRegistrationOutcome> {
+    if (this.pending) return { ok: false, message: "项目正在处理中。" };
+    this.pending = true;
+    const result = await this.runRegistration(rootPath, name, this.abortController.signal, (phase) => {
+      this.phase = phase;
+    });
+    this.pending = false;
+    this.completed = result.ok;
+    return result;
+  }
+
+  requestClose(): { close: boolean; message?: string } {
+    if (this.pending && (this.phase === "saving" || this.phase === "committed")) {
+      return { close: false, message: "正在保存项目，完成后将自动关闭。" };
+    }
+    if (!this.completed) this.abortController.abort();
+    return { close: true };
+  }
+}
+
+export class SerialTransactionQueue {
+  private tail: Promise<void> = Promise.resolve();
+
+  run<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.tail.then(operation, operation);
+    this.tail = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result;
+  }
+}
+
+export type CockpitTransaction<T> =
+  | { write: false; value: T }
+  | { write: true; data: CockpitData; value: T };
+
+export interface WhiteboardCommitListener {
+  receiveWhiteboardCommit(document: GlobalBoardDocument, revision: number): void;
+}
+
+export class WhiteboardCommitChannel {
+  private readonly listeners = new Set<WhiteboardCommitListener>();
+
+  subscribe(listener: WhiteboardCommitListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  publish(document: GlobalBoardDocument, revision: number, origin?: WhiteboardCommitListener): void {
+    for (const listener of this.listeners) {
+      if (listener !== origin) listener.receiveWhiteboardCommit(document, revision);
+    }
+  }
+}
+
+export class CockpitPersistenceCoordinator {
+  private data: CockpitData;
+  private blockedError: Error | undefined;
+  private readonly queue = new SerialTransactionQueue();
+
+  constructor(
+    initialData: CockpitData,
+    private readonly persist: (data: CockpitData) => Promise<void>,
+    private readonly onCommit: (data: CockpitData) => void = () => undefined
+  ) {
+    this.data = normalizeData(initialData);
+  }
+
+  snapshot(): CockpitData {
+    return this.data;
+  }
+
+  block(error: Error): void {
+    this.blockedError = error;
+  }
+
+  async transact<T>(operation: (current: CockpitData) => CockpitTransaction<T> | Promise<CockpitTransaction<T>>): Promise<T> {
+    return this.queue.run(async () => {
+      if (this.blockedError) throw this.blockedError;
+      const transaction = await operation(this.data);
+      if (!transaction.write) return transaction.value;
+      const next = normalizeData(transaction.data);
+      await this.persist(next);
+      this.commit(next);
+      return transaction.value;
+    });
+  }
+
+  async saveWhiteboard(
+    document: GlobalBoardDocument,
+    expectedRevision: number
+  ): Promise<WhiteboardCommitResult> {
+    return this.queue.run(async () => {
+      if (this.blockedError) throw this.blockedError;
+      if (expectedRevision !== this.data.whiteboardRevision) {
+        return {
+          ok: false,
+          code: "WHITEBOARD_REVISION_CONFLICT",
+          document: this.data.whiteboard,
+          revision: this.data.whiteboardRevision
+        };
+      }
+      const next = normalizeData({
+        ...this.data,
+        whiteboard: document,
+        whiteboardRevision: this.data.whiteboardRevision + 1
+      });
+      await this.persist(next);
+      this.commit(next);
+      return { ok: true, document: next.whiteboard, revision: next.whiteboardRevision };
+    });
+  }
+
+  async registerProject(
+    rootPath: string,
+    name: string,
+    signal?: AbortSignal,
+    onPhase?: (phase: ProjectRegistrationPhase) => void
+  ): Promise<ProjectRegistrationResult> {
+    return this.queue.run(async () => {
+      if (this.blockedError) throw this.blockedError;
+      if (signal?.aborted) return { ok: false, message: "已取消添加项目。" };
+      const result = registerCanonicalProject(this.data, rootPath, name);
+      if (!result.ok) return result;
+      if (signal?.aborted) return { ok: false, message: "已取消添加项目。" };
+      onPhase?.("saving");
+      await this.persist(result.data);
+      this.commit(result.data);
+      onPhase?.("committed");
+      return result;
+    });
+  }
+
+  async recover(load: () => Promise<unknown>): Promise<CockpitData> {
+    return this.queue.run(async () => {
+      const next = normalizeData(await load());
+      await this.persist(next);
+      this.blockedError = undefined;
+      this.commit(next);
+      return next;
+    });
+  }
+
+  private commit(next: CockpitData): void {
+    this.data = next;
+    this.onCommit(next);
+  }
+}
+
+export class DurableWriteGuard {
+  private blockedError: Error | undefined;
+
+  constructor(error: Error) {
+    this.blockedError = error;
+  }
+
+  get blocked(): boolean {
+    return Boolean(this.blockedError);
+  }
+
+  block(error: Error): void {
+    this.blockedError = error;
+  }
+
+  assertWritable(): void {
+    if (this.blockedError) throw this.blockedError;
+  }
+
+  async recover<T>(candidate: T, persist: (value: T) => Promise<void>): Promise<T> {
+    await persist(candidate);
+    this.blockedError = undefined;
+    return candidate;
+  }
+}
 
 export function nowIso(): string {
   return new Date().toISOString();
@@ -33,9 +320,11 @@ export function createId(prefix = "item"): string {
 
 export function createEmptyData(settings: Partial<CockpitSettings> = {}): CockpitData {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     settings: normalizeSettings(settings),
     workSessionSnapshot: createEmptyWorkSessionSnapshot(),
+    whiteboard: createEmptyGlobalBoardDocument(),
+    whiteboardRevision: 0,
     plans: []
   };
 }
@@ -55,14 +344,24 @@ export function normalizeData(input: unknown): CockpitData {
   const activePlanId = requestedPlan?.id ?? plans.find((plan) => plan.targetDate >= today)?.id;
 
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     settings,
     plans,
     workSessionSnapshot: normalizeWorkSessionSnapshot(source.workSessionSnapshot),
+    whiteboard: normalizeGlobalBoardDocument(source.whiteboard),
+    whiteboardRevision: normalizeWhiteboardRevision(source.whiteboardRevision),
     ...(activePlanId ? { activePlanId } : {}),
     ...(typeof source.lastOpenedAt === "string" ? { lastOpenedAt: source.lastOpenedAt } : {}),
     ...(typeof source.lastExportPath === "string" ? { lastExportPath: source.lastExportPath } : {})
   };
+}
+
+function normalizeWhiteboardRevision(value: unknown): number {
+  if (value === undefined) return 0;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new WhiteboardMigrationError("白板提交版本无效。");
+  }
+  return value;
 }
 
 export function createSeedData(): CockpitData {
@@ -216,7 +515,11 @@ export function setWorkSessionSnapshot(data: CockpitData, snapshot: AgentWorkSna
 
 export function normalizeSettings(input: unknown): CockpitSettings {
   if (!input || typeof input !== "object") {
-    return { ...DEFAULT_SETTINGS, sessionScanRoots: [...DEFAULT_SETTINGS.sessionScanRoots] };
+    return {
+      ...DEFAULT_SETTINGS,
+      sessionScanRoots: [...DEFAULT_SETTINGS.sessionScanRoots],
+      enabledSessionProviders: [...DEFAULT_SETTINGS.enabledSessionProviders]
+    };
   }
 
   const settings = input as Partial<CockpitSettings>;
@@ -230,10 +533,18 @@ export function normalizeSettings(input: unknown): CockpitSettings {
     llmModel: cleanModel(settings.llmModel),
     llmApiKey: typeof settings.llmApiKey === "string" ? settings.llmApiKey.trim() : "",
     sessionScanRoots,
+    enabledSessionProviders: normalizeSessionProviders(settings.enabledSessionProviders),
     sessionSummaryMode: settings.sessionSummaryMode === "metadata" ? "metadata" : "native",
+    runtimeNodePath: cleanCommand(settings.runtimeNodePath, DEFAULT_SETTINGS.runtimeNodePath),
     codexCliPath: cleanCommand(settings.codexCliPath, DEFAULT_SETTINGS.codexCliPath),
     claudeCliPath: cleanCommand(settings.claudeCliPath, DEFAULT_SETTINGS.claudeCliPath)
   };
+}
+
+function normalizeSessionProviders(value: unknown): SessionProvider[] {
+  if (!Array.isArray(value)) return [...DEFAULT_SESSION_PROVIDERS];
+  const supported = new Set<SessionProvider>(DEFAULT_SESSION_PROVIDERS);
+  return Array.from(new Set(value.filter((provider): provider is SessionProvider => supported.has(provider as SessionProvider))));
 }
 
 export function createEmptyWorkSessionSnapshot(date = previousLocalDateString(), timestamp = nowIso()): AgentWorkSnapshot {

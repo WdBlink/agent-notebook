@@ -1,9 +1,9 @@
 {
   "id": "daily-cockpit",
-  "name": "Daily Cockpit",
-  "version": "0.2.0",
+  "name": "Agent Whiteboard",
+  "version": "0.3.0",
   "minAppVersion": "1.5.0",
-  "description": "Review yesterday's local Agent work, resume verified sessions, and plan tomorrow in Obsidian.",
+  "description": "A persistent Obsidian whiteboard for local Agent projects, sessions, Markdown notes, and spatial context.",
   "author": "WdBlink",
   "authorUrl": "https://github.com/WdBlink",
   "isDesktopOnly": true

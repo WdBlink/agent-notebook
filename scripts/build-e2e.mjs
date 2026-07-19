@@ -6,6 +6,7 @@ await esbuild.build({
   format: "iife",
   platform: "browser",
   target: "es2022",
+  alias: { obsidian: "./tests/e2e/obsidian-shim.ts" },
   outfile: "tests/e2e/harness.js",
   sourcemap: false,
   logLevel: "info"

@@ -40,7 +40,7 @@ async function walk(dir) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       out.push(...(await walk(full)));
-    } else if (entry.name.endsWith(".ts")) {
+    } else if (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) {
       out.push(full);
     }
   }

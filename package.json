@@ -1,24 +1,29 @@
 {
   "name": "daily-cockpit",
-  "version": "0.2.0",
-  "description": "An Obsidian cockpit for reviewing yesterday's local agent work, resuming verified sessions, and decomposing tomorrow's intent into tasks.",
+  "version": "0.3.0",
+  "description": "A persistent Obsidian whiteboard for local Agent projects, sessions, Markdown notes, and spatial context.",
   "main": "main.js",
   "type": "module",
   "scripts": {
-    "build": "node esbuild.config.mjs production",
+    "build": "node scripts/build-runtime-helper.mjs && node esbuild.config.mjs production",
     "dev": "node esbuild.config.mjs development --watch",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --import tsx --test tests/*.test.ts",
     "test:e2e": "npm run build && node scripts/build-e2e.mjs && playwright test",
+    "test:runtime-host": "node scripts/build-runtime-helper.mjs && node scripts/test-runtime-host.mjs",
     "test:obsidian": "node scripts/test-obsidian-local.mjs",
     "lint": "npm run typecheck && node scripts/privacy-check.mjs && node scripts/readme-check.mjs",
     "install:local": "npm run build && node scripts/install-local.mjs",
     "verify:local": "node scripts/verify-local.mjs",
+    "release:macos": "npm run build && node scripts/build-release.mjs",
+    "verify:release": "node scripts/verify-release.mjs",
     "check": "npm run lint && npm test && npm run test:e2e"
   },
   "keywords": [
     "obsidian",
     "obsidian-plugin",
+    "infinite-canvas",
+    "agent-whiteboard",
     "task-decomposition",
     "local-ai",
     "agent-sessions",
@@ -30,10 +35,21 @@
     "@playwright/test": "1.61.1",
     "@types/jsdom": "28.0.3",
     "@types/node": "26.1.0",
+    "@types/react": "^19.0.14",
+    "@types/react-dom": "^19.0.6",
     "esbuild": "0.28.1",
     "jsdom": "29.1.1",
     "obsidian": "1.13.1",
     "tsx": "^4.22.5",
     "typescript": "6.0.3"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
+    "@xyflow/react": "^12.10.1",
+    "lucide-react": "^0.577.0",
+    "node-pty": "1.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   }
 }

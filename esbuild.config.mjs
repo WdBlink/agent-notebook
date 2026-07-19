@@ -12,15 +12,19 @@ Source: https://github.com/WdBlink/daily-cockpit
 
 const context = await esbuild.context({
   banner: { js: banner },
-  entryPoints: ["src/main.ts"],
+  entryPoints: {
+    main: "src/main.ts",
+    styles: "src/plugin.css"
+  },
   bundle: true,
-  external: ["obsidian"],
+  external: ["obsidian", "node:*"],
   format: "cjs",
   target: "es2022",
   platform: "browser",
   sourcemap: !isProd,
   treeShaking: true,
-  outfile: "main.js",
+  outdir: ".",
+  entryNames: "[name]",
   logLevel: "info",
   define: {
     "process.env.NODE_ENV": JSON.stringify(isProd ? "production" : "development")
@@ -29,7 +33,7 @@ const context = await esbuild.context({
 
 if (watch) {
   await context.watch();
-  console.log("[daily-cockpit] watching src/main.ts");
+  console.log("[daily-cockpit] watching plugin sources");
 } else {
   await context.rebuild();
   await context.dispose();
