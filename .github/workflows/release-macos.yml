@@ -41,7 +41,10 @@ jobs:
       - run: npm test
       - run: npm run test:runtime-host
       - run: npm run release:macos -- --arch "${{ matrix.arch }}"
-      - run: npm run verify:release -- --archive "dist/release/agent-whiteboard-v$(node -p 'require(\"./package.json\").version')-macos-${{ matrix.arch }}.zip" --arch "${{ matrix.arch }}"
+      - name: Verify release archive
+        run: |
+          VERSION="$(node -p 'require("./package.json").version')"
+          npm run verify:release -- --archive "dist/release/agent-whiteboard-v${VERSION}-macos-${{ matrix.arch }}.zip" --arch "${{ matrix.arch }}"
       - uses: actions/upload-artifact@v4
         with:
           name: macos-${{ matrix.arch }}
@@ -69,7 +72,9 @@ jobs:
       - name: Assemble checksums
         run: cat dist/upload/*.sha256 | sort > dist/upload/SHA256SUMS.txt
       - name: Validate release tag
-        run: test "$RELEASE_TAG" = "v$(node -p 'require(\"./package.json\").version')"
+        run: |
+          VERSION="$(node -p 'require("./package.json").version')"
+          test "$RELEASE_TAG" = "v${VERSION}"
       - name: Create or update release
         run: |
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
