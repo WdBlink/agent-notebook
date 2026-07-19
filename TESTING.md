@@ -44,10 +44,12 @@ Use a temporary vault for automated install/verify tests. Do not point repositor
 Build and verify the current Mac architecture with:
 
 ```bash
-npm run release:macos -- --arch "$(node -p process.arch)"
+ARCH="$(node -p process.arch)"
+VERSION="$(node -p 'require("./package.json").version')"
+npm run release:macos -- --arch "$ARCH"
 npm run verify:release -- \
-  --archive "dist/release/agent-whiteboard-v$(node -p 'require(\"./package.json\").version')-macos-$(node -p process.arch).zip" \
-  --arch "$(node -p process.arch)"
+  --archive "dist/release/agent-whiteboard-v${VERSION}-macos-${ARCH}.zip" \
+  --arch "$ARCH"
 ```
 
 The release workflow repeats lint, Node tests, native-host tests, archive construction, architecture inspection, manifest hashing, and packaged-runtime smoke tests on native Apple Silicon and Intel macOS runners. A tag matching `package.json` publishes both ZIP files plus `SHA256SUMS.txt`.
