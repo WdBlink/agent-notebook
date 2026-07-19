@@ -44,11 +44,14 @@ jobs:
       - name: Verify release archive
         run: |
           VERSION="$(node -p 'require("./package.json").version')"
-          npm run verify:release -- --archive "dist/release/agent-whiteboard-v${VERSION}-macos-${{ matrix.arch }}.zip" --arch "${{ matrix.arch }}"
+          for FORMAT in dmg zip; do
+            npm run verify:release -- --archive "dist/release/agent-whiteboard-v${VERSION}-macos-${{ matrix.arch }}.${FORMAT}" --arch "${{ matrix.arch }}"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: macos-${{ matrix.arch }}
           path: |
+            dist/release/*.dmg
             dist/release/*.zip
             dist/release/*.sha256
           if-no-files-found: error
@@ -78,8 +81,8 @@ jobs:
       - name: Create or update release
         run: |
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" dist/upload/*.zip dist/upload/SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$RELEASE_TAG" dist/upload/*.dmg dist/upload/*.zip dist/upload/SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"
             gh release edit "$RELEASE_TAG" --notes-file RELEASE_NOTES.md --title "Agent Whiteboard $RELEASE_TAG" --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$RELEASE_TAG" dist/upload/*.zip dist/upload/SHA256SUMS.txt --verify-tag --title "Agent Whiteboard $RELEASE_TAG" --notes-file RELEASE_NOTES.md --repo "$GITHUB_REPOSITORY"
+            gh release create "$RELEASE_TAG" dist/upload/*.dmg dist/upload/*.zip dist/upload/SHA256SUMS.txt --verify-tag --title "Agent Whiteboard $RELEASE_TAG" --notes-file RELEASE_NOTES.md --repo "$GITHUB_REPOSITORY"
           fi

@@ -47,12 +47,14 @@ Build and verify the current Mac architecture with:
 ARCH="$(node -p process.arch)"
 VERSION="$(node -p 'require("./package.json").version')"
 npm run release:macos -- --arch "$ARCH"
-npm run verify:release -- \
-  --archive "dist/release/agent-whiteboard-v${VERSION}-macos-${ARCH}.zip" \
-  --arch "$ARCH"
+for FORMAT in dmg zip; do
+  npm run verify:release -- \
+    --archive "dist/release/agent-whiteboard-v${VERSION}-macos-${ARCH}.${FORMAT}" \
+    --arch "$ARCH"
+done
 ```
 
-The release workflow repeats lint, Node tests, native-host tests, archive construction, architecture inspection, manifest hashing, and packaged-runtime smoke tests on native Apple Silicon and Intel macOS runners. A tag matching `package.json` publishes both ZIP files plus `SHA256SUMS.txt`.
+The release workflow repeats lint, Node tests, native-host tests, DMG mounting, archive construction, architecture inspection, manifest hashing, and packaged-runtime smoke tests on native Apple Silicon and Intel macOS runners. A tag matching `package.json` publishes both DMG files, ZIP fallbacks, and `SHA256SUMS.txt`.
 
 ## Real Whiteboard E2E
 

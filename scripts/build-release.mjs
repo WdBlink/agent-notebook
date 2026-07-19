@@ -77,17 +77,32 @@ const readmeTemplate = await fs.readFile(path.join(repo, "release", "README.txt"
 await fs.writeFile(path.join(releaseRoot, "README.txt"), readmeTemplate.replaceAll("__ARCH__", arch).replaceAll("__VERSION__", version), { mode: 0o644 });
 
 await rejectSymlinks(releaseRoot);
-const archive = path.join(dist, `${releaseName}.zip`);
-await fs.rm(archive, { force: true });
-await execFileAsync("/usr/bin/ditto", ["-c", "-k", "--norsrc", "--keepParent", releaseRoot, archive], {
+const zip = path.join(dist, `${releaseName}.zip`);
+await fs.rm(zip, { force: true });
+await execFileAsync("/usr/bin/ditto", ["-c", "-k", "--norsrc", "--keepParent", releaseRoot, zip], {
   timeout: 60_000,
   maxBuffer: 4 * 1024 * 1024
 });
-const digest = await fileHash(archive);
-const checksumPath = `${archive}.sha256`;
-await fs.writeFile(checksumPath, `${digest}  ${path.basename(archive)}\n`, { mode: 0o644 });
+const dmg = path.join(dist, `${releaseName}.dmg`);
+await fs.rm(dmg, { force: true });
+await execFileAsync("/usr/bin/hdiutil", [
+  "create",
+  "-volname", `Agent Whiteboard ${version} ${arch}`,
+  "-srcfolder", releaseRoot,
+  "-format", "UDZO",
+  "-ov",
+  dmg
+], { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
 
-console.log(JSON.stringify({ ok: true, version, arch, archive, checksumPath, runtimeVersion }, null, 2));
+const archives = [];
+for (const archive of [dmg, zip]) {
+  const digest = await fileHash(archive);
+  const checksumPath = `${archive}.sha256`;
+  await fs.writeFile(checksumPath, `${digest}  ${path.basename(archive)}\n`, { mode: 0o644 });
+  archives.push({ archive, checksumPath });
+}
+
+console.log(JSON.stringify({ ok: true, version, arch, archives, runtimeVersion }, null, 2));
 
 async function copy(relative, destination, mode) {
   return copyFrom(path.join(repo, relative), destination, mode);

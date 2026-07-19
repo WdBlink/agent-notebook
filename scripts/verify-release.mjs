@@ -9,21 +9,22 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const args = process.argv.slice(2);
 const archiveArg = valueAfter(args, "--archive");
-if (!archiveArg) throw new Error("Use --archive <release.zip>.");
+if (!archiveArg) throw new Error("Use --archive <release.zip|release.dmg>.");
 const archive = path.resolve(archiveArg);
-const arch = valueAfter(args, "--arch") ?? archive.match(/macos-(arm64|x64)\.zip$/)?.[1];
+const format = path.extname(archive).slice(1);
+if (!new Set(["zip", "dmg"]).has(format)) throw new Error(`Unsupported release archive: ${archive}`);
+const arch = valueAfter(args, "--arch") ?? archive.match(/macos-(arm64|x64)\.(?:zip|dmg)$/)?.[1];
 if (!arch || !new Set(["arm64", "x64"]).has(arch)) throw new Error("Could not determine release architecture.");
 
 const packageJson = JSON.parse(await fs.readFile("package.json", "utf8"));
 const version = packageJson.version;
 const expectedRootName = `agent-whiteboard-v${version}-macos-${arch}`;
 const temp = await fs.mkdtemp(path.join(os.tmpdir(), "agent-whiteboard-release-"));
+const mountPoint = path.join(temp, "mounted");
+let mounted = false;
 
 try {
-  await execFileAsync("/usr/bin/ditto", ["-x", "-k", archive, temp], { timeout: 60_000, maxBuffer: 4 * 1024 * 1024 });
-  const rootEntries = (await fs.readdir(temp)).filter((entry) => entry !== "__MACOSX");
-  if (JSON.stringify(rootEntries) !== JSON.stringify([expectedRootName])) throw new Error(`Unexpected archive roots: ${rootEntries.join(", ")}`);
-  const root = path.join(temp, expectedRootName);
+  const root = await openArchive();
   const plugin = path.join(root, "daily-cockpit");
   await rejectSymlinks(root);
   for (const relative of ["main.js", "styles.css", "manifest.json", "runtime/active.json"]) await assertFile(path.join(plugin, relative));
@@ -81,9 +82,31 @@ try {
     if (checksum !== await fileHash(archive)) throw new Error("Release checksum does not match archive.");
   }
 
-  console.log(JSON.stringify({ ok: true, version, arch, archive, runtime: pointer.version, runtimeSmoke }, null, 2));
+  console.log(JSON.stringify({ ok: true, version, arch, format, archive, runtime: pointer.version, runtimeSmoke }, null, 2));
 } finally {
+  if (mounted) {
+    await execFileAsync("/usr/bin/hdiutil", ["detach", mountPoint], { timeout: 60_000, maxBuffer: 4 * 1024 * 1024 });
+  }
   await fs.rm(temp, { recursive: true, force: true });
+}
+
+async function openArchive() {
+  if (format === "zip") {
+    await execFileAsync("/usr/bin/ditto", ["-x", "-k", archive, temp], { timeout: 60_000, maxBuffer: 4 * 1024 * 1024 });
+    const rootEntries = (await fs.readdir(temp)).filter((entry) => entry !== "__MACOSX");
+    if (JSON.stringify(rootEntries) !== JSON.stringify([expectedRootName])) {
+      throw new Error(`Unexpected archive roots: ${rootEntries.join(", ")}`);
+    }
+    return path.join(temp, expectedRootName);
+  }
+
+  await fs.mkdir(mountPoint);
+  await execFileAsync("/usr/bin/hdiutil", ["attach", archive, "-readonly", "-nobrowse", "-mountpoint", mountPoint], {
+    timeout: 60_000,
+    maxBuffer: 4 * 1024 * 1024
+  });
+  mounted = true;
+  return mountPoint;
 }
 
 async function verifyRuntimeManifest(root) {
