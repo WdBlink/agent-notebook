@@ -12,7 +12,8 @@ const hostPath = path.resolve(hostArgumentIndex >= 0 ? process.argv[hostArgument
 const localSpawnHelper = path.join(path.dirname(hostPath), "node_modules", "node-pty", "build", "Release", "spawn-helper");
 const sourceSpawnHelper = path.resolve("node_modules/node-pty", "prebuilds", `${process.platform}-${process.arch}`, "spawn-helper");
 const spawnHelper = await exists(localSpawnHelper) ? localSpawnHelper : sourceSpawnHelper;
-await fs.chmod(spawnHelper, 0o755);
+const spawnHelperMode = (await fs.stat(spawnHelper)).mode;
+if ((spawnHelperMode & 0o111) === 0) await fs.chmod(spawnHelper, 0o755);
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "daily-cockpit-runtime-"));
 const cwdA = path.join(tempRoot, "cockpit project α");
 const cwdB = path.join(tempRoot, "cockpit project β");

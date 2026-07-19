@@ -41,7 +41,7 @@ Register a local project
         -> reopen Obsidian with the same board and viewport
 ```
 
-Version `0.3.0` places every registered project frame on one global React Flow canvas with no project switcher. Explicit project ownership, frame movement and resize containment, notes, headings, edges, viewport persistence, embedded Codex/shell PTYs, and selectable Codex/Claude Code history readers are implemented.
+Version `0.3.1` places every registered project frame on one global React Flow canvas with no project switcher. Explicit project ownership, frame movement and resize containment, notes, headings, edges, viewport persistence, embedded Codex/shell PTYs, and selectable Codex/Claude Code history readers are implemented.
 
 ## What It Does
 
@@ -65,12 +65,12 @@ Claude Code launch remains explicitly unavailable in this slice. The whiteboard 
 
 ## macOS Install
 
-Version `0.3.0` supports macOS only. Download the matching archive from [GitHub Releases](https://github.com/WdBlink/daily-cockpit/releases):
+Version `0.3.1` supports macOS only. Download the matching disk image from [GitHub Releases](https://github.com/WdBlink/daily-cockpit/releases):
 
-- Apple Silicon (M1 and later): `agent-whiteboard-v0.3.0-macos-arm64.zip`
-- Intel Mac: `agent-whiteboard-v0.3.0-macos-x64.zip`
+- Apple Silicon (M1 and later): `agent-whiteboard-v0.3.1-macos-arm64.dmg`
+- Intel Mac: `agent-whiteboard-v0.3.1-macos-x64.dmg`
 
-Unzip it, double-click **Install Agent Whiteboard.command**, select your Obsidian vault, then enable **Agent Whiteboard** in **Obsidian → Settings → Community plugins**. The archive also includes a manually installable `daily-cockpit` folder and `SHA256SUMS.txt` is published beside both downloads.
+Open the DMG, double-click **Install Agent Whiteboard.command**, select your Obsidian vault, then enable **Agent Whiteboard** in **Obsidian → Settings → Community plugins**. The disk image also includes a manually installable `daily-cockpit` folder. ZIP fallbacks and `SHA256SUMS.txt` are published beside both DMGs.
 
 The guided installer copies plugin and native runtime files without deleting or replacing an existing `data.json`. This first release is not signed or notarized; if macOS blocks the installer, Control-click it and choose **Open** after confirming it came from this repository.
 

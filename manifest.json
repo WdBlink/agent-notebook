@@ -1,7 +1,7 @@
 {
   "id": "daily-cockpit",
   "name": "Agent Whiteboard",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "minAppVersion": "1.5.0",
   "description": "A persistent Obsidian whiteboard for local Agent projects, sessions, Markdown notes, and spatial context.",
   "author": "WdBlink",

@@ -1,6 +1,6 @@
 {
   "name": "daily-cockpit",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A persistent Obsidian whiteboard for local Agent projects, sessions, Markdown notes, and spatial context.",
   "main": "main.js",
   "type": "module",
