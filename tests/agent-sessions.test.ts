@@ -53,6 +53,30 @@ test("extracts Codex JSONL sessions with resume hints", () => {
   assert.equal(session?.resumable, true);
 });
 
+test("Codex archived sessions are completed and model summaries cannot reopen them", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "work-continuity-archive-"));
+  const archive = path.join(root, ".codex", "archived_sessions");
+  await mkdir(archive, { recursive: true });
+  const sessionPath = path.join(archive, "rollout-archived.jsonl");
+  await writeFile(sessionPath, [
+    JSON.stringify({ timestamp: "2026-07-21T04:00:00.000Z", type: "session_meta", payload: { id: "archived-id", cwd: root } }),
+    JSON.stringify({ timestamp: "2026-07-21T04:01:00.000Z", type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "归档这条会话" }] } })
+  ].join("\n"));
+  try {
+    const settings = { ...createEmptyData().settings, sessionScanRoots: [archive], enabledSessionProviders: ["codex" as const] };
+    const snapshot = await loadAgentWorkSnapshot(settings, {
+      date: "2026-07-21",
+      fs: fsAdapter,
+      homeDir: root,
+      summarizer: async () => ({ summaries: [{ id: "archived-id", platform: "codex", title: "模型标题", summary: "模型认为仍在进行。", artifacts: [], status: "active" }], warnings: [] })
+    });
+    assert.equal(snapshot.sessions[0]?.status, "completed");
+    assert.equal(snapshot.sessions[0]?.title, "模型标题");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("extracts current Claude Code session metadata and nested messages", () => {
   const content = [
     JSON.stringify({ type: "mode", mode: "default", sessionId: "16d0cc2d-b022-4205-863d-3924305c92f9" }),

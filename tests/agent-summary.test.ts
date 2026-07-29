@@ -17,6 +17,7 @@ test("provider CLIs receive only their canonical manifests and return validated 
     id: "claude-real-id",
     platform: "claude",
     path: "/tmp/claude.jsonl",
+    resumable: false,
     summary: "SECRET_TRANSCRIPT_BODY"
   });
   const result = await summarizeSessionsWithProviderClis(
@@ -25,6 +26,7 @@ test("provider CLIs receive only their canonical manifests and return validated 
     [codex, claude],
     {
       homeDir: "/Users/test",
+      modelByPlatform: { codex: "cheap-codex", claude: "cheap-claude" },
       runner: async (request) => {
         requests.push(request);
         if (request.command === "codex") {
@@ -79,6 +81,8 @@ test("provider CLIs receive only their canonical manifests and return validated 
   assert.equal(requests.length, 2);
   assert.ok(requests[0]?.args.includes("--ephemeral"));
   assert.ok(requests[1]?.args.includes("--no-session-persistence"));
+  assert.deepEqual(requests[0]?.args.slice(0, 4), ["exec", "--model", "cheap-codex", "--ephemeral"]);
+  assert.deepEqual(requests[1]?.args.slice(0, 2), ["--model", "cheap-claude"]);
   assert.ok(requests[0]?.stdin.includes("codex-real-id"));
   assert.equal(requests[0]?.stdin.includes("claude-real-id"), false);
   assert.ok(requests[1]?.stdin.includes("claude-real-id"));
@@ -134,6 +138,63 @@ test("metadata mode never starts a provider process", async () => {
   });
   assert.equal(called, false);
   assert.deepEqual(result, { summaries: [], warnings: [] });
+});
+
+test("small batches keep one failed session from hiding successful summaries", async () => {
+  let calls = 0;
+  const result = await summarizeSessionsWithProviderClis(
+    createEmptyData().settings,
+    "2026-07-12",
+    [session({ id: "first" }), session({ id: "second", path: "/tmp/second.jsonl" })],
+    {
+      batchSize: 1,
+      concurrency: 1,
+      runner: async (request) => {
+        calls += 1;
+        if (request.stdin.includes('"id": "first"')) throw new Error("first failed");
+        return {
+          stdout: `${JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify({ sessions: [{ id: "second", title: "第二条成功", summary: "保留成功结果。", artifacts: [], status: "active" }] }) } })}\n`,
+          stderr: ""
+        };
+      }
+    }
+  );
+  assert.equal(calls, 2);
+  assert.equal(result.summaries[0]?.title, "第二条成功");
+  assert.ok(result.warnings.some((warning) => warning.includes("first failed")));
+});
+
+test("completed batches are published before a slower sibling finishes", async () => {
+  let releaseSlow: (() => void) | undefined;
+  const slowGate = new Promise<void>((resolve) => { releaseSlow = resolve; });
+  let publishFast: (() => void) | undefined;
+  const fastPublished = new Promise<void>((resolve) => { publishFast = resolve; });
+  let finished = false;
+  const pending = summarizeSessionsWithProviderClis(
+    createEmptyData().settings,
+    "2026-07-12",
+    [session({ id: "fast" }), session({ id: "slow", path: "/tmp/slow.jsonl" })],
+    {
+      batchSize: 1,
+      concurrency: 2,
+      runner: async (request) => {
+        const id = request.stdin.includes('"id": "fast"') ? "fast" : "slow";
+        if (id === "slow") await slowGate;
+        return {
+          stdout: `${JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify({ sessions: [{ id, title: `${id} title`, summary: `${id} summary`, artifacts: [], status: "active" }] }) } })}\n`,
+          stderr: ""
+        };
+      },
+      onBatch: (batch) => {
+        if (batch.summaries.some((summary) => summary.id === "fast")) publishFast?.();
+      }
+    }
+  ).finally(() => { finished = true; });
+  await fastPublished;
+  assert.equal(finished, false);
+  releaseSlow?.();
+  const result = await pending;
+  assert.deepEqual(result.summaries.map((summary) => summary.id), ["fast", "slow"]);
 });
 
 test("parses Codex JSONL and Claude fenced result envelopes", () => {

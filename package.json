@@ -1,12 +1,16 @@
 {
-  "name": "daily-cockpit",
-  "version": "0.3.1",
-  "description": "A persistent Obsidian whiteboard for local Agent projects, sessions, Markdown notes, and spatial context.",
-  "main": "main.js",
+  "name": "work-continuity",
+  "version": "0.4.0",
+  "description": "A standalone macOS work-continuity app for local Codex and Claude Code sessions.",
+  "main": "dist/desktop/main.js",
   "type": "module",
   "scripts": {
-    "build": "node scripts/build-runtime-helper.mjs && node esbuild.config.mjs production",
-    "dev": "node esbuild.config.mjs development --watch",
+    "build": "npm run build:plugin && npm run build:desktop",
+    "build:plugin": "node scripts/build-runtime-helper.mjs && node esbuild.config.mjs production",
+    "build:desktop": "node scripts/build-desktop.mjs production",
+    "dev": "node scripts/build-desktop.mjs development --watch",
+    "dev:plugin": "node esbuild.config.mjs development --watch",
+    "start:desktop": "npm run build:desktop && electron .",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --import tsx --test tests/*.test.ts",
     "test:e2e": "npm run build && node scripts/build-e2e.mjs && playwright test",
@@ -15,14 +19,15 @@
     "lint": "npm run typecheck && node scripts/privacy-check.mjs && node scripts/readme-check.mjs",
     "install:local": "npm run build && node scripts/install-local.mjs",
     "verify:local": "node scripts/verify-local.mjs",
-    "release:macos": "npm run build && node scripts/build-release.mjs",
+    "release:plugin:macos": "npm run build:plugin && node scripts/build-release.mjs",
+    "dist:macos": "npm run build:desktop && electron-builder --mac dmg zip --arm64 --x64",
     "verify:release": "node scripts/verify-release.mjs",
     "check": "npm run lint && npm test && npm run test:e2e"
   },
   "keywords": [
-    "obsidian",
-    "obsidian-plugin",
-    "infinite-canvas",
+    "macos",
+    "electron",
+    "work-continuity",
     "agent-whiteboard",
     "task-decomposition",
     "local-ai",
@@ -31,12 +36,52 @@
   ],
   "author": "WdBlink",
   "license": "MIT",
+  "build": {
+    "appId": "com.wdblink.workcontinuity",
+    "productName": "Work Continuity",
+    "directories": {
+      "app": "dist/desktop",
+      "output": "dist/macos",
+      "buildResources": "app/desktop/assets"
+    },
+    "files": [
+      "**/*"
+    ],
+    "npmRebuild": false,
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "app-icon.icns",
+      "artifactName": "${productName}-${version}-macos-${arch}.${ext}",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ]
+    },
+    "dmg": {
+      "artifactName": "${productName}-${version}-macos-${arch}.${ext}"
+    }
+  },
   "devDependencies": {
     "@playwright/test": "1.61.1",
     "@types/jsdom": "28.0.3",
     "@types/node": "26.1.0",
     "@types/react": "^19.0.14",
     "@types/react-dom": "^19.0.6",
+    "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
     "esbuild": "0.28.1",
     "jsdom": "29.1.1",
     "obsidian": "1.13.1",
