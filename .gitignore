@@ -13,3 +13,4 @@ coverage/
 dist/
 runtime/process-membership
 /ctx
+.od-skills/

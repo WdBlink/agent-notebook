@@ -1,32 +1,32 @@
-# Agent Whiteboard v0.3.1
+# Work Continuity v0.4.0
 
-The first macOS-focused Agent Whiteboard release turns Daily Cockpit into a persistent, local-first workspace for Agent projects and work continuity.
+This release begins the standalone macOS application line. Work Continuity is no longer packaged as an Obsidian plugin.
 
 ## Highlights
 
-- One persistent canvas for multiple local project directories.
-- Codex Agent and shell terminal nodes with isolated embedded PTYs.
-- Markdown notes, spatial headings, connections, frame resize, and saved viewport state.
-- Read-only Codex and Claude Code session recovery with independently selectable providers.
-- Verified session IDs, working directories, transcript locations, and copy-only resume commands.
-- Previous-work brief and project grouping remain available in the Daily Cockpit view.
+- Restores the visual skeleton, proportions, spacing, date control, activity pulse, and editorial hierarchy of the selected first HTML demo.
+- Uses the supplied stuffed Traveler's Notebook artwork as the app, Dock, window, and installer icon.
+- Reads local Codex and Claude Code session stores independently or together.
+- Replaces provider-default session names with background-generated Chinese work titles and progress summaries, using explicitly selected inexpensive provider models.
+- Opens immediately from metadata, reuses a local transcript-versioned summary cache, and updates every product surface when new summaries arrive.
+- Shows whether each title came from Codex AI, Claude AI, or metadata fallback, with model and job diagnostics under Sources.
+- Uses a desktop-native ESM-safe process runner and isolated, concurrency-limited summary batches so one slow or failed transcript cannot suppress the rest of the day.
+- Publishes and caches each completed session summary immediately instead of waiting for every slower sibling to finish.
+- Restores the original Demo's desktop Brief sidebar behavior (`position: sticky; top: 94px`) while keeping its responsive static layout below 900px.
+- Presents Brief, Sessions, project-scoped Timeline, interactive Map, and Sources surfaces.
+- Limits AI continuation suggestions to the three highest-value next actions.
+- Marks active dates in the calendar for historical review.
+- Keeps exact session IDs, transcript paths, working directories, and copy-only resume commands available as evidence.
+- Treats provider-side Codex archival as canonical completion evidence, even when an AI summary suggests more work remains.
+- Opens session history in a spacious, read-only in-app transcript reader instead of depending on an external editor.
+- Loads bounded current CTX documents in read-only mode when a project has a context store.
+- Animates Map focus changes without replacing node DOM identity, expands child branches, and exposes source documents in the inspector.
+- Adapts the desktop shell into a compact bottom-navigation layout at narrow window sizes.
+- Packages separate macOS DMGs for Apple Silicon and Intel through Electron Builder.
 
-## macOS downloads
+## Boundaries
 
-- `agent-whiteboard-v0.3.1-macos-arm64.dmg` — Apple Silicon (M1, M2, M3, M4, and later).
-- `agent-whiteboard-v0.3.1-macos-x64.dmg` — Intel Macs.
-- Matching ZIP files remain available as fallback downloads.
-- `SHA256SUMS.txt` — release archive checksums.
-
-Each DMG contains a guided macOS installer and a manually installable `daily-cockpit` plugin folder. Obsidian Desktop 1.5.0 or later is required.
-
-The installer is not signed or notarized in this first release. If macOS blocks it, Control-click **Install Agent Whiteboard.command** and choose **Open** after verifying the download and checksum.
-
-To install, open the matching DMG, run **Install Agent Whiteboard.command**, choose your Obsidian vault, then enable **Agent Whiteboard** in Obsidian's Community plugins settings.
-
-## Current boundaries
-
-- The first release supports macOS only.
-- Codex Agent and shell terminals can be launched from the whiteboard; Claude Code launch is not enabled yet.
-- Session stores remain owned by their provider and are never edited by Agent Whiteboard.
-- The release is not yet listed in the Obsidian community-plugin directory.
+- macOS only for the first standalone build.
+- Unsigned and not notarized.
+- Local-first and read-only: provider transcripts and CTX documents are never modified.
+- Obsidian plugin artifacts from v0.2.0 through v0.3.1 are deprecated prototypes.

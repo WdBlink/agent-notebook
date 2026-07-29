@@ -6,7 +6,9 @@ const requiredFiles = [
   ".github/logo-light.svg",
   ".github/logo-dark.svg",
   ".github/cockpit-preview.png",
-  ".github/repo-meta.yml"
+  ".github/repo-meta.yml",
+  "app/desktop/assets/app-icon.png",
+  "app/desktop/assets/app-icon.icns"
 ];
 for (const file of requiredFiles) {
   await assertFile(file);
@@ -14,7 +16,7 @@ for (const file of requiredFiles) {
 
 const readme = await fs.readFile("README.md", "utf8");
 const requiredSnippets = [
-  "Daily Cockpit",
+  "Work Continuity",
   "macOS Install",
   "Quick Start From Source",
   "Source Install",
@@ -22,11 +24,13 @@ const requiredSnippets = [
   "Verification",
   "Local Model",
   "Session Recovery",
-  "one global React Flow canvas with no project switcher",
+  "Brief",
+  "Sessions",
+  "Timeline",
+  "Map",
+  "Sources",
   "Node unit/integration suite",
   "Playwright browser suite",
-  "aborts and joins timed-out mutators",
-  "independent recovery budgets",
   "MIT"
 ];
 
@@ -37,7 +41,8 @@ for (const snippet of requiredSnippets) {
 }
 
 for (const retired of [
-  "project switching",
+  "Installs as `Agent Whiteboard.app`",
+  "one global React Flow canvas with no project switcher",
   "keep independent boards",
   "53 unit/integration tests",
   "14 Playwright browser tests",
@@ -48,11 +53,11 @@ for (const retired of [
   "36 Playwright browser tests"
 ]) {
   if (readme.includes(retired)) {
-    throw new Error(`README still contains retired whiteboard wording: ${retired}`);
+    throw new Error(`README still contains retired product wording: ${retired}`);
   }
 }
 
-console.log("readme-check: README assets and required sections are present");
+console.log("readme-check: Work Continuity assets and required sections are present");
 
 async function assertFile(file) {
   const stat = await fs.stat(file);

@@ -24,6 +24,7 @@ export interface RuntimeFileSystem {
 
 export interface SessionScanOptions {
   now?: Date;
+  date?: string;
   roots?: string[];
   providers?: SessionProvider[];
   fs?: RuntimeFileSystem;
@@ -84,7 +85,7 @@ export async function loadAgentWorkSnapshot(
   options: SessionScanOptions = {}
 ): Promise<AgentWorkSnapshot> {
   const now = options.now ?? new Date();
-  const date = previousLocalDateString(now);
+  const date = options.date ?? previousLocalDateString(now);
   const enabledProviders = new Set(options.providers ?? settings.enabledSessionProviders ?? DEFAULT_SESSION_PROVIDERS);
   const sourceDescriptors = normalizeRoots(options.roots ?? settings.sessionScanRoots)
     .map((source) => ({ source, platform: inferPlatform(source) }))
@@ -160,7 +161,7 @@ export function mergeSessionSummaries(
       title: truncateOneLine(summary.title, 120),
       summary: truncateOneLine(summary.summary, 600),
       artifacts: normalizeGeneratedArtifacts(summary.artifacts, session),
-      status: summary.status,
+      status: isArchivedSessionPath(session.path) ? "completed" : summary.status,
       summarySource: summary.platform
     };
   });
@@ -300,11 +301,17 @@ async function readSession(
     const content = await fs.readFile(candidate.path, "utf8");
     if (hasTargetDayActivity(content, day) === false) return null;
     const session = extractWorkSessionFromText(content, candidate.path, candidate.platform, candidate.updatedAt);
+    if (session && isArchivedSessionPath(candidate.path)) session.status = "completed";
     if (session) await enrichWorkspaceMetadata(session, fs);
     return session;
   } catch {
     return null;
   }
+}
+
+export function isArchivedSessionPath(value: string): boolean {
+  return /(?:^|[\\/])archived_sessions(?:[\\/]|$)/i.test(value)
+    || /(?:^|[\\/])archive(?:[\\/]|$)/i.test(value);
 }
 
 async function enrichWorkspaceMetadata(session: AgentWorkSession, fs: RuntimeFileSystem): Promise<void> {
