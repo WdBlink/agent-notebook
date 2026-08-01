@@ -20,8 +20,8 @@
     "install:local": "npm run build && node scripts/install-local.mjs",
     "verify:local": "node scripts/verify-local.mjs",
     "release:plugin:macos": "npm run build:plugin && node scripts/build-release.mjs",
-    "dist:macos": "npm run build:desktop && electron-builder --mac dmg zip --arm64 --x64",
-    "dist:macos:arch": "npm run build:desktop && electron-builder --mac dmg zip",
+    "dist:macos": "npm run build:desktop && electron-builder --mac dmg zip --arm64 --x64 --publish never",
+    "dist:macos:arch": "npm run build:desktop && electron-builder --mac dmg zip --publish never",
     "verify:release": "node scripts/verify-release.mjs",
     "verify:desktop-release": "node scripts/verify-desktop-release.mjs",
     "check": "npm run lint && npm test && npm run test:e2e"
