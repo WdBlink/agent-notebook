@@ -40,7 +40,8 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run test:e2e
-      - run: npm run dist:macos:arch -- --${{ matrix.arch }}
+      - name: Build installers without implicit publishing
+        run: npm run build:desktop && npx electron-builder --mac dmg zip --${{ matrix.arch }} --publish never
       - name: Create checksums
         run: |
           cd dist/macos
