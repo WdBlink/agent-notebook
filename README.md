@@ -1,16 +1,16 @@
 # Work Continuity
 
-Work Continuity is a local, agent-native work continuity app for macOS. It reads Codex and Claude Code session stores, reconstructs what happened by project and day, and turns that evidence into a daily brief, a continuation queue, a timeline, and a navigable context map.
+Work Continuity is a local work notebook for macOS. It reads Codex and Claude Code session stores, groups the day's work by project, lets you keep timestamped notes, and turns an explicit end-of-day review into a stable sealed page.
 
 The product is a standalone Mac app. It does not require Obsidian and it never edits provider-owned session files.
 
 ## What The App Does
 
-- **Brief** — see what moved today and the three most useful next actions.
+- **Today** — keep local notes beside a cross-session project synthesis, then organize and seal the day.
 - **Sessions** — inspect every matching Codex and Claude Code session, its status, path, and resume command.
 - **Timeline** — review activity across all projects or within one project.
 - **Map** — navigate a project tree derived from session evidence and bounded CTX documents; focusing a node preserves spatial context and expands its children.
-- **Sources** — independently enable Codex and Claude Code and see exactly which local stores are being read.
+- **Sources** — enable Codex and Claude Code independently, inspect read roots, and manage the local LLM-Wiki root.
 - **Historical review** — open the restrained date picker; days with known session activity are marked.
 
 The app uses the supplied stuffed Traveler's Notebook artwork as its product icon and keeps the first-demo visual language: a narrow dark rail, quiet editorial spacing, strong hierarchy, and warm physical-material cues.
@@ -20,8 +20,8 @@ The app uses the supplied stuffed Traveler's Notebook artwork as its product ico
 The first release supports both current Mac architectures:
 
 ```text
-dist/macos/Work Continuity-0.4.0-macos-arm64.dmg
-dist/macos/Work Continuity-0.4.0-macos-x64.dmg
+dist/macos/Work Continuity-0.5.0-macos-arm64.dmg
+dist/macos/Work Continuity-0.5.0-macos-x64.dmg
 ```
 
 Use the `arm64` image on Apple Silicon Macs and the `x64` image on Intel Macs. These initial builds are unsigned and not notarized, so local testing may require Control-clicking the app and choosing **Open**.
@@ -31,8 +31,11 @@ Use the `arm64` image on Apple Silicon Macs and the `x64` image on Intel Macs. T
 1. Launch Work Continuity.
 2. Open **Sources** and enable Codex, Claude Code, or both.
 3. Choose a date from the calendar. Activity dots identify dates with known sessions.
-4. Use **Brief** for the daily answer, **Sessions** for exact evidence, **Timeline** for sequence, and **Map** for project context.
-5. Copy a resume command when you want to continue work. Work Continuity never executes it automatically.
+4. Use **Today** to capture thoughts and expand the project records assembled from multiple sessions.
+5. When you finish thinking for the day, choose **开始整理今天**, write what you want to keep, select up to three bookmarks, and seal the page.
+6. Copy a resume command when you want to continue work. Work Continuity never executes it automatically.
+
+Notes remain local until you explicitly use the paper-plane action. From there you can export a card, write a source into the configured `LLM-Wiki/raw`, or hand it to an existing project's CTX intake.
 
 Default read roots:
 
@@ -73,7 +76,7 @@ npx playwright test tests/e2e/desktop-app.spec.ts
 npm run test:e2e
 ```
 
-The Node unit/integration suite covers session parsing, source selection, grouping, recovery metadata, and shared models. The Playwright browser suite includes a real Electron launch, responsive window checks, all five product surfaces, command-palette navigation, stable Map node identity during animated focus changes, and read-only CTX source inspection.
+The Node unit/integration suite covers session parsing, project grouping, note persistence, sealing, source selection, recovery metadata, and shared models. The Playwright browser suite covers the two-pane Today surface, note delivery, EOD sealing, responsive window checks, all five product surfaces, command-palette navigation, stable Map node identity during animated focus changes, and CTX source inspection.
 
 ## Local Model / Smart Session Titles
 
@@ -88,9 +91,11 @@ Session recovery is intentionally copy-only. The evidence panel shows the provid
 ## Privacy And Safety
 
 - Provider session stores are read-only.
-- CTX access is bounded to current overview, progress, specification, and accepted decision documents.
+- CTX reading is bounded to current overview, progress, specification, and accepted decision documents.
+- A note is written to LLM-Wiki or CTX only after an explicit delivery action; the original note is preserved.
+- The app refuses project delivery when the project has no existing CTX store.
 - Provider toggles are applied before filesystem discovery.
-- App preferences stay in the macOS application-support directory.
+- App preferences, notes, drafts, sealed pages, and delivery receipts stay in the macOS application-support directory.
 - No transcript is uploaded by the app.
 - Resume actions copy commands instead of executing external tools.
 

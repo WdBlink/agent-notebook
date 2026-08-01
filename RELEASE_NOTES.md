@@ -1,32 +1,27 @@
-# Work Continuity v0.4.0
+# Work Continuity v0.5.0
 
-This release begins the standalone macOS application line. Work Continuity is no longer packaged as an Obsidian plugin.
+This release turns the standalone macOS app into a daily work notebook: collect thoughts while working, understand the day across Codex and Claude Code, then deliberately organize and seal a stable page.
 
 ## Highlights
 
-- Restores the visual skeleton, proportions, spacing, date control, activity pulse, and editorial hierarchy of the selected first HTML demo.
-- Uses the supplied stuffed Traveler's Notebook artwork as the app, Dock, window, and installer icon.
-- Reads local Codex and Claude Code session stores independently or together.
-- Replaces provider-default session names with background-generated Chinese work titles and progress summaries, using explicitly selected inexpensive provider models.
-- Opens immediately from metadata, reuses a local transcript-versioned summary cache, and updates every product surface when new summaries arrive.
-- Shows whether each title came from Codex AI, Claude AI, or metadata fallback, with model and job diagnostics under Sources.
-- Uses a desktop-native ESM-safe process runner and isolated, concurrency-limited summary batches so one slow or failed transcript cannot suppress the rest of the day.
-- Publishes and caches each completed session summary immediately instead of waiting for every slower sibling to finish.
-- Restores the original Demo's desktop Brief sidebar behavior (`position: sticky; top: 94px`) while keeping its responsive static layout below 900px.
-- Presents Brief, Sessions, project-scoped Timeline, interactive Map, and Sources surfaces.
-- Limits AI continuation suggestions to the three highest-value next actions.
-- Marks active dates in the calendar for historical review.
-- Keeps exact session IDs, transcript paths, working directories, and copy-only resume commands available as evidence.
-- Treats provider-side Codex archival as canonical completion evidence, even when an AI summary suggests more work remains.
-- Opens session history in a spacious, read-only in-app transcript reader instead of depending on an external editor.
-- Loads bounded current CTX documents in read-only mode when a project has a context store.
-- Animates Map focus changes without replacing node DOM identity, expands child branches, and exposes source documents in the inspector.
-- Adapts the desktop shell into a compact bottom-navigation layout at narrow window sizes.
-- Packages separate macOS DMGs for Apple Silicon and Intel through Electron Builder.
+- Replaces the former Brief dashboard with the Today notebook surface from the validated HTML prototype.
+- Keeps timestamped notes and the Daily Page in separate, independently scrolling panes across wide and compact windows.
+- Groups multiple provider sessions into project-level work records instead of repeating the Codex or Claude Code session list.
+- Expands each work record to show what changed, what remains uncertain, and every contributing source session.
+- Adds durable local note creation, editing, favorites, deletion, and delivery history.
+- Exports an individual note as a standalone SVG card.
+- Routes a note explicitly to the configured `LLM-Wiki/raw` intake or an existing project's CTX intake; the original note remains unchanged.
+- Adds the complete EOD flow: bounded draft, personal writing, up to three continuation bookmarks, temporary draft save, and immutable sealing.
+- Preserves Sessions, Timeline, Map, Sources, in-app transcript reading, provider selection, and copy-only resume commands.
+- Adds a versioned, normalized, atomically replaced notebook store separate from provider evidence and semantic caches.
+- Fixes the GitHub release workflow so tags build and verify the independent Electron application rather than the deprecated Obsidian plugin.
+- Packages and verifies separate macOS DMGs and ZIP archives for Apple Silicon and Intel.
 
 ## Boundaries
 
-- macOS only for the first standalone build.
+- macOS only.
 - Unsigned and not notarized.
-- Local-first and read-only: provider transcripts and CTX documents are never modified.
-- Obsidian plugin artifacts from v0.2.0 through v0.3.1 are deprecated prototypes.
+- Provider session stores remain read-only.
+- Wiki and CTX writes occur only after an explicit note-delivery action.
+- Project delivery requires an existing CTX store; the app never adopts CTX automatically.
+- Continuation remains copy-only: the app does not own a terminal, PTY, tmux session, or provider process.

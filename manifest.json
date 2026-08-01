@@ -1,7 +1,7 @@
 {
   "id": "daily-cockpit",
   "name": "Agent Whiteboard",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "minAppVersion": "1.5.0",
   "description": "Deprecated legacy Obsidian prototype for Agent Whiteboard.",
   "author": "WdBlink",

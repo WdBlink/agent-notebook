@@ -5,6 +5,7 @@ import {
   CalendarDays,
   Check,
   ChevronLeft,
+  ChevronRight,
   Clipboard,
   Clock3,
   Command,
@@ -13,14 +14,20 @@ import {
   FileText,
   FolderOpen,
   GitBranch,
+  Image,
   Layers3,
   ListChecks,
+  LockKeyhole,
   Map as MapIcon,
   Network,
+  Plus,
   RefreshCw,
   Search,
+  Send,
   Settings,
   ShieldCheck,
+  Star,
+  Trash2,
   X
 } from "lucide-react";
 import { createRoot } from "react-dom/client";
@@ -28,7 +35,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactElement } from "react";
 import { buildResumeCommand } from "../../src/resume";
 import type { AgentSessionStatus, AgentWorkSession, SessionProvider } from "../../src/types";
-import type { DesktopState, ProjectContextDocument, ProjectContextState, SessionTranscriptState } from "./api";
+import type { DailyDraftInput, DailyWorkRecord, DesktopNotebookState, DesktopState, NotebookNote, ProjectContextDocument, ProjectContextState, SessionTranscriptState } from "./api";
 
 type ViewKey = "brief" | "sessions" | "timeline" | "map" | "sources";
 type StatusFilter = "all" | AgentSessionStatus;
@@ -73,7 +80,7 @@ interface DrawnEdge {
 }
 
 const viewLabels: Record<ViewKey, string> = {
-  brief: "Brief",
+  brief: "今日",
   sessions: "Sessions",
   timeline: "Timeline",
   map: "Map",
@@ -206,6 +213,10 @@ function App(): ReactElement {
     window.setTimeout(() => setNotice(null), 1900);
   }
 
+  function updateNotebook(notebook: DesktopNotebookState): void {
+    setState((current) => current ? { ...current, notebook } : current);
+  }
+
   const sessions = state?.data.workSessionSnapshot.sessions ?? [];
   const projects = useMemo(() => groupSessionsByProject(sessions), [sessions]);
   const selectedSessions = useMemo(() => sessionsForProject(projects, sessions, selectedProjectKey), [projects, sessions, selectedProjectKey]);
@@ -233,7 +244,7 @@ function App(): ReactElement {
           onRefresh={() => void refresh()}
         />
         {notice ? <div className="toast" role="status">{notice}</div> : null}
-        <section className="content" onPointerDown={() => { if (calendarOpen) setCalendarOpen(false); if (providerOpen) setProviderOpen(false); }}>
+        <section className={`content${view === "brief" ? " today-content" : ""}`} onPointerDown={() => { if (calendarOpen) setCalendarOpen(false); if (providerOpen) setProviderOpen(false); }}>
           {view === "brief" ? (
             <Brief
               state={state}
@@ -246,6 +257,9 @@ function App(): ReactElement {
               onEvidence={setEvidenceSession}
               onResume={(session) => void copyResume(session)}
               onRetry={() => void refresh()}
+              onNotebook={updateNotebook}
+              onNotice={showNotice}
+              onSession={(session) => { setView("sessions"); setEvidenceSession(session); }}
             />
           ) : null}
           {view === "sessions" ? (
@@ -283,6 +297,13 @@ function App(): ReactElement {
               onProvider={(provider) => void toggleProvider(provider)}
               onAddRoot={() => void addRoot()}
               onOpenPath={(target) => void window.agentWhiteboard.openPath(target)}
+              onKnowledgeRoot={async () => {
+                const directory = await window.agentWhiteboard.chooseDirectory();
+                if (!directory) return;
+                const next = await window.agentWhiteboard.updateSettings({ knowledgeRoot: directory });
+                setState(next);
+                showNotice("LLM-Wiki 根目录已经更新");
+              }}
             />
           ) : null}
         </section>
@@ -365,6 +386,7 @@ function Topbar({
           {calendarOpen ? <CalendarPopover state={state} onDate={onDate} /> : null}
         </div>
         <button type="button" className="icon-button" aria-label="打开日期日历" aria-expanded={calendarOpen} onClick={onCalendar}><CalendarDays size={18} /></button>
+        <button type="button" className="icon-button" aria-label="查看后一天" onClick={() => onDate(shiftDate(state.activeDate, 1))} disabled={state.activeDate >= localDate()}><ChevronRight size={20} /></button>
       </div>
       <div className="top-actions">
         <button type="button" className="command-button" onClick={onCommand}><Search size={18} /><span>搜索项目、会话或证据</span><kbd>⌘ K</kbd></button>
@@ -430,7 +452,10 @@ function Brief({
   onProject,
   onEvidence,
   onResume,
-  onRetry
+  onRetry,
+  onNotebook,
+  onNotice,
+  onSession
 }: {
   state: DesktopState;
   projects: ProjectGroup[];
@@ -442,53 +467,187 @@ function Brief({
   onEvidence(session: AgentWorkSession): void;
   onResume(session: AgentWorkSession): void;
   onRetry(): void;
+  onNotebook(notebook: DesktopNotebookState): void;
+  onNotice(message: string): void;
+  onSession(session: AgentWorkSession): void;
 }): ReactElement {
-  const [filter, setFilter] = useState<StatusFilter>("all");
-  const suggestions = buildSuggestions(sessions).filter((item) => filter === "all" || item.session.status === filter);
-  const allSuggestions = buildSuggestions(sessions);
-  const completed = sessions.filter((session) => session.status === "completed").length;
-  const resumable = sessions.filter((session) => Boolean(buildResumeCommand(session))).length;
-  const scopedProjects = selectedProjectKey === "all" ? projects : projects.filter((project) => project.key === selectedProjectKey);
+  const [editorId, setEditorId] = useState<string | "new" | null>(null);
+  const [closing, setClosing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const notebook = state.notebook;
+  const baseRecords = notebook.page.status === "unformed" ? notebook.previewRecords : notebook.page.workRecords;
+  const records = selectedProjectKey === "all" ? baseRecords : baseRecords.filter((record) => record.projectKey === selectedProjectKey);
+  const editorNote = editorId && editorId !== "new" ? notebook.notes.find((note) => note.id === editorId) ?? null : null;
+
+  async function runNotebookAction(action: () => Promise<DesktopNotebookState>, success?: string): Promise<DesktopNotebookState | undefined> {
+    setBusy(true);
+    setActionError(null);
+    try {
+      const next = await action();
+      onNotebook(next);
+      if (success) onNotice(success);
+      return next;
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "手帐操作没有完成。");
+      return undefined;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function beginClosing(): Promise<void> {
+    if (notebook.page.status === "sealed") return;
+    const next = notebook.page.status === "draft"
+      ? notebook
+      : await runNotebookAction(() => window.agentWhiteboard.composeDailyPage(state.activeDate));
+    if (next) setClosing(true);
+  }
+
   return (
-    <section className="view brief-view">
-      <h1 className="sr-only">今天从这里继续</h1>
-      <ProjectStrip projects={projects} selected={selectedProjectKey} onProject={onProject} />
-      {loading ? <BriefSkeleton /> : error ? <StateMessage kind="error" title="本地证据暂时无法读取" detail={error} action="重新扫描" onAction={onRetry} /> : sessions.length === 0 ? <StateMessage kind="empty" title="这一天没有确认的活动" detail="系统不会因为文件很新、会话被打开过，或只有初始化记录，就虚构你今天干过活。" /> : (
-        <div className="brief-grid">
-          <div className="primary-column">
-            <section className="hero-brief">
-              <div className="hero-copy"><span className="kicker">Across {scopedProjects.length} projects · {sessions.length} sessions</span><h2>{summaryLine(scopedProjects, sessions)}</h2><p>{summaryDetail(sessions)}</p></div>
-              <div className="hero-metrics">
-                <div><strong>{String(allSuggestions.length).padStart(2, "0")}</strong><span>open</span></div>
-                <div><strong>{String(scopedProjects.length).padStart(2, "0")}</strong><span>projects</span></div>
-                <div><strong>{String(sessions.length).padStart(2, "0")}</strong><span>sessions</span></div>
-              </div>
-            </section>
-            <div className="section-bar">
-              <div><span className="kicker">AI prioritized · 智能接续建议</span><h2>接着做 <small>{String(allSuggestions.length).padStart(2, "0")} suggestions</small></h2><p>最值得继续的工作，最多显示三项</p></div>
-              <StatusFilters value={filter} onChange={setFilter} />
+    <section className="view today-view">
+      <h1 className="sr-only">今日</h1>
+      {loading ? <BriefSkeleton /> : error ? <StateMessage kind="error" title="本地证据暂时无法读取" detail={error} action="重新扫描" onAction={onRetry} /> : (
+        <div className="today-ledger">
+          <aside className="capture-tray" aria-label="今日便签">
+            <header className="capture-head">
+              <span className="folio-label">{formatShortDate(state.activeDate)} · {notebook.notes.length}</span>
+              <button type="button" className="round-action" aria-label="新建便签" onClick={() => setEditorId("new")}><Plus size={18} /></button>
+            </header>
+            <div className="capture-list">
+              {notebook.notes.map((note) => <NotebookNoteCard key={note.id} note={note} onOpen={() => setEditorId(note.id)} />)}
+              {notebook.notes.length === 0 ? <button type="button" className="empty-note-line" onClick={() => setEditorId("new")}><Plus size={16} /><span>写下一条</span></button> : null}
             </div>
-            <div className="continuity-list">
-              {suggestions.map((item, index) => (
-                <article className="continuity-row" key={`${item.session.platform}:${item.session.id}:${item.session.path}`}>
-                  <span className="work-index">{String(index + 1).padStart(2, "0")}</span>
-                  <StatusBadge status={item.session.status} />
-                  <div className="work-main"><small>{platformLabel(item.session.platform)} · {item.label}</small><strong>{item.title}</strong><p>{item.detail}</p></div>
-                  <div className="row-actions"><button type="button" onClick={() => onEvidence(item.session)}>Evidence</button><button type="button" className="primary-action" onClick={() => onResume(item.session)} disabled={!buildResumeCommand(item.session)}>Continue</button></div>
-                </article>
-              ))}
-              {suggestions.length === 0 ? <EmptyLine text="这个筛选范围里没有需要继续的工作。" /> : null}
-            </div>
-          </div>
-          <aside className="brief-side">
-            <section><h3>Execution order</h3><div className="execution-list">{allSuggestions.map((item, index) => <button key={item.session.id} type="button" onClick={() => onEvidence(item.session)}><span>{String(index + 1).padStart(2, "0")}</span><strong>{item.title}</strong><small>{item.detail}</small></button>)}</div></section>
-            <section><h3>Continuity pulse</h3><ActivityPulse sessions={sessions} /></section>
-            <section><h3>Snapshot provenance</h3><div className="source-line"><span>Providers</span><code>{state.data.settings.enabledSessionProviders.length || "00"}</code></div><div className="source-line"><span>User sessions</span><code>{sessions.length}</code></div><div className="source-line"><span>Resumable</span><code>{resumable}</code></div><div className="source-line"><span>Completed</span><code>{completed}</code></div></section>
           </aside>
+          <article className={`daily-canvas${notebook.page.status === "sealed" ? " is-sealed" : ""}`}>
+            <ProjectStrip projects={projects} selected={selectedProjectKey} onProject={onProject} />
+            <section className="daily-paper">
+              <header className="daily-paper-head">
+                <div><span className="folio-label">{weekdayEnglish(state.activeDate)} · {formatMonthDay(state.activeDate)}</span><h2>{notebook.page.status === "sealed" ? "今天到这里" : "今日页草稿"}</h2></div>
+                {notebook.page.status === "sealed" ? <div className="seal-mark"><LockKeyhole size={15} />封</div> : <span className="page-state">OPEN PAGE<br />{records.length} RECORDS</span>}
+              </header>
+              <div className="daily-records">
+                {records.map((record) => <DailyRecordRow key={record.id} record={record} sessions={sessions} onSession={onSession} />)}
+                {records.length === 0 ? <div className="blank-page"><p>唯有那些沉思默想的时刻，才是真正的你我。</p></div> : null}
+              </div>
+              {notebook.page.status === "sealed" && notebook.page.reflection ? <blockquote className="personal-ink">{notebook.page.reflection}</blockquote> : null}
+              {notebook.page.status === "sealed" && notebook.page.bookmarks.length ? (
+                <section className="sealed-bookmarks"><span className="folio-label">NEXT OPEN</span>{notebook.page.bookmarks.map((bookmark) => {
+                  const session = sessions.find((item) => item.id === bookmark.sessionId && item.path === bookmark.sessionPath);
+                  return <button type="button" key={bookmark.id} onClick={() => {
+                    if (session) onResume(session);
+                    else if (bookmark.resumeCommand) void window.agentWhiteboard.copyText(bookmark.resumeCommand).then((copied) => onNotice(copied ? "已复制续上命令" : "复制续上命令失败"));
+                  }} disabled={!session && !bookmark.resumeCommand}><strong>{bookmark.title}</strong><small>{bookmark.projectName} · {platformLabel(bookmark.provider)}</small></button>;
+                })}</section>
+              ) : null}
+              <footer className="daily-paper-foot">
+                <div><strong>{notebook.page.status === "sealed" ? `已封存 · ${formatDateTime(notebook.page.sealedAt)}` : notebook.page.status === "draft" ? "整理稿已暂存" : "这一页还没有封存"}</strong><small>{notebook.page.status === "sealed" ? "页面内容保持只读" : "便签和会话原文仍保留各自来源"}</small></div>
+                {notebook.page.status !== "sealed" && state.activeDate <= localDate() ? <button type="button" className="seal-entry" disabled={busy} onClick={() => void beginClosing()}>{notebook.page.status === "draft" ? "继续整理今天" : "开始整理今天"}</button> : null}
+              </footer>
+            </section>
+          </article>
         </div>
       )}
+      {editorId ? <NotebookNoteEditor
+        note={editorNote}
+        projects={projects}
+        busy={busy}
+        error={actionError}
+        knowledgeRawPath={notebook.knowledgeRawPath}
+        onClose={() => { setEditorId(null); setActionError(null); }}
+        onCreate={async (input) => {
+          const next = await runNotebookAction(() => window.agentWhiteboard.createNotebookNote(state.activeDate, input), "便签已留在今天");
+          if (next) setEditorId(next.notes.at(-1)?.id ?? null);
+        }}
+        onSave={async (id, patch) => { await runNotebookAction(() => window.agentWhiteboard.updateNotebookNote(id, patch), "便签已保存"); }}
+        onDelete={async (id) => { const next = await runNotebookAction(() => window.agentWhiteboard.deleteNotebookNote(id), "便签已删除"); if (next) setEditorId(null); }}
+        onCard={async (id) => { const result = await runNotebookResult(() => window.agentWhiteboard.exportNotebookNoteCard(id), onNotebook, setBusy, setActionError); if (result) onNotice(`卡片已生成：${result.path}`); }}
+        onWiki={async (id) => { const result = await runNotebookResult(() => window.agentWhiteboard.routeNotebookNoteToWiki(id), onNotebook, setBusy, setActionError); if (result) onNotice("已写入 LLM-Wiki/raw，等待 Wiki 协议吸收"); }}
+        onProject={async (id, projectPath) => { const result = await runNotebookResult(() => window.agentWhiteboard.routeNotebookNoteToProject(id, projectPath), onNotebook, setBusy, setActionError); if (result) onNotice("已交给项目 CTX 协议"); }}
+      /> : null}
+      {closing ? <ClosingRitual
+        notebook={notebook}
+        date={state.activeDate}
+        busy={busy}
+        error={actionError}
+        onClose={() => { setClosing(false); setActionError(null); }}
+        onSave={async (input) => { await runNotebookAction(() => window.agentWhiteboard.saveDailyDraft(state.activeDate, input), "整理稿已保存"); }}
+        onSeal={async (input) => { const next = await runNotebookAction(() => window.agentWhiteboard.sealDailyPage(state.activeDate, input), "今天已经封好"); if (next) setClosing(false); }}
+      /> : null}
     </section>
   );
+}
+
+function NotebookNoteCard({ note, onOpen }: { note: NotebookNote; onOpen(): void }): ReactElement {
+  return <button type="button" className="capture-card" data-kind={note.kind} onClick={onOpen}><time>{formatTime(note.createdAt)}</time><span><strong>{note.title}</strong><p>{note.body}</p><small>{note.sourceLabel}{note.deliveries.length ? ` · ${deliveryMark(note)}` : ""}</small></span>{note.favorite ? <Star className="note-favorite" size={15} fill="currentColor" /> : null}</button>;
+}
+
+function DailyRecordRow({ record, sessions, onSession }: { record: DailyWorkRecord; sessions: AgentWorkSession[]; onSession(session: AgentWorkSession): void }): ReactElement {
+  return <details className="daily-record"><summary><time>{formatTime(record.occurredAt)}</time><span><small>{record.projectName}</small><strong>{record.title}</strong></span><ChevronRight size={16} /></summary><div className="record-detail"><p>{record.summary}</p><dl><div><dt>今天改变了什么</dt><dd>{record.changed}</dd></div><div><dt>还没想清楚</dt><dd>{record.uncertainty}</dd></div></dl><div className="record-sources">{record.sessions.map((reference) => {
+    const session = sessions.find((item) => item.id === reference.id && item.path === reference.path && item.platform === reference.platform);
+    return <button type="button" key={`${reference.platform}:${reference.id}:${reference.path}`} onClick={() => session && onSession(session)} disabled={!session}><span>{platformAbbreviation(reference.platform)}</span>{reference.title}</button>;
+  })}</div></div></details>;
+}
+
+function NotebookNoteEditor({
+  note,
+  projects,
+  busy,
+  error,
+  knowledgeRawPath,
+  onClose,
+  onCreate,
+  onSave,
+  onDelete,
+  onCard,
+  onWiki,
+  onProject
+}: {
+  note: NotebookNote | null;
+  projects: ProjectGroup[];
+  busy: boolean;
+  error: string | null;
+  knowledgeRawPath: string;
+  onClose(): void;
+  onCreate(input: { title: string; body: string }): Promise<void>;
+  onSave(id: string, patch: Partial<Pick<NotebookNote, "title" | "body" | "favorite">>): Promise<void>;
+  onDelete(id: string): Promise<void>;
+  onCard(id: string): Promise<void>;
+  onWiki(id: string): Promise<void>;
+  onProject(id: string, projectPath: string): Promise<void>;
+}): ReactElement {
+  const [title, setTitle] = useState(note?.title ?? "");
+  const [body, setBody] = useState(note?.body ?? "");
+  const [shareOpen, setShareOpen] = useState(false);
+  const [projectOpen, setProjectOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  useEffect(() => { setTitle(note?.title ?? ""); setBody(note?.body ?? ""); }, [note?.id]);
+  return <div className="note-layer" role="dialog" aria-modal="true" aria-label={note ? note.title : "新建便签"}><button type="button" className="note-backdrop" aria-label="关闭便签" onClick={onClose} /><section className="note-editor"><header><button type="button" aria-label="关闭" onClick={onClose}><ChevronLeft size={20} /></button><span>{note ? `${formatDateTime(note.createdAt)} · ${body.length}` : "QUICK CAPTURE"}</span><div>{note ? <><button type="button" aria-label={note.favorite ? "取消收藏" : "收藏"} onClick={() => void onSave(note.id, { favorite: !note.favorite })}><Star size={19} fill={note.favorite ? "currentColor" : "none"} /></button><button type="button" aria-label="删除" onClick={() => setDeleteOpen(true)}><Trash2 size={19} /></button><button type="button" aria-label="分享便签" onClick={() => { setShareOpen(!shareOpen); setProjectOpen(false); }}><Send size={19} /></button></> : null}</div></header><div className="note-paper"><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="标题（可以留空）" aria-label="便签标题" /><textarea autoFocus={!note} value={body} onChange={(event) => setBody(event.target.value)} placeholder="写下刚刚想到的事，或者粘贴一个链接…" aria-label="便签正文" /></div>{error ? <div className="note-error"><AlertTriangle size={14} />{error}</div> : null}<footer><div>{note?.deliveries.map((delivery) => <span key={`${delivery.kind}:${delivery.deliveredAt}`}>{delivery.kind.toUpperCase()}</span>)}</div><button type="button" className="primary-action" disabled={busy || !body.trim()} onClick={() => void (note ? onSave(note.id, { title, body }) : onCreate({ title, body }))}>{note ? "保存" : "收下"}</button></footer>{note && shareOpen ? <div className="note-share-menu"><button type="button" onClick={() => void onCard(note.id)}><Image size={20} /><span><strong>生成精美卡片</strong><small>导出独立 SVG 卡片并打开</small></span></button><button type="button" onClick={() => void onWiki(note.id)}><Archive size={20} /><span><strong>归入 LLM-Wiki</strong><small>{knowledgeRawPath}</small></span></button><button type="button" onClick={() => setProjectOpen(true)}><Network size={20} /><span><strong>归入项目</strong><small>交给项目 CTX 协议自动吸收</small></span></button></div> : null}{note && projectOpen ? <div className="project-route-menu"><header><strong>交给项目 CTX</strong><button type="button" onClick={() => setProjectOpen(false)}><X size={16} /></button></header>{projects.filter((project) => project.path).map((project) => <button type="button" key={project.key} onClick={() => void onProject(note.id, project.path!)}><span>{project.name}</span><small>{project.path}</small></button>)}</div> : null}{note && deleteOpen ? <div className="delete-confirm"><p>删除这条便签？已经送往其他位置的副本不会被删除。</p><button type="button" onClick={() => setDeleteOpen(false)}>取消</button><button type="button" className="danger" onClick={() => void onDelete(note.id)}>删除</button></div> : null}</section></div>;
+}
+
+function ClosingRitual({ notebook, date, busy, error, onClose, onSave, onSeal }: { notebook: DesktopNotebookState; date: string; busy: boolean; error: string | null; onClose(): void; onSave(input: DailyDraftInput): Promise<void>; onSeal(input: DailyDraftInput): Promise<void> }): ReactElement {
+  const [reflection, setReflection] = useState(notebook.page.reflection);
+  const [bookmarkIds, setBookmarkIds] = useState(notebook.page.bookmarks.map((item) => item.id));
+  const input = { reflection, bookmarkIds };
+  function toggleBookmark(id: string): void {
+    setBookmarkIds((current) => current.includes(id) ? current.filter((item) => item !== id) : current.length < 3 ? [...current, id] : current);
+  }
+  return <div className="closing-layer" role="dialog" aria-modal="true" aria-label="整理今天"><section className="closing-sheet"><header><div><span className="folio-label">END OF DAY · {formatShortDate(date)}</span><h2>收笔之前</h2></div><button type="button" aria-label="退出整理" onClick={onClose}><X size={20} /></button></header><div className="closing-grid"><section className="closing-records"><span className="folio-label">TODAY · {notebook.page.workRecords.length}</span>{notebook.page.workRecords.map((record) => <article key={record.id}><time>{formatTime(record.occurredAt)}</time><div><small>{record.projectName}</small><strong>{record.title}</strong><p>{record.summary}</p></div></article>)}</section><aside className="closing-ink"><label><span className="folio-label">PERSONAL INK</span><textarea value={reflection} onChange={(event) => setReflection(event.target.value)} placeholder="我今天真正想留下的是……" /></label><section><span className="folio-label">明天从哪里继续 · 最多 3 项</span><div className="bookmark-choices">{notebook.continuationCandidates.map((bookmark) => <button type="button" key={bookmark.id} aria-pressed={bookmarkIds.includes(bookmark.id)} onClick={() => toggleBookmark(bookmark.id)}><span>{bookmarkIds.includes(bookmark.id) ? <Check size={13} /> : null}</span><div><strong>{bookmark.title}</strong><small>{bookmark.projectName} · {platformLabel(bookmark.provider)}</small></div></button>)}</div></section></aside></div>{error ? <div className="closing-error"><AlertTriangle size={15} />{error}</div> : null}<footer><button type="button" disabled={busy} onClick={() => void onSave(input)}>暂存整理稿</button><button type="button" className="seal-button" disabled={busy} onClick={() => void onSeal(input)}>收笔并封存</button></footer></section></div>;
+}
+
+async function runNotebookResult<T extends { notebook: DesktopNotebookState }>(action: () => Promise<T>, onNotebook: (notebook: DesktopNotebookState) => void, setBusy: (busy: boolean) => void, setError: (message: string | null) => void): Promise<T | undefined> {
+  setBusy(true);
+  setError(null);
+  try {
+    const result = await action();
+    onNotebook(result.notebook);
+    return result;
+  } catch (error) {
+    setError(error instanceof Error ? error.message : "手帐操作没有完成。");
+    return undefined;
+  } finally {
+    setBusy(false);
+  }
 }
 
 function BriefSkeleton(): ReactElement {
@@ -667,13 +826,14 @@ function DocumentDrawer({ document, onClose, onOpen }: { document: ProjectContex
   return <div className="drawer-layer"><button className="drawer-backdrop" type="button" aria-label="关闭项目文档" onClick={onClose} /><aside className="document-drawer"><header><div><span className="kicker">Project document / read only</span><h2>{document.label}</h2><code>{document.relativePath}</code></div><button type="button" aria-label="关闭" onClick={onClose}><X size={19} /></button></header><pre>{document.content}</pre><footer><button type="button" onClick={onOpen}><ExternalLink size={15} />在默认应用打开</button></footer></aside></div>;
 }
 
-function SourcesPanel({ state, onProvider, onAddRoot, onOpenPath }: { state: DesktopState; onProvider(provider: SessionProvider): void; onAddRoot(): void; onOpenPath(target: string): void }): ReactElement {
+function SourcesPanel({ state, onProvider, onAddRoot, onOpenPath, onKnowledgeRoot }: { state: DesktopState; onProvider(provider: SessionProvider): void; onAddRoot(): void; onOpenPath(target: string): void; onKnowledgeRoot(): void }): ReactElement {
   const enabled = new Set(state.data.settings.enabledSessionProviders);
   return (
     <section className="view sources-view">
       <ViewHeading kicker="Trust surface / local evidence" title="Sources" />
       <div className="source-grid">
         <div className="source-main">
+          <div className="source-record knowledge-root"><Archive size={18} /><span><strong>LLM-Wiki knowledge root</strong><code>{state.notebook.knowledgeRoot}</code><small>INGEST → {state.notebook.knowledgeRawPath}</small></span><em>protocol</em><div><button type="button" onClick={() => onOpenPath(state.notebook.knowledgeRawPath)}>打开 raw</button><button type="button" onClick={onKnowledgeRoot}>管理根目录</button></div></div>
           {(["codex", "claude"] as SessionProvider[]).map((provider) => <button type="button" className="source-record" key={provider} onClick={() => onProvider(provider)}><Bot size={18} /><span><strong>{platformLabel(provider)} sessions</strong><code>{provider === "codex" ? "~/.codex/sessions/" : "~/.claude/projects/"}</code></span><em data-enabled={enabled.has(provider)}>{enabled.has(provider) ? "connected" : "disabled"}</em></button>)}
           <div className="source-record static"><Archive size={18} /><span><strong>Archived sessions</strong><code>provider-specific archives</code></span><em>read only</em></div>
           <div className="source-record static"><FileText size={18} /><span><strong>Project context</strong><code>&lt;project&gt;/ctx → current overview, progress, spec, decisions</code></span><em>on demand</em></div>
@@ -682,7 +842,7 @@ function SourcesPanel({ state, onProvider, onAddRoot, onOpenPath }: { state: Des
           <button type="button" className="add-root" onClick={onAddRoot}>添加读取目录</button>
         </div>
         <aside>
-          <div className="policy-list"><div><strong>Provider files</strong><span>read-only</span></div><div><strong>Smart titles</strong><span>provider CLI · ephemeral</span></div><div><strong>Summary cache</strong><span>local only</span></div><div><strong>Resume action</strong><span>copy only</span></div></div>
+          <div className="policy-list"><div><strong>Provider files</strong><span>read-only</span></div><div><strong>Notebook pages</strong><span>local · durable</span></div><div><strong>Wiki / CTX delivery</strong><span>explicit only</span></div><div><strong>Resume action</strong><span>copy only</span></div></div>
           <section><span className="kicker">Snapshot diagnostics</span><p>{state.data.workSessionSnapshot.generatedAt ? `生成于 ${formatTime(state.data.workSessionSnapshot.generatedAt)}` : "尚未生成"}</p>{state.summaryJob?.message ? <div className={`diagnostic ${state.summaryJob.status === "complete" ? "ok" : ""}`}><Bot size={14} />{state.summaryJob.message}</div> : null}{state.data.workSessionSnapshot.warnings.length ? state.data.workSessionSnapshot.warnings.map((warning) => <div className="diagnostic" key={warning}><AlertTriangle size={14} />{warning}</div>) : <div className="diagnostic ok"><Check size={14} />没有读取警告</div>}</section>
           <button type="button" className="storage-button" onClick={() => onOpenPath(state.userDataPath)}><Settings size={17} />打开应用数据目录</button>
         </aside>
@@ -909,6 +1069,37 @@ function summaryJobLabel(state: DesktopState): string {
 function formatTime(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
+}
+
+function formatDateTime(value?: string): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
+}
+
+function formatShortDate(value: string): string {
+  const date = parseLocalDate(value);
+  return `${String(date.getMonth() + 1).padStart(2, "0")}.${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function formatMonthDay(value: string): string {
+  const date = parseLocalDate(value);
+  return new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric" }).format(date).toUpperCase();
+}
+
+function weekdayEnglish(value: string): string {
+  return new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(parseLocalDate(value)).toUpperCase();
+}
+
+function platformAbbreviation(platform: string): string {
+  if (platform === "codex") return "CX";
+  if (platform === "claude") return "CC";
+  return platform.slice(0, 2).toUpperCase();
+}
+
+function deliveryMark(note: NotebookNote): string {
+  const kinds = new Set(note.deliveries.map((delivery) => delivery.kind));
+  return [kinds.has("wiki") ? "WIKI" : "", kinds.has("project") ? "CTX" : "", kinds.has("card") ? "CARD" : ""].filter(Boolean).join(" · ");
 }
 
 function transcriptDay(value?: string): string {
