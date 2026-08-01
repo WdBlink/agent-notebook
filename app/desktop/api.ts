@@ -6,7 +6,95 @@ export interface DesktopState {
   activityDates: string[];
   appVersion: string;
   userDataPath: string;
+  notebook: DesktopNotebookState;
   summaryJob?: DesktopSummaryJob;
+}
+
+export type NotebookNoteKind = "thought" | "web" | "note";
+export type NotebookDeliveryKind = "card" | "wiki" | "project";
+
+export interface NotebookNoteDelivery {
+  kind: NotebookDeliveryKind;
+  deliveredAt: string;
+  target: string;
+  status: "delivered" | "queued";
+}
+
+export interface NotebookNote {
+  id: string;
+  logicalDate: string;
+  createdAt: string;
+  updatedAt: string;
+  title: string;
+  body: string;
+  kind: NotebookNoteKind;
+  sourceLabel: string;
+  favorite: boolean;
+  deliveries: NotebookNoteDelivery[];
+}
+
+export interface DailySessionReference {
+  id: string;
+  platform: AgentPlatform;
+  path: string;
+  title: string;
+}
+
+export interface DailyWorkRecord {
+  id: string;
+  projectKey: string;
+  projectName: string;
+  title: string;
+  summary: string;
+  changed: string;
+  uncertainty: string;
+  occurredAt: string;
+  sessions: DailySessionReference[];
+}
+
+export interface DailyContinuationBookmark {
+  id: string;
+  title: string;
+  projectName: string;
+  provider: AgentPlatform;
+  sessionId: string;
+  sessionPath: string;
+  cwd?: string;
+  resumeCommand?: string;
+}
+
+export interface DailyNotebookPage {
+  schemaVersion: 1;
+  logicalDate: string;
+  status: "unformed" | "draft" | "sealed";
+  createdAt?: string;
+  updatedAt?: string;
+  evidenceCutoff?: string;
+  sealedAt?: string;
+  workRecords: DailyWorkRecord[];
+  reflection: string;
+  bookmarks: DailyContinuationBookmark[];
+}
+
+export interface DesktopNotebookState {
+  notes: NotebookNote[];
+  page: DailyNotebookPage;
+  previewRecords: DailyWorkRecord[];
+  continuationCandidates: DailyContinuationBookmark[];
+  knowledgeRoot: string;
+  knowledgeRawPath: string;
+  pendingPreviousDates: string[];
+  latestSealedDate?: string;
+}
+
+export interface NotebookNoteInput {
+  title?: string;
+  body: string;
+}
+
+export interface DailyDraftInput {
+  reflection: string;
+  bookmarkIds: string[];
 }
 
 export interface DesktopSummaryJob {
@@ -20,6 +108,7 @@ export interface DesktopSummaryJob {
 export interface DesktopSettingsPatch {
   enabledSessionProviders?: SessionProvider[];
   sessionScanRoots?: string[];
+  knowledgeRoot?: string;
 }
 
 export interface ProjectContextDocument {
@@ -67,6 +156,15 @@ export interface DesktopApi {
   getState(date?: string): Promise<DesktopState>;
   refreshSessions(date?: string): Promise<DesktopState>;
   updateSettings(patch: DesktopSettingsPatch): Promise<DesktopState>;
+  createNotebookNote(date: string, input: NotebookNoteInput): Promise<DesktopNotebookState>;
+  updateNotebookNote(noteId: string, patch: Partial<Pick<NotebookNote, "title" | "body" | "favorite">>): Promise<DesktopNotebookState>;
+  deleteNotebookNote(noteId: string): Promise<DesktopNotebookState>;
+  exportNotebookNoteCard(noteId: string): Promise<{ notebook: DesktopNotebookState; path: string }>;
+  routeNotebookNoteToWiki(noteId: string): Promise<{ notebook: DesktopNotebookState; path: string }>;
+  routeNotebookNoteToProject(noteId: string, projectPath: string): Promise<{ notebook: DesktopNotebookState; path: string }>;
+  composeDailyPage(date: string): Promise<DesktopNotebookState>;
+  saveDailyDraft(date: string, input: DailyDraftInput): Promise<DesktopNotebookState>;
+  sealDailyPage(date: string, input: DailyDraftInput): Promise<DesktopNotebookState>;
   getProjectContext(projectPath: string): Promise<ProjectContextState>;
   getSessionTranscript(request: SessionTranscriptRequest): Promise<SessionTranscriptState>;
   chooseDirectory(): Promise<string | null>;

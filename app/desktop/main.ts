@@ -8,8 +8,23 @@ import { loadAgentWorkSnapshot, mergeSessionSummaries, type RuntimeFileStat, typ
 import { DEFAULT_SESSION_SCAN_ROOTS } from "../../src/constants";
 import { createEmptyData, localDateString, normalizeData, setWorkSessionSnapshot } from "../../src/state";
 import type { CockpitData, SessionProvider } from "../../src/types";
-import type { DesktopSettingsPatch, DesktopState, DesktopSummaryJob, ProjectContextDocument, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState } from "./api";
+import type { DailyDraftInput, DesktopNotebookState, DesktopSettingsPatch, DesktopState, DesktopSummaryJob, NotebookNote, NotebookNoteInput, ProjectContextDocument, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState } from "./api";
 import { desktopCliRunner } from "./cli-runner";
+import {
+  composeDailyPage,
+  createEmptyNotebookDocument,
+  createNotebookNote,
+  deleteNotebookNote,
+  findNotebookNote,
+  markNotebookDelivery,
+  normalizeNotebookDocument,
+  notebookStateForDate,
+  saveDailyDraft,
+  sealDailyPage,
+  setKnowledgeRoot,
+  updateNotebookNote,
+  type NotebookDocument
+} from "./notebook-store";
 import {
   createEmptySessionSummaryCache,
   normalizeSessionSummaryCache,
@@ -24,6 +39,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.AGENT_WHITEBOARD_DEV === "1";
 const storeFileName = "cockpit-data.json";
 const summaryCacheFileName = "session-summary-cache-v1.json";
+const notebookFileName = "notebook-v1.json";
 const summaryModels: SummaryModelMap = {
   codex: process.env.WORK_CONTINUITY_CODEX_SUMMARY_MODEL?.trim() || "gpt-5.3-codex-spark",
   claude: process.env.WORK_CONTINUITY_CLAUDE_SUMMARY_MODEL?.trim() || "fable"
@@ -31,6 +47,7 @@ const summaryModels: SummaryModelMap = {
 
 let mainWindow: BrowserWindow | undefined;
 let data: CockpitData | undefined;
+let notebook = createEmptyNotebookDocument();
 let activeDate = localDateString();
 let summaryCache = createEmptySessionSummaryCache();
 let summaryRunId = 0;
@@ -51,7 +68,7 @@ const runtimeFs: RuntimeFileSystem = {
 app.setName("Work Continuity");
 
 void app.whenReady().then(async () => {
-  data = await loadStore();
+  [data, notebook] = await Promise.all([loadStore(), loadNotebook()]);
   summaryCache = await loadSummaryCache();
   await refreshSnapshot(activeDate);
   if (process.platform === "darwin") app.dock?.setIcon(path.join(__dirname, "app-icon.png"));
@@ -94,8 +111,97 @@ ipcMain.handle("desktop:update-settings", async (_event, patch: DesktopSettingsP
     }
   });
   await persistStore(data);
+  if (patch.knowledgeRoot !== undefined) {
+    notebook = setKnowledgeRoot(notebook, patch.knowledgeRoot);
+    await persistNotebook();
+  }
   await refreshSnapshot(activeDate);
   return buildState();
+});
+
+ipcMain.handle("desktop:create-notebook-note", async (_event, date: string, input: NotebookNoteInput) => {
+  const logicalDate = cleanDate(date, activeDate);
+  return mutateNotebook(logicalDate, (current) => createNotebookNote(current, logicalDate, input));
+});
+
+ipcMain.handle("desktop:update-notebook-note", async (_event, noteId: string, patch: Partial<Pick<NotebookNote, "title" | "body" | "favorite">>) => {
+  return mutateNotebook(activeDate, (current) => updateNotebookNote(current, cleanIdentifier(noteId), patch));
+});
+
+ipcMain.handle("desktop:delete-notebook-note", async (_event, noteId: string) => {
+  return mutateNotebook(activeDate, (current) => deleteNotebookNote(current, cleanIdentifier(noteId)));
+});
+
+ipcMain.handle("desktop:export-notebook-note-card", async (_event, noteId: string) => {
+  const note = findNotebookNote(notebook, cleanIdentifier(noteId));
+  const outputDirectory = path.join(app.getPath("documents"), "Work Continuity Cards");
+  await fs.mkdir(outputDirectory, { recursive: true });
+  const target = path.join(outputDirectory, `${note.logicalDate}-${safeFileName(note.title)}-${note.id.slice(-8)}.svg`);
+  await fs.writeFile(target, renderNoteCard(note), "utf8");
+  await mutateNotebook(activeDate, (current) => markNotebookDelivery(current, note.id, {
+    kind: "card",
+    deliveredAt: new Date().toISOString(),
+    target,
+    status: "delivered"
+  }));
+  await shell.openPath(target);
+  return { notebook: notebookView(activeDate), path: target };
+});
+
+ipcMain.handle("desktop:route-notebook-note-to-wiki", async (_event, noteId: string) => {
+  const note = findNotebookNote(notebook, cleanIdentifier(noteId));
+  const root = await fs.realpath(expandHome(notebook.knowledgeRoot)).catch(() => "");
+  if (!root) throw new Error("LLM-Wiki 根目录不存在，请先在 Sources 中设置。");
+  const rawRoot = path.join(root, "raw");
+  const targetDirectory = path.join(rawRoot, "work-continuity", note.logicalDate);
+  await fs.mkdir(targetDirectory, { recursive: true });
+  const target = path.join(targetDirectory, `${timestampSlug()}-${safeFileName(note.title)}.md`);
+  await fs.writeFile(target, renderProtocolCapture(note, "llm-wiki"), { encoding: "utf8", flag: "wx" });
+  await mutateNotebook(activeDate, (current) => markNotebookDelivery(current, note.id, {
+    kind: "wiki",
+    deliveredAt: new Date().toISOString(),
+    target,
+    status: "queued"
+  }));
+  return { notebook: notebookView(activeDate), path: target };
+});
+
+ipcMain.handle("desktop:route-notebook-note-to-project", async (_event, noteId: string, requestedProjectPath: string) => {
+  const note = findNotebookNote(notebook, cleanIdentifier(noteId));
+  const projectPath = await verifiedSnapshotProjectPath(requestedProjectPath);
+  const ctxStore = await fs.realpath(path.join(projectPath, "ctx")).catch(() => "");
+  if (!ctxStore) throw new Error("这个项目还没有可读取的 CTX；应用不会替用户自动采用 CTX。");
+  const targetDirectory = path.join(ctxStore, "scratch", "inbox");
+  await fs.mkdir(targetDirectory, { recursive: true });
+  const target = path.join(targetDirectory, `${note.logicalDate}-${timestampSlug()}-${safeFileName(note.title)}.md`);
+  await fs.writeFile(target, renderProtocolCapture(note, "ctx", projectPath), { encoding: "utf8", flag: "wx" });
+  await mutateNotebook(activeDate, (current) => markNotebookDelivery(current, note.id, {
+    kind: "project",
+    deliveredAt: new Date().toISOString(),
+    target,
+    status: "queued"
+  }));
+  return { notebook: notebookView(activeDate), path: target };
+});
+
+ipcMain.handle("desktop:compose-daily-page", async (_event, date: string) => {
+  const logicalDate = cleanDate(date, activeDate);
+  const current = await ensureLoaded();
+  return mutateNotebook(logicalDate, (document) => composeDailyPage(document, logicalDate, current.workSessionSnapshot.sessions));
+});
+
+ipcMain.handle("desktop:save-daily-draft", async (_event, date: string, input: DailyDraftInput) => {
+  const logicalDate = cleanDate(date, activeDate);
+  const current = await ensureLoaded();
+  const candidates = notebookStateForDate(notebook, logicalDate, current.workSessionSnapshot.sessions).continuationCandidates;
+  return mutateNotebook(logicalDate, (document) => saveDailyDraft(document, logicalDate, input, candidates));
+});
+
+ipcMain.handle("desktop:seal-daily-page", async (_event, date: string, input: DailyDraftInput) => {
+  const logicalDate = cleanDate(date, activeDate);
+  const current = await ensureLoaded();
+  const candidates = notebookStateForDate(notebook, logicalDate, current.workSessionSnapshot.sessions).continuationCandidates;
+  return mutateNotebook(logicalDate, (document) => sealDailyPage(document, logicalDate, input, candidates));
 });
 
 ipcMain.handle("desktop:get-project-context", async (_event, projectPath: string) => {
@@ -182,6 +288,44 @@ function storePath(): string {
 
 function summaryCachePath(): string {
   return path.join(app.getPath("userData"), summaryCacheFileName);
+}
+
+function notebookPath(): string {
+  return path.join(app.getPath("userData"), notebookFileName);
+}
+
+async function loadNotebook(): Promise<NotebookDocument> {
+  try {
+    return normalizeNotebookDocument(JSON.parse(await fs.readFile(notebookPath(), "utf8")) as unknown);
+  } catch {
+    return createEmptyNotebookDocument();
+  }
+}
+
+async function persistNotebook(): Promise<void> {
+  await fs.mkdir(app.getPath("userData"), { recursive: true });
+  const temporary = `${notebookPath()}.tmp`;
+  await fs.writeFile(temporary, `${JSON.stringify(notebook, null, 2)}\n`, "utf8");
+  await fs.rename(temporary, notebookPath());
+}
+
+let notebookWriteQueue: Promise<void> = Promise.resolve();
+
+async function mutateNotebook(logicalDate: string, operation: (current: NotebookDocument) => NotebookDocument): Promise<DesktopNotebookState> {
+  let result: DesktopNotebookState | undefined;
+  const write = notebookWriteQueue.then(async () => {
+    notebook = normalizeNotebookDocument(operation(notebook));
+    await persistNotebook();
+    result = notebookView(logicalDate);
+  });
+  notebookWriteQueue = write.catch(() => undefined);
+  await write;
+  if (!result) throw new Error("手帐数据没有完成保存。");
+  return result;
+}
+
+function notebookView(logicalDate: string): DesktopNotebookState {
+  return notebookStateForDate(notebook, logicalDate, data?.workSessionSnapshot.sessions ?? []);
 }
 
 async function loadSummaryCache(): Promise<SessionSummaryCacheDocument> {
@@ -313,13 +457,19 @@ async function broadcastState(): Promise<void> {
 
 async function buildState(): Promise<DesktopState> {
   const current = await ensureLoaded();
-  const activityDates = await findActivityDates(current.settings.sessionScanRoots, current.settings.enabledSessionProviders);
+  const providerActivityDates = await findActivityDates(current.settings.sessionScanRoots, current.settings.enabledSessionProviders);
+  const activityDates = Array.from(new Set([
+    ...providerActivityDates,
+    ...notebook.notes.map((note) => note.logicalDate),
+    ...Object.keys(notebook.pages)
+  ])).sort((a, b) => b.localeCompare(a)).slice(0, 70);
   return {
     data: current,
     activeDate,
     activityDates,
     appVersion: app.getVersion(),
     userDataPath: app.getPath("userData"),
+    notebook: notebookStateForDate(notebook, activeDate, current.workSessionSnapshot.sessions),
     summaryJob
   };
 }
@@ -394,6 +544,12 @@ function cleanPath(value: string): string | undefined {
   return clean && !/[\r\n\0]/.test(clean) ? clean : undefined;
 }
 
+function cleanIdentifier(value: unknown): string {
+  const clean = typeof value === "string" ? value.trim() : "";
+  if (!clean || clean.length > 2_000 || /[\r\n\0]/.test(clean)) throw new Error("无效的本地记录标识。");
+  return clean;
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message.trim() ? error.message.replace(/\s+/g, " ").trim().slice(-220) : "未知错误";
 }
@@ -403,6 +559,65 @@ function expandHome(value: string): string {
   if (value.startsWith("~/")) return path.join(os.homedir(), value.slice(2));
   return value;
 }
+
+async function verifiedSnapshotProjectPath(input: string): Promise<string> {
+  const clean = cleanPath(input);
+  if (!clean) throw new Error("项目路径无效。");
+  const requested = await fs.realpath(expandHome(clean)).catch(() => "");
+  if (!requested) throw new Error("项目目录不存在。");
+  const current = await ensureLoaded();
+  const candidates = current.workSessionSnapshot.sessions
+    .map((session) => session.worktreePath ?? session.projectPath ?? session.repositoryPath)
+    .filter((value): value is string => Boolean(value));
+  for (const candidate of candidates) {
+    const canonical = await fs.realpath(expandHome(candidate)).catch(() => "");
+    if (canonical === requested) return requested;
+  }
+  throw new Error("项目不在当前只读会话快照中，拒绝写入。");
+}
+
+function renderProtocolCapture(note: NotebookNote, protocol: "ctx" | "llm-wiki", projectPath?: string): string {
+  const metadata = [
+    "---",
+    `title: ${yamlString(note.title)}`,
+    `created: ${note.createdAt}`,
+    `logical_date: ${note.logicalDate}`,
+    "source: work-continuity-note",
+    `source_id: ${yamlString(note.id)}`,
+    `protocol: ${protocol}`,
+    "status: pending-absorption",
+    ...(projectPath ? [`project_path: ${yamlString(projectPath)}`] : []),
+    "---",
+    "",
+    `# ${note.title}`,
+    "",
+    note.body,
+    "",
+    "> 原始便签由 Work Continuity 写入；后续分类与吸收由目标协议管理。",
+    ""
+  ];
+  return metadata.join("\n");
+}
+
+function renderNoteCard(note: NotebookNote): string {
+  const lines = wrapCardText(note.body, 25, 12);
+  const body = lines.map((line, index) => `<text x="124" y="${286 + index * 54}" class="body">${escapeXml(line)}</text>`).join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1500" viewBox="0 0 1200 1500"><defs><filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="28" stdDeviation="28" flood-color="#3b2619" flood-opacity=".18"/></filter><pattern id="paper" width="12" height="12" patternUnits="userSpaceOnUse"><path d="M0 11.5h12" stroke="#e8ddca" stroke-width="1"/></pattern></defs><rect width="1200" height="1500" fill="#d9c4a4"/><rect x="70" y="62" width="1060" height="1376" rx="26" fill="#fffaf0" filter="url(#shadow)"/><rect x="70" y="62" width="1060" height="1376" rx="26" fill="url(#paper)"/><rect x="70" y="62" width="18" height="1376" rx="9" fill="#b84f32"/><text x="124" y="142" class="meta">WORK CONTINUITY · ${escapeXml(note.logicalDate)}</text><text x="124" y="226" class="title">${escapeXml(note.title)}</text>${body}<line x1="124" y1="1320" x2="1074" y2="1320" stroke="#d7c9b4"/><text x="124" y="1370" class="foot">${escapeXml(note.sourceLabel)} · ${escapeXml(formatCardTime(note.createdAt))}</text><style>.meta,.foot{font:600 22px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:3px;fill:#8d7965}.title{font:600 50px Georgia,'Songti SC',serif;fill:#2a2723}.body{font:400 34px Georgia,'Songti SC',serif;fill:#514a42}</style></svg>`;
+}
+
+function wrapCardText(value: string, width: number, maxLines: number): string[] {
+  const characters = Array.from(value.replace(/\s+/g, " ").trim());
+  const lines: string[] = [];
+  for (let index = 0; index < characters.length && lines.length < maxLines; index += width) lines.push(characters.slice(index, index + width).join(""));
+  if (characters.length > width * maxLines && lines.length) lines[lines.length - 1] = `${lines.at(-1)?.slice(0, -1)}…`;
+  return lines;
+}
+
+function escapeXml(value: string): string { return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+function yamlString(value: string): string { return JSON.stringify(value.replace(/\r?\n/g, " ")); }
+function safeFileName(value: string): string { return value.replace(/[\\/:*?"<>|\0]/g, "-").replace(/\s+/g, "-").slice(0, 64) || "note"; }
+function timestampSlug(date = new Date()): string { return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z"); }
+function formatCardTime(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }).format(date); }
 
 async function loadProjectContext(input: string): Promise<ProjectContextState> {
   const cleaned = cleanPath(input);

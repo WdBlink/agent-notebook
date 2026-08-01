@@ -61,7 +61,46 @@ const baseSessions = [
 
 async function installDesktopApi(page: Page): Promise<void> {
   await page.addInitScript(({ sessions }) => {
-    const createState = (enabledProviders: string[] = ["codex", "claude"], activeDate = "2026-07-20") => ({
+    const createNotebook = (activeDate: string, scopedSessions: typeof sessions): any => {
+      const groups = new Map<string, typeof scopedSessions>();
+      for (const session of scopedSessions) {
+        const key = session.projectPath ?? `unresolved:${session.platform}`;
+        groups.set(key, [...(groups.get(key) ?? []), session]);
+      }
+      const previewRecords = [...groups.entries()].map(([projectKey, records], index) => ({
+        id: `record-${index}`,
+        projectKey,
+        projectName: projectKey.split("/").pop() ?? projectKey,
+        title: records.length > 1 ? `${records[0]?.title}，并推进 ${records.length - 1} 条相关工作` : records[0]?.title ?? "工作记录",
+        summary: records.map((session) => session.summary).join(" "),
+        changed: `${records.length} 条会话被归并为一条项目脉络。`,
+        uncertainty: records.some((session) => session.status === "blocked") ? "仍有工作受边界阻塞。" : "当前没有额外的未确认边界。",
+        occurredAt: records.at(-1)?.updatedAt ?? "2026-07-20T18:00:00+08:00",
+        sessions: records.map((session) => ({ id: session.id, platform: session.platform, path: session.path, title: session.title }))
+      }));
+      const continuationCandidates = scopedSessions.filter((session) => session.status !== "completed").slice(0, 3).map((session) => ({
+        id: `${session.platform}:${session.id}:${session.path}`,
+        title: session.title,
+        projectName: session.projectPath?.split("/").pop() ?? session.platform,
+        provider: session.platform,
+        sessionId: session.id,
+        sessionPath: session.path,
+        cwd: session.projectPath,
+        resumeCommand: `${session.platform} resume ${session.id}`
+      }));
+      return {
+        notes: [{ id: "note-1", logicalDate: activeDate, createdAt: "2026-07-20T09:18:00+08:00", updatedAt: "2026-07-20T09:18:00+08:00", title: "手帐不是 Agent 平台", body: "真正需要承载的是每天收工时的思维停点，而不是另一套运行监控。", kind: "thought", sourceLabel: "个人记录", favorite: true, deliveries: [] }],
+        page: { schemaVersion: 1, logicalDate: activeDate, status: "unformed", workRecords: [], reflection: "", bookmarks: [] },
+        previewRecords,
+        continuationCandidates,
+        knowledgeRoot: "/workspace/LLM-Wiki",
+        knowledgeRawPath: "/workspace/LLM-Wiki/raw",
+        pendingPreviousDates: []
+      };
+    };
+    const createState = (enabledProviders: string[] = ["codex", "claude"], activeDate = "2026-07-20") => {
+      const scopedSessions = sessions.filter((session: { platform: string }) => enabledProviders.includes(session.platform));
+      return ({
       activeDate,
       activityDates: ["2026-07-20", "2026-07-19", "2026-07-18"],
       appVersion: "0.4.0-test",
@@ -83,14 +122,16 @@ async function installDesktopApi(page: Page): Promise<void> {
         workSessionSnapshot: {
           date: activeDate,
           generatedAt: "2026-07-20T19:00:00+08:00",
-          sessions: sessions.filter((session: { platform: string }) => enabledProviders.includes(session.platform)),
+          sessions: scopedSessions,
           sources: ["~/.codex/sessions", "~/.claude/projects"],
           warnings: []
         },
         whiteboard: { schemaVersion: 3, projects: [], nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } },
         whiteboardRevision: 0
-      }
+      },
+      notebook: createNotebook(activeDate, scopedSessions)
     });
+    };
     let state = createState();
     const stateListeners: Array<(next: ReturnType<typeof createState>) => void> = [];
     (window as unknown as { openedPaths: string[] }).openedPaths = [];
@@ -107,10 +148,50 @@ async function installDesktopApi(page: Page): Promise<void> {
     (window as unknown as { agentWhiteboard: unknown }).agentWhiteboard = {
       getState: async (date?: string) => { state = createState(state.data.settings.enabledSessionProviders, date ?? state.activeDate); return state; },
       refreshSessions: async (date?: string) => { state = createState(state.data.settings.enabledSessionProviders, date ?? state.activeDate); return state; },
-      updateSettings: async (patch: { enabledSessionProviders?: string[]; sessionScanRoots?: string[] }) => {
+      updateSettings: async (patch: { enabledSessionProviders?: string[]; sessionScanRoots?: string[]; knowledgeRoot?: string }) => {
         state = createState(patch.enabledSessionProviders ?? state.data.settings.enabledSessionProviders, state.activeDate);
         if (patch.sessionScanRoots) state.data.settings.sessionScanRoots = patch.sessionScanRoots;
+        if (patch.knowledgeRoot) {
+          state.notebook.knowledgeRoot = patch.knowledgeRoot;
+          state.notebook.knowledgeRawPath = `${patch.knowledgeRoot}/raw`;
+        }
         return state;
+      },
+      createNotebookNote: async (date: string, input: { title?: string; body: string }) => {
+        state.notebook.notes.push({ id: `note-${state.notebook.notes.length + 1}`, logicalDate: date, createdAt: "2026-07-20T20:10:00+08:00", updatedAt: "2026-07-20T20:10:00+08:00", title: input.title || input.body.slice(0, 18), body: input.body, kind: "thought", sourceLabel: "个人记录", favorite: false, deliveries: [] });
+        return state.notebook;
+      },
+      updateNotebookNote: async (noteId: string, patch: Record<string, unknown>) => {
+        const note = state.notebook.notes.find((item: any) => item.id === noteId);
+        if (note) Object.assign(note, patch);
+        return state.notebook;
+      },
+      deleteNotebookNote: async (noteId: string) => {
+        state.notebook.notes = state.notebook.notes.filter((item: any) => item.id !== noteId);
+        return state.notebook;
+      },
+      exportNotebookNoteCard: async (noteId: string) => ({ notebook: state.notebook, path: `/tmp/${noteId}.svg` }),
+      routeNotebookNoteToWiki: async (noteId: string) => {
+        const note = state.notebook.notes.find((item: any) => item.id === noteId);
+        note?.deliveries.push({ kind: "wiki", deliveredAt: "2026-07-20T20:12:00+08:00", target: `/workspace/LLM-Wiki/raw/${noteId}.md`, status: "queued" });
+        return { notebook: state.notebook, path: `/workspace/LLM-Wiki/raw/${noteId}.md` };
+      },
+      routeNotebookNoteToProject: async (noteId: string) => ({ notebook: state.notebook, path: `/workspace/work-continuity/ctx/scratch/inbox/${noteId}.md` }),
+      composeDailyPage: async () => {
+        state.notebook.page = { ...state.notebook.page, status: "draft", createdAt: "2026-07-20T20:00:00+08:00", updatedAt: "2026-07-20T20:00:00+08:00", evidenceCutoff: "2026-07-20T20:00:00+08:00", workRecords: state.notebook.previewRecords };
+        return state.notebook;
+      },
+      saveDailyDraft: async (_date: string, input: { reflection: string; bookmarkIds: string[] }) => {
+        state.notebook.page.reflection = input.reflection;
+        state.notebook.page.bookmarks = state.notebook.continuationCandidates.filter((item: any) => input.bookmarkIds.includes(item.id));
+        return state.notebook;
+      },
+      sealDailyPage: async (_date: string, input: { reflection: string; bookmarkIds: string[] }) => {
+        state.notebook.page.reflection = input.reflection;
+        state.notebook.page.bookmarks = state.notebook.continuationCandidates.filter((item: any) => input.bookmarkIds.includes(item.id));
+        state.notebook.page.status = "sealed";
+        state.notebook.page.sealedAt = "2026-07-20T22:16:00+08:00";
+        return state.notebook;
       },
       getProjectContext: async (projectPath: string) => ({
         projectPath,
@@ -153,26 +234,43 @@ async function installDesktopApi(page: Page): Promise<void> {
 test.beforeEach(async ({ page }) => {
   await installDesktopApi(page);
   await page.goto(desktopUrl);
-  await expect(page.locator(".hero-brief")).toBeVisible();
+  await expect(page.locator(".today-ledger")).toBeVisible();
 });
 
-test("desktop brief preserves the recovered first-version hierarchy", async ({ page }) => {
+test("today notebook keeps the native shell and two independently scrolling panes", async ({ page }) => {
   await page.setViewportSize({ width: 1380, height: 683 });
   await expect(page.locator(".brand-mark")).toHaveAttribute("src", "./app-icon.png");
   const logo = await page.locator(".brand-mark").boundingBox();
   const lastNavigationItem = await page.locator(".rail-nav button").last().boundingBox();
   expect(logo?.y).toBeGreaterThanOrEqual(48);
   expect((lastNavigationItem?.y ?? 0) + (lastNavigationItem?.height ?? 0)).toBeLessThan(590);
-  await expect(page.locator(".hero-brief")).toBeVisible();
-  await expect(page.locator(".continuity-row")).toHaveCount(3);
-  await expect(page.locator(".pulse-chart i")).toHaveCount(24);
+  await expect(page.locator(".capture-card")).toHaveCount(1);
+  await expect(page.locator(".daily-record")).toHaveCount(2);
   await expect(page.locator(".project-strip button").first()).toContainText("02");
-  await expect(page.locator(".brief-side")).toHaveCSS("position", "sticky");
-  await expect(page.locator(".brief-side")).toHaveCSS("top", "94px");
-  await expect(page.locator(".brief-view > .view-heading")).toHaveCount(0);
-  await page.evaluate(() => window.scrollTo(0, 420));
-  await expect.poll(async () => Math.round((await page.locator(".brief-side").boundingBox())?.y ?? -1)).toBe(94);
+  await expect(page.locator(".capture-tray")).toHaveCSS("overflow-y", "auto");
+  await expect(page.locator(".daily-canvas")).toHaveCSS("overflow-y", "auto");
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+});
+
+test("a note stays local until the paper-plane route is explicitly chosen", async ({ page }) => {
+  await page.getByRole("button", { name: "新建便签" }).click();
+  await page.getByRole("textbox", { name: "便签正文" }).fill("记录一个新的产品判断");
+  await page.getByRole("button", { name: "收下" }).click();
+  await expect(page.locator(".capture-card").last()).toContainText("记录一个新的产品判断");
+  await page.getByRole("button", { name: "分享便签" }).click();
+  await page.getByRole("button", { name: /归入 LLM-Wiki/ }).click();
+  await expect(page.getByText("WIKI", { exact: true })).toBeVisible();
+});
+
+test("end-of-day flow stores personal ink and seals an immutable page", async ({ page }) => {
+  await page.getByRole("button", { name: "开始整理今天" }).click();
+  const ritual = page.getByRole("dialog", { name: "整理今天" });
+  await ritual.getByPlaceholder("我今天真正想留下的是……").fill("今天到这里，明天继续验证闭环。");
+  await ritual.locator(".bookmark-choices button").first().click();
+  await ritual.getByRole("button", { name: "收笔并封存" }).click();
+  await expect(page.getByText("今天到这里", { exact: true })).toBeVisible();
+  await expect(page.getByText("今天到这里，明天继续验证闭环。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "开始整理今天" })).toHaveCount(0);
 });
 
 test("complete session ledger, timeline, command search, and source scope stay connected", async ({ page }) => {
@@ -217,7 +315,9 @@ test("map keeps node identity while focusing and exposes current project source"
 test("narrow window collapses to bottom navigation without overflow", async ({ page }) => {
   await page.setViewportSize({ width: 736, height: 809 });
   const rail = await page.locator(".rail").boundingBox();
+  const ledger = await page.locator(".today-ledger").boundingBox();
   expect(rail?.width).toBe(736);
+  expect((ledger?.y ?? 0) + (ledger?.height ?? 0)).toBeLessThanOrEqual(rail?.y ?? 809);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   await page.getByRole("button", { name: "Map", exact: true }).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);

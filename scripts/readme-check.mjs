@@ -24,7 +24,7 @@ const requiredSnippets = [
   "Verification",
   "Local Model",
   "Session Recovery",
-  "Brief",
+  "Today",
   "Sessions",
   "Timeline",
   "Map",
