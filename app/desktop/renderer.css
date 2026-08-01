@@ -619,6 +619,10 @@ code, kbd { font-family: var(--mono); }
   .closing-records, .closing-ink { padding-right: 22px; padding-left: 22px; }
 }
 
+@media (max-width: 900px) {
+  .today-content { height: calc(100vh - 132px); }
+}
+
 @media (max-width: 760px) {
   .today-content { height: calc(100vh - 132px); padding: 9px; }
   .topbar > .date-control > .icon-button:first-child { display: grid; }

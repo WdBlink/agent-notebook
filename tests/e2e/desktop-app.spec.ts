@@ -315,7 +315,9 @@ test("map keeps node identity while focusing and exposes current project source"
 test("narrow window collapses to bottom navigation without overflow", async ({ page }) => {
   await page.setViewportSize({ width: 736, height: 809 });
   const rail = await page.locator(".rail").boundingBox();
+  const ledger = await page.locator(".today-ledger").boundingBox();
   expect(rail?.width).toBe(736);
+  expect((ledger?.y ?? 0) + (ledger?.height ?? 0)).toBeLessThanOrEqual(rail?.y ?? 809);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   await page.getByRole("button", { name: "Map", exact: true }).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);

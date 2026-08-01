@@ -74,9 +74,9 @@ test("sealing freezes work records, reflection, and selected bookmarks", () => {
 });
 
 test("normalization keeps malformed legacy notebook data from entering the renderer", () => {
-  const normalized = normalizeNotebookDocument({ schemaVersion: 99, knowledgeRoot: "/wiki", notes: [{ id: "", body: "invalid" }], pages: { nope: { status: "sealed" } } });
+  const normalized = normalizeNotebookDocument({ schemaVersion: 99, knowledgeRoot: "/wiki", notes: [{ id: "", body: "invalid" }], pages: { nope: { status: "sealed" }, "2026-08-01": { status: "sealed", workRecords: [{ id: "record", projectKey: "/tmp/project", title: "unsafe", sessions: [{ id: {}, path: null }] }] } } });
   assert.equal(normalized.schemaVersion, 1);
   assert.equal(normalized.knowledgeRoot, "/wiki");
   assert.deepEqual(normalized.notes, []);
-  assert.deepEqual(normalized.pages, {});
+  assert.equal(normalized.pages["2026-08-01"]?.workRecords.length, 0);
 });

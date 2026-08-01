@@ -528,7 +528,7 @@ function Brief({
               </header>
               <div className="daily-records">
                 {records.map((record) => <DailyRecordRow key={record.id} record={record} sessions={sessions} onSession={onSession} />)}
-                {records.length === 0 ? <div className="blank-page"><p>唯有那些沉思默想的时刻，才是真正的你我。</p></div> : null}
+                {records.length === 0 ? <div className="blank-page">{notebook.notes.length === 0 ? <p>唯有那些沉思默想的时刻，才是真正的你我。</p> : null}</div> : null}
               </div>
               {notebook.page.status === "sealed" && notebook.page.reflection ? <blockquote className="personal-ink">{notebook.page.reflection}</blockquote> : null}
               {notebook.page.status === "sealed" && notebook.page.bookmarks.length ? (

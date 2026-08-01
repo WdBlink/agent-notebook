@@ -457,7 +457,12 @@ async function broadcastState(): Promise<void> {
 
 async function buildState(): Promise<DesktopState> {
   const current = await ensureLoaded();
-  const activityDates = await findActivityDates(current.settings.sessionScanRoots, current.settings.enabledSessionProviders);
+  const providerActivityDates = await findActivityDates(current.settings.sessionScanRoots, current.settings.enabledSessionProviders);
+  const activityDates = Array.from(new Set([
+    ...providerActivityDates,
+    ...notebook.notes.map((note) => note.logicalDate),
+    ...Object.keys(notebook.pages)
+  ])).sort((a, b) => b.localeCompare(a)).slice(0, 70);
   return {
     data: current,
     activeDate,

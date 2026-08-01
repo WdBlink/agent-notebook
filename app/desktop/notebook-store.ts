@@ -30,7 +30,7 @@ export function normalizeNotebookDocument(value: unknown): NotebookDocument {
   if (!value || typeof value !== "object") return fallback;
   const raw = value as Partial<NotebookDocument>;
   const knowledgeRoot = cleanText(raw.knowledgeRoot, 2_000) || fallback.knowledgeRoot;
-  const notes = Array.isArray(raw.notes) ? raw.notes.map(normalizeNote).filter((note): note is NotebookNote => Boolean(note)) : [];
+  const notes = uniqueNotes(Array.isArray(raw.notes) ? raw.notes.map(normalizeNote).filter((note): note is NotebookNote => Boolean(note)) : []);
   const pages: Record<string, DailyNotebookPage> = {};
   if (raw.pages && typeof raw.pages === "object") {
     for (const [date, page] of Object.entries(raw.pages)) {
@@ -313,9 +313,9 @@ function normalizePage(value: unknown, logicalDate: string): DailyNotebookPage {
     ...(raw.updatedAt ? { updatedAt: cleanTimestamp(raw.updatedAt) } : {}),
     ...(raw.evidenceCutoff ? { evidenceCutoff: cleanTimestamp(raw.evidenceCutoff) } : {}),
     ...(status === "sealed" && raw.sealedAt ? { sealedAt: cleanTimestamp(raw.sealedAt) } : {}),
-    workRecords: Array.isArray(raw.workRecords) ? raw.workRecords.filter(isWorkRecord).map((item) => structuredClone(item)) : [],
+    workRecords: Array.isArray(raw.workRecords) ? raw.workRecords.map(normalizeWorkRecord).filter((item): item is DailyWorkRecord => Boolean(item)) : [],
     reflection: cleanText(raw.reflection, 12_000),
-    bookmarks: Array.isArray(raw.bookmarks) ? raw.bookmarks.filter(isBookmark).slice(0, 3).map((item) => structuredClone(item)) : []
+    bookmarks: Array.isArray(raw.bookmarks) ? raw.bookmarks.map(normalizeBookmark).filter((item): item is DailyContinuationBookmark => Boolean(item)).slice(0, 3) : []
   };
 }
 
@@ -329,12 +329,54 @@ function uniqueBookmarks(bookmarks: DailyContinuationBookmark[]): DailyContinuat
   return bookmarks.filter((bookmark) => !seen.has(bookmark.id) && Boolean(seen.add(bookmark.id)));
 }
 
-function isWorkRecord(value: unknown): value is DailyWorkRecord {
-  return Boolean(value && typeof value === "object" && cleanText((value as DailyWorkRecord).id, 240) && Array.isArray((value as DailyWorkRecord).sessions));
+function normalizeWorkRecord(value: unknown): DailyWorkRecord | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Partial<DailyWorkRecord>;
+  const id = cleanText(raw.id, 240);
+  const projectKey = cleanText(raw.projectKey, 2_000);
+  const title = cleanText(raw.title, 300);
+  if (!id || !projectKey || !title || !Array.isArray(raw.sessions)) return undefined;
+  const sessions = raw.sessions.map((session) => {
+    if (!session || typeof session !== "object") return undefined;
+    const id = cleanText(session.id, 2_000);
+    const path = cleanText(session.path, 4_000);
+    const title = cleanText(session.title, 300);
+    const platform = ["codex", "claude", "minimax", "other"].includes(session.platform) ? session.platform : "other";
+    return id && path && title ? { id, path, title, platform } : undefined;
+  }).filter((session): session is DailyWorkRecord["sessions"][number] => Boolean(session));
+  if (sessions.length === 0) return undefined;
+  return {
+    id,
+    projectKey,
+    projectName: cleanText(raw.projectName, 240) || basename(projectKey),
+    title,
+    summary: cleanText(raw.summary, 8_000),
+    changed: cleanText(raw.changed, 4_000),
+    uncertainty: cleanText(raw.uncertainty, 4_000),
+    occurredAt: cleanTimestamp(raw.occurredAt),
+    sessions
+  };
 }
 
-function isBookmark(value: unknown): value is DailyContinuationBookmark {
-  return Boolean(value && typeof value === "object" && cleanText((value as DailyContinuationBookmark).id, 2_000) && cleanText((value as DailyContinuationBookmark).sessionId, 2_000));
+function normalizeBookmark(value: unknown): DailyContinuationBookmark | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Partial<DailyContinuationBookmark>;
+  const id = cleanText(raw.id, 2_000);
+  const sessionId = cleanText(raw.sessionId, 2_000);
+  const sessionPath = cleanText(raw.sessionPath, 4_000);
+  const title = cleanText(raw.title, 300);
+  if (!id || !sessionId || !sessionPath || !title) return undefined;
+  const provider = ["codex", "claude", "minimax", "other"].includes(raw.provider ?? "") ? raw.provider! : "other";
+  return {
+    id,
+    title,
+    projectName: cleanText(raw.projectName, 240) || "未识别项目",
+    provider,
+    sessionId,
+    sessionPath,
+    ...(cleanText(raw.cwd, 4_000) ? { cwd: cleanText(raw.cwd, 4_000) } : {}),
+    ...(cleanText(raw.resumeCommand, 8_000) ? { resumeCommand: cleanText(raw.resumeCommand, 8_000) } : {})
+  };
 }
 
 function inferSource(body: string): { kind: NotebookNote["kind"]; label: string } {
@@ -363,6 +405,7 @@ function sessionKey(session: AgentWorkSession): string {
 
 function clonePage(page: DailyNotebookPage): DailyNotebookPage { return structuredClone(page); }
 function cloneNote(note: NotebookNote): NotebookNote { return structuredClone(note); }
+function uniqueNotes(notes: NotebookNote[]): NotebookNote[] { const seen = new Set<string>(); return notes.filter((note) => { if (seen.has(note.id)) return false; seen.add(note.id); return true; }); }
 function emptyPage(logicalDate: string): DailyNotebookPage { return { schemaVersion: 1, logicalDate, status: "unformed", workRecords: [], reflection: "", bookmarks: [] }; }
 function cleanText(value: unknown, limit: number): string { return typeof value === "string" ? value.replace(/\0/g, "").trim().slice(0, limit) : ""; }
 function cleanTimestamp(value: unknown): string { const date = new Date(typeof value === "string" ? value : 0); return Number.isNaN(date.getTime()) ? new Date(0).toISOString() : date.toISOString(); }
