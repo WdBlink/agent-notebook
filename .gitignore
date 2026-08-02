@@ -14,3 +14,4 @@ dist/
 runtime/process-membership
 /ctx
 .od-skills/
+.worktrees/
