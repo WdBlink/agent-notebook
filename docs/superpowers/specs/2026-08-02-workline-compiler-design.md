@@ -133,7 +133,14 @@ type CompilationRun = {
   logicalDate: string;
   evidenceCutoff: string;
   sourceHashes: Record<string, string>;
-  status: "preflight" | "compiling" | "blocked" | "ready" | "cancelled";
+  status:
+    | "preflight"
+    | "identifying_boundaries"
+    | "awaiting_boundary_confirmation"
+    | "compiling"
+    | "blocked"
+    | "ready"
+    | "cancelled";
   compilerVersion: string;
   schemaVersion: number;
   createdAt: string;
@@ -315,7 +322,10 @@ interface CompilerProvider {
 ```text
 INDEXED
   → PREFLIGHT
-  → COMPILING
+  → IDENTIFYING_BOUNDARIES
+      ├─ 低置信度边界 → AWAITING_BOUNDARY_CONFIRMATION
+      │                    → 用户确认 → COMPILING
+      └─ 全部高置信度 → COMPILING
       ├─ 核心失败 → BLOCKED
       └─ 验证通过 → READY
                            → REVIEWING
