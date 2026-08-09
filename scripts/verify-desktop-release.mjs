@@ -54,7 +54,7 @@ try {
   assertMarkers("main process", main, {
     "explicit daily-review preparation": ["desktop:prepare-daily-review"],
     "Traceink prompt profile": ["traceink-review-v1"],
-    "frozen Traceink evidence": ["workline-evidence-manifest-v2", "transcriptCapture", "已采纳 byte range"],
+    "frozen Traceink evidence": ["workline-evidence-manifest-v2", "transcriptCapture", "freezeCapturedPrefix"],
     "generation-preserving review store": ["packageGenerations", "activePackageGenerationId"],
     "generation-safe reflection and sealing": ["desktop:save-daily-draft", "desktop:seal-daily-page", "expectedActiveGenerationId"],
     "sealed evidence access": ["desktop:get-session-transcript", "sealed-package"]
@@ -70,7 +70,7 @@ try {
     "explicit daily-review preparation": ["prepareDailyReview"],
     "Today workline board": ["today-board", "today-worklines", "workline-participation"],
     "evidence reader": ["review-reader", "review-block-evidence"],
-    "legacy mutable artifact disclosure": ["当前文件引用（未冻结）"],
+    "legacy mutable artifact disclosure": ["review-evidence-reference"],
     "generation-safe reflection and sealing": ["saveDailyDraft", "review-reflection", "review-seal", "expectedActiveGenerationId"]
   });
   assertStringLiterals("renderer Today Board", renderer, ["raw", "compiled", "stale", "sealed"]);
