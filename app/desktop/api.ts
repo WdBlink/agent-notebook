@@ -1,5 +1,6 @@
 import type { AgentPlatform, CockpitData, SessionProvider } from "../../src/types";
 import type { DailyReviewPackage } from "../../src/workline-review";
+import type { TodayBoardPackageGeneration, TodayBoardProjection } from "../../src/today-board";
 
 export interface DesktopState {
   data: CockpitData;
@@ -65,7 +66,7 @@ export interface DailyContinuationBookmark {
 }
 
 export interface DailyNotebookPage {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   logicalDate: string;
   status: "unformed" | "draft" | "sealed";
   createdAt?: string;
@@ -75,6 +76,9 @@ export interface DailyNotebookPage {
   workRecords: DailyWorkRecord[];
   reflection: string;
   reviewPackage?: DailyReviewPackage;
+  packageGenerations?: TodayBoardPackageGeneration[];
+  activePackageGenerationId?: string;
+  lastCompilationError?: string;
   worklineReflections: DailyWorklineReflection[];
   bookmarks: DailyContinuationBookmark[];
 }
@@ -88,6 +92,7 @@ export interface DailyWorklineReflection {
 export interface DesktopNotebookState {
   notes: NotebookNote[];
   page: DailyNotebookPage;
+  todayBoard: TodayBoardProjection;
   previewRecords: DailyWorkRecord[];
   continuationCandidates: DailyContinuationBookmark[];
   knowledgeRoot: string;

@@ -2,6 +2,7 @@ import path from "node:path";
 import { buildResumeCommand } from "../../src/resume";
 import type { AgentSessionStatus, AgentWorkSession } from "../../src/types";
 import { normalizeDailyReviewPackage, type DailyReviewPackage } from "../../src/workline-review";
+import { createTodayBoardGeneration, legacyTodayBoardGeneration, projectTodayBoard, type TodayBoardPackageGeneration } from "../../src/today-board";
 import type {
   DailyContinuationBookmark,
   DailyDraftInput,
@@ -61,6 +62,7 @@ export function notebookStateForDate(document: NotebookDocument, date: string, s
   return {
     notes: document.notes.filter((note) => note.logicalDate === logicalDate).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(cloneNote),
     page,
+    todayBoard: projectTodayBoard(page, sessions),
     previewRecords,
     continuationCandidates: candidates,
     knowledgeRoot: document.knowledgeRoot,
@@ -163,9 +165,13 @@ export function composeDailyPage(
   const existing = document.pages[logicalDate];
   if (existing?.status === "sealed") throw new Error("这一天已经封页，不能重新整理。");
   const timestamp = now.toISOString();
-  const exactReviewPackage = existing?.reviewPackage ?? (reviewPackage ? structuredClone(reviewPackage) : undefined);
+  const existingGenerations = generationsFor(existing);
+  const appendedGeneration = reviewPackage ? createTodayBoardGeneration(reviewPackage, sessions) : undefined;
+  const packageGenerations = appendedGeneration ? [...existingGenerations, appendedGeneration] : existingGenerations;
+  const activeGeneration = appendedGeneration ?? packageGenerations.at(-1);
+  const exactReviewPackage = activeGeneration?.package;
   const page: DailyNotebookPage = {
-    schemaVersion: exactReviewPackage ? 2 : 1,
+    schemaVersion: 3,
     logicalDate,
     status: "draft",
     createdAt: existing?.createdAt ?? timestamp,
@@ -174,10 +180,30 @@ export function composeDailyPage(
     workRecords: existing?.workRecords.length ? existing.workRecords : compileWorkRecords(sessions),
     reflection: existing?.reflection ?? "",
     ...(exactReviewPackage ? { reviewPackage: exactReviewPackage } : {}),
+    ...(packageGenerations.length ? { packageGenerations } : {}),
+    ...(activeGeneration ? { activePackageGenerationId: activeGeneration.id } : {}),
     worklineReflections: existing?.worklineReflections ?? [],
     bookmarks: existing?.bookmarks ?? []
   };
   return { ...document, pages: { ...document.pages, [logicalDate]: page } };
+}
+
+export function recordDailyCompilationFailure(
+  document: NotebookDocument,
+  logicalDate: string,
+  error: string,
+  now = new Date()
+): NotebookDocument {
+  const existing = document.pages[logicalDate];
+  if (!existing || existing.status !== "draft") throw new Error("请先开始整理今天。");
+  const lastCompilationError = cleanText(error, 2_000) || "整理失败，请重试。";
+  return {
+    ...document,
+    pages: {
+      ...document.pages,
+      [logicalDate]: { ...existing, lastCompilationError, updatedAt: now.toISOString() }
+    }
+  };
 }
 
 export function saveDailyDraft(
@@ -316,8 +342,12 @@ function normalizePage(value: unknown, logicalDate: string): DailyNotebookPage {
   const raw = value as Partial<DailyNotebookPage>;
   const status = raw.status === "sealed" ? "sealed" : raw.status === "draft" ? "draft" : "unformed";
   const reviewPackage = normalizeDailyReviewPackage(raw.reviewPackage, logicalDate);
+  const packageGenerations = normalizePackageGenerations(raw.packageGenerations, logicalDate);
+  const legacyGeneration = !packageGenerations.length && reviewPackage ? legacyTodayBoardGeneration(reviewPackage) : undefined;
+  const generations = packageGenerations.length ? packageGenerations : legacyGeneration ? [legacyGeneration] : [];
+  const activeGeneration = generations.find((generation) => generation.id === cleanText(raw.activePackageGenerationId, 400)) ?? generations.at(-1);
   return {
-    schemaVersion: reviewPackage ? 2 : 1,
+    schemaVersion: 3,
     logicalDate,
     status,
     ...(raw.createdAt ? { createdAt: cleanTimestamp(raw.createdAt) } : {}),
@@ -326,12 +356,48 @@ function normalizePage(value: unknown, logicalDate: string): DailyNotebookPage {
     ...(status === "sealed" && raw.sealedAt ? { sealedAt: cleanTimestamp(raw.sealedAt) } : {}),
     workRecords: Array.isArray(raw.workRecords) ? raw.workRecords.map(normalizeWorkRecord).filter((item): item is DailyWorkRecord => Boolean(item)) : [],
     reflection: cleanText(raw.reflection, 12_000),
-    ...(reviewPackage ? { reviewPackage } : {}),
-    worklineReflections: reviewPackage && Array.isArray(raw.worklineReflections)
-      ? normalizeWorklineReflections(raw.worklineReflections, reviewPackage)
+    ...(activeGeneration ? { reviewPackage: activeGeneration.package } : {}),
+    ...(generations.length ? { packageGenerations: generations } : {}),
+    ...(activeGeneration ? { activePackageGenerationId: activeGeneration.id } : {}),
+    ...(cleanText(raw.lastCompilationError, 2_000) ? { lastCompilationError: cleanText(raw.lastCompilationError, 2_000) } : {}),
+    worklineReflections: activeGeneration && Array.isArray(raw.worklineReflections)
+      ? normalizeWorklineReflections(raw.worklineReflections, activeGeneration.package)
       : [],
     bookmarks: Array.isArray(raw.bookmarks) ? raw.bookmarks.map(normalizeBookmark).filter((item): item is DailyContinuationBookmark => Boolean(item)).slice(0, 3) : []
   };
+}
+
+function generationsFor(page: DailyNotebookPage | undefined): TodayBoardPackageGeneration[] {
+  if (!page) return [];
+  if (page.packageGenerations?.length) return structuredClone(page.packageGenerations);
+  return page.reviewPackage ? [legacyTodayBoardGeneration(page.reviewPackage)] : [];
+}
+
+function normalizePackageGenerations(value: unknown, logicalDate: string): TodayBoardPackageGeneration[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const raw = item as Partial<TodayBoardPackageGeneration>;
+    const reviewPackage = normalizeDailyReviewPackage(raw.package, logicalDate);
+    const id = cleanText(raw.id, 400);
+    if (!reviewPackage || !id || seen.has(id)) return [];
+    seen.add(id);
+    const admittedEvidence = Array.isArray(raw.admittedEvidence) ? raw.admittedEvidence.flatMap((entry) => {
+      if (!entry || typeof entry !== "object") return [];
+      const identity = cleanText(entry.identity, 4_000);
+      const revision = cleanText(entry.revision, 400);
+      return identity && revision ? [{ identity, revision }] : [];
+    }) : [];
+    return [{
+      schemaVersion: 1,
+      id,
+      generatedAt: cleanTimestamp(raw.generatedAt),
+      evidenceCutoff: cleanTimestamp(raw.evidenceCutoff),
+      admittedEvidence,
+      package: reviewPackage
+    }];
+  });
 }
 
 function selectWorklineReflections(

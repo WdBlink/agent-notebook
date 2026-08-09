@@ -10,6 +10,7 @@ import {
   markNotebookDelivery,
   normalizeNotebookDocument,
   notebookStateForDate,
+  recordDailyCompilationFailure,
   saveDailyDraft,
   sealDailyPage,
   updateNotebookNote
@@ -100,7 +101,7 @@ test("review drafts preserve the exact generated package and one user reflection
     new Date("2026-08-01T18:05:00Z")
   );
 
-  assert.equal(drafted.pages["2026-08-01"]?.schemaVersion, 2);
+  assert.equal(drafted.pages["2026-08-01"]?.schemaVersion, 3);
   assert.deepEqual(drafted.pages["2026-08-01"]?.reviewPackage, review);
   assert.deepEqual(drafted.pages["2026-08-01"]?.worklineReflections, [
     {
@@ -130,6 +131,49 @@ test("review drafts preserve the exact generated package and one user reflection
     /已经封页/
   );
   assert.equal(JSON.stringify(sealed.pages["2026-08-01"]), serialized);
+});
+
+test("successful refresh appends a package generation and activates it without replacing user data", () => {
+  const first = composeDailyPage(createEmptyNotebookDocument(), "2026-08-01", sessions, new Date("2026-08-01T18:00:00Z"), reviewPackage());
+  const drafted = saveDailyDraft(first, "2026-08-01", { reflection: "用户自己的判断。", bookmarkIds: [] }, [], new Date("2026-08-01T18:01:00Z"));
+  const nextPackage = { ...reviewPackage(), id: "review-package-2", generatedAt: "2026-08-01T19:00:00.000Z", evidenceCutoff: "2026-08-01T19:00:00.000Z" };
+  const refreshed = composeDailyPage(drafted, "2026-08-01", sessions, new Date("2026-08-01T19:00:00Z"), nextPackage);
+  const page = refreshed.pages["2026-08-01"];
+
+  assert.equal(page?.packageGenerations?.length, 2);
+  assert.deepEqual(page?.packageGenerations?.map((generation) => generation.package.id), ["review-package", "review-package-2"]);
+  assert.equal(page?.activePackageGenerationId, page?.packageGenerations?.[1]?.id);
+  assert.equal(page?.reviewPackage?.id, "review-package-2");
+  assert.equal(page?.reflection, "用户自己的判断。");
+});
+
+test("failed compilation records a retryable error without replacing the active successful generation", () => {
+  const composed = composeDailyPage(createEmptyNotebookDocument(), "2026-08-01", sessions, new Date("2026-08-01T18:00:00Z"), reviewPackage());
+  const failed = recordDailyCompilationFailure(composed, "2026-08-01", "模型没有返回可用工作线。", new Date("2026-08-01T19:00:00Z"));
+  const page = failed.pages["2026-08-01"];
+
+  assert.equal(page?.packageGenerations?.length, 1);
+  assert.equal(page?.activePackageGenerationId, composed.pages["2026-08-01"]?.activePackageGenerationId);
+  assert.equal(page?.reviewPackage?.id, "review-package");
+  assert.equal(page?.lastCompilationError, "模型没有返回可用工作线。");
+});
+
+test("normalization upgrades schema 1 and 2 pages without losing legacy notes or page data", () => {
+  const legacy = normalizeNotebookDocument({
+    schemaVersion: 1,
+    knowledgeRoot: "/wiki",
+    notes: [{ id: "legacy-note", logicalDate: "2026-08-01", createdAt: "2026-08-01T08:00:00Z", updatedAt: "2026-08-01T08:00:00Z", title: "保留", body: "已有用户记录", kind: "thought", sourceLabel: "个人记录", favorite: true, deliveries: [] }],
+    pages: {
+      "2026-08-01": { schemaVersion: 1, status: "draft", reflection: "旧反思", workRecords: [], worklineReflections: [], bookmarks: [] },
+      "2026-08-02": { schemaVersion: 2, status: "draft", reflection: "旧包", workRecords: [], reviewPackage: { ...reviewPackage(), logicalDate: "2026-08-02", id: "review-package-legacy" }, worklineReflections: [], bookmarks: [] }
+    }
+  });
+
+  assert.equal(legacy.notes[0]?.body, "已有用户记录");
+  assert.equal(legacy.pages["2026-08-01"]?.reflection, "旧反思");
+  assert.equal(legacy.pages["2026-08-01"]?.schemaVersion, 3);
+  assert.equal(legacy.pages["2026-08-02"]?.packageGenerations?.length, 1);
+  assert.equal(legacy.pages["2026-08-02"]?.reviewPackage?.id, "review-package-legacy");
 });
 
 test("normalization keeps malformed legacy notebook data from entering the renderer", () => {
