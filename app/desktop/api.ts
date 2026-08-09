@@ -1,4 +1,5 @@
 import type { AgentPlatform, CockpitData, SessionProvider } from "../../src/types";
+import type { DailySessionActivity } from "../../src/session-activity";
 import type { DailyReviewPackage } from "../../src/workline-review";
 import type { TodayBoardPackageGeneration, TodayBoardProjection } from "../../src/today-board";
 
@@ -9,6 +10,7 @@ export interface DesktopState {
   appVersion: string;
   userDataPath: string;
   notebook: DesktopNotebookState;
+  activity: DailySessionActivity;
   summaryJob?: DesktopSummaryJob;
 }
 
