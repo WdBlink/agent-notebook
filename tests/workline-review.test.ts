@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   compileDailyWorklineReview,
+  normalizeDailyReviewPackage,
   type DailyReviewPackage
 } from "../src/workline-review";
 import { createEmptyData } from "../src/state";
@@ -171,8 +172,16 @@ test("relative artifact evidence is resolved against the provider-owned working 
           title: "相对材料仍可重开",
           summary: "路径按会话工作目录解析。",
           sourceSessionIds: ["codex:codex-relative"],
-          participation: [],
-          dossier: { title: "材料路径", dek: "", blocks: [{ id: "one", kind: "evidence", title: "结果", body: "读取结果。", evidenceIds: ["artifact:codex:codex-relative:0"] }] }
+          participation: [{ id: "unknown", kind: "unknown", label: "无法从可读范围确认用户参与。" }],
+          dossier: {
+            title: "材料路径",
+            dek: "",
+            blocks: [
+              { id: "one", kind: "evidence", title: "结果", body: "读取结果。", evidenceIds: ["artifact:codex:codex-relative:0"] },
+              { id: "future", kind: "validation-window", title: "未来验证", body: "若重开相对路径，读取应继续指向会话工作目录。", evidenceIds: ["artifact:codex:codex-relative:0"] }
+            ],
+            question: { prompt: "是否需要保留这条材料路径作为后续复核入口？" }
+          }
         }]
       })
     }
@@ -189,7 +198,7 @@ test("a later Prompt may add a semantic role without requiring a schema migratio
         summary: "保留未知语义块。",
         status: "ready",
         sourceSessionIds: ["codex:codex-one"],
-        participation: [],
+        participation: [{ id: "unknown", kind: "unknown", label: "无法从现有时间戳确认用户参与。" }],
         dossier: {
           title: "可读 dossier",
           dek: "",
@@ -202,8 +211,16 @@ test("a later Prompt may add a semantic role without requiring a schema migratio
               evidenceIds: ["session:codex:codex-one"],
               affectedScopes: ["local", "project"],
               visualHint: "margin-note"
+            },
+            {
+              id: "future",
+              kind: "future-check",
+              title: "未来如何验证",
+              body: "若下一次整理仍出现相同边界张力，适用范围需要收窄。",
+              evidenceIds: ["session:codex:codex-one"]
             }
-          ]
+          ],
+          question: { prompt: "这条边界张力是否值得在下一次回看时优先核验？" }
         }
       }
     ]
@@ -214,6 +231,72 @@ test("a later Prompt may add a semantic role without requiring a schema migratio
     affectedScopes: ["local", "project"],
     visualHint: "margin-note"
   });
+});
+
+test("rejects a workline that omits any required Prompt-profile semantic gate", async () => {
+  const omissions: Array<{ name: string; output: Record<string, unknown> }> = [
+    {
+      name: "admitted material evidence",
+      output: semanticWorkline({ dossier: { blocks: [{ id: "claim", kind: "claim", title: "材料", body: "这是一个重要主张。", evidenceIds: [] }] } })
+    },
+    {
+      name: "participation boundary",
+      output: semanticWorkline({ participation: [] })
+    },
+    {
+      name: "falsifiable future observation",
+      output: semanticWorkline({ dossier: { blocks: [{ id: "claim", kind: "claim", title: "当前材料", body: "证据支持重新评估。", evidenceIds: ["session:codex:codex-one"] }] } })
+    },
+    {
+      name: "human question",
+      output: semanticWorkline({ dossier: { question: undefined } })
+    }
+  ];
+
+  for (const omission of omissions) {
+    await assert.rejects(
+      () => runReview({ worklines: [omission.output] }),
+      /没有返回可用的跨会话工作线/,
+      omission.name
+    );
+  }
+});
+
+test("reload preserves a historically versioned provenance record when canonical facts still match", async () => {
+  const review = await runReview({ worklines: [semanticWorkline()] });
+  const stored = JSON.parse(JSON.stringify(review)) as DailyReviewPackage;
+  stored.provenance!.compiler.version = "1";
+  stored.provenance!.evidence.manifestVersion = "workline-evidence-manifest-v0";
+
+  const reloaded = normalizeDailyReviewPackage(stored, "2026-08-09");
+
+  assert.equal(reloaded?.provenance?.compiler.version, "1");
+  assert.equal(reloaded?.provenance?.evidence.manifestVersion, "workline-evidence-manifest-v0");
+  assert.equal(reloaded?.provenance?.evidence.cutoff, review.evidenceCutoff);
+  assert.deepEqual(reloaded?.provenance?.evidence.sourceRefs, review.evidence);
+  assert.deepEqual(reloaded?.provenance?.evidence.completenessWarnings, review.warnings);
+});
+
+test("reload surfaces malformed provenance instead of silently erasing it", async () => {
+  const review = await runReview({ worklines: [semanticWorkline()] });
+  const stored = JSON.parse(JSON.stringify(review)) as DailyReviewPackage;
+  stored.provenance!.evidence.sourceRefs[0]!.path = "/tmp/not-the-admitted-path.jsonl";
+
+  const reloaded = normalizeDailyReviewPackage(stored, "2026-08-09");
+
+  assert.equal(reloaded?.provenance, undefined);
+  assert.match(reloaded?.warnings.join(" ") ?? "", /provenance/i);
+});
+
+test("reload leaves a legacy package without provenance free of invented provenance warnings", async () => {
+  const review = await runReview({ worklines: [semanticWorkline()] });
+  const stored = JSON.parse(JSON.stringify(review)) as DailyReviewPackage;
+  delete stored.provenance;
+
+  const reloaded = normalizeDailyReviewPackage(stored, "2026-08-09");
+
+  assert.equal(reloaded?.provenance, undefined);
+  assert.deepEqual(reloaded?.warnings, review.warnings);
 });
 
 test("zero valid worklines is a visible compiler failure, not a thin-summary fallback", async () => {
@@ -234,6 +317,41 @@ async function runReview(output: unknown): Promise<DailyReviewPackage> {
       runner: async () => codexResult(output)
     }
   );
+}
+
+function semanticWorkline(overrides: { participation?: unknown; dossier?: Record<string, unknown> } = {}): Record<string, unknown> {
+  const dossier = {
+    title: "Evidence-led review",
+    dek: "",
+    blocks: [
+      {
+        id: "material",
+        kind: "unfixed-semantic-role",
+        title: "来自会话的材料",
+        body: "证据表明值得重新评估。",
+        evidenceIds: ["session:codex:codex-one"],
+        futurePayload: { remains: "extensible" }
+      },
+      {
+        id: "future",
+        kind: "another-future-role",
+        title: "未来如何验证",
+        body: "若下次观察到相同约束失败，应该收窄这个可能变化。",
+        evidenceIds: ["session:codex:codex-one"]
+      }
+    ],
+    question: { prompt: "是否值得优先验证这个可能变化？" },
+    ...overrides.dossier
+  };
+  return {
+    id: "semantic-workline",
+    title: "一条可复核的工作线",
+    summary: "由可重开材料支持。",
+    status: "needs-judgment",
+    sourceSessionIds: ["codex:codex-one"],
+    participation: overrides.participation ?? [{ id: "uncertain", kind: "uncertain", label: "无法确定用户参与边界。" }],
+    dossier
+  };
 }
 
 function codexResult(output: unknown): { stdout: string; stderr: string } {

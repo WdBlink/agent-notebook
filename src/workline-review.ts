@@ -119,8 +119,9 @@ export function normalizeDailyReviewPackage(value: unknown, expectedDate?: strin
   const allowedSessionIds = evidence.filter((item) => item.kind === "session").map((item) => `${item.platform}:${item.sessionId}`);
   const normalized = normalizeWorklines({ worklines: record.worklines }, allowedSessionIds, evidence);
   if (normalized.worklines.length === 0) return undefined;
-  const warnings = uniqueStrings(record.warnings, 12).map((warning) => cleanText(warning, 500));
-  const provenance = normalizeStoredProvenance(record.provenance, promptProfile, compilerProvider, model, evidenceCutoff, evidence, warnings);
+  const canonicalWarnings = uniqueStrings(record.warnings, 12).map((warning) => cleanText(warning, 500));
+  const provenanceResult = normalizeStoredProvenance(record.provenance, promptProfile, compilerProvider, model, evidenceCutoff, evidence, canonicalWarnings);
+  const warnings = Array.from(new Set([...canonicalWarnings, ...provenanceResult.warnings])).slice(0, 12);
   return {
     schemaVersion: 1,
     id,
@@ -134,7 +135,7 @@ export function normalizeDailyReviewPackage(value: unknown, expectedDate?: strin
     worklines: normalized.worklines,
     warnings,
     rawOutput: structuredClone(rawOutput),
-    ...(provenance ? { provenance } : {})
+    ...(provenanceResult.provenance ? { provenance: provenanceResult.provenance } : {})
   };
 }
 
@@ -349,6 +350,12 @@ function normalizeWorklines(
     const blocks = normalizeBlocks(dossier?.blocks, allowedEvidenceIds, warnings, title);
     const questionRecord = asRecord(dossier?.question);
     const questionPrompt = cleanText(questionRecord?.prompt, 600);
+    const participation = normalizeParticipation(record?.participation);
+    const qualityIssues = semanticGateIssues(blocks, participation, questionPrompt);
+    if (qualityIssues.length > 0) {
+      warnings.push(`${title} 未满足 Prompt 语义质量门：${qualityIssues.join("、")}，已忽略。`);
+      continue;
+    }
     const startedAt = cleanTimestamp(record.startedAt);
     const endedAt = cleanTimestamp(record.endedAt);
     const standardKeys = new Set(["id", "title", "summary", "status", "sourceSessionIds", "startedAt", "endedAt", "participation", "dossier", "payload"]);
@@ -360,7 +367,7 @@ function normalizeWorklines(
       sourceSessionIds,
       ...(startedAt ? { startedAt } : {}),
       ...(endedAt ? { endedAt } : {}),
-      participation: normalizeParticipation(record?.participation),
+      participation,
       dossier: {
         title: dossierTitle,
         dek: cleanText(dossier?.dek, 1_200) || "",
@@ -425,36 +432,47 @@ function normalizeStoredProvenance(
   evidenceCutoff: string,
   evidence: DailyReviewEvidence[],
   warnings: string[]
-): DailyReviewProvenance | undefined {
+): { provenance?: DailyReviewProvenance; warnings: string[] } {
+  if (value === undefined || value === null) return { warnings: [] };
   const record = asRecord(value);
   const compiler = asRecord(record?.compiler);
   const storedModel = asRecord(record?.model);
   const storedEvidence = asRecord(record?.evidence);
-  if (!record || !compiler || !storedModel || !storedEvidence) return undefined;
+  if (!record || !compiler || !storedModel || !storedEvidence) return provenanceIssue("missing required fields");
+  const compilerId = cleanText(compiler.id, 120);
+  const compilerVersion = cleanText(compiler.version, 120);
+  const manifestVersion = cleanText(storedEvidence.manifestVersion, 160);
   if (
-    cleanText(compiler.id, 120) !== WORKLINE_REVIEW_COMPILER_ID ||
-    cleanText(compiler.version, 120) !== WORKLINE_REVIEW_COMPILER_VERSION ||
+    !compilerId ||
+    !compilerVersion ||
     cleanText(record.promptProfile, 160) !== promptProfile ||
     storedModel.provider !== compilerProvider ||
     cleanText(storedModel.name, 160) !== model ||
-    cleanText(storedEvidence.manifestVersion, 160) !== WORKLINE_REVIEW_EVIDENCE_MANIFEST_VERSION ||
+    !manifestVersion ||
     cleanTimestamp(storedEvidence.cutoff) !== evidenceCutoff
-  ) return undefined;
+  ) return provenanceIssue("canonical package facts do not match");
   const sourceRefs = normalizeStoredEvidence(storedEvidence.sourceRefs);
-  if (!sameEvidenceRefs(sourceRefs, evidence)) return undefined;
+  if (!sameEvidenceRefs(sourceRefs, evidence)) return provenanceIssue("canonical source references do not match");
   const completenessWarnings = uniqueStrings(storedEvidence.completenessWarnings, 12).map((warning) => cleanText(warning, 500));
-  if (!sameStrings(completenessWarnings, warnings)) return undefined;
+  if (!sameStrings(completenessWarnings, warnings)) return provenanceIssue("canonical completeness warnings do not match");
   return {
-    compiler: { id: WORKLINE_REVIEW_COMPILER_ID, version: WORKLINE_REVIEW_COMPILER_VERSION },
-    promptProfile,
-    model: { provider: compilerProvider, name: model },
-    evidence: {
-      manifestVersion: WORKLINE_REVIEW_EVIDENCE_MANIFEST_VERSION,
-      cutoff: evidenceCutoff,
-      sourceRefs,
-      completenessWarnings
-    }
+    provenance: {
+      compiler: { id: compilerId, version: compilerVersion },
+      promptProfile,
+      model: { provider: compilerProvider, name: model },
+      evidence: {
+        manifestVersion,
+        cutoff: evidenceCutoff,
+        sourceRefs,
+        completenessWarnings
+      }
+    },
+    warnings: []
   };
+}
+
+function provenanceIssue(reason: string): { warnings: string[] } {
+  return { warnings: [`Provenance could not be preserved: ${reason}.`] };
 }
 
 function outputWarnings(rawOutput: Record<string, unknown>): string[] {
@@ -506,6 +524,26 @@ function normalizeBlocks(
   return blocks;
 }
 
+function semanticGateIssues(
+  blocks: DailyReviewBlock[],
+  participation: DailyReviewParticipationSpan[],
+  questionPrompt: string
+): string[] {
+  const issues: string[] = [];
+  if (!blocks.some((block) => block.evidenceIds.length > 0)) issues.push("缺少已采纳证据支持的实质语义块");
+  if (participation.length === 0) issues.push("缺少参与边界或明确的不确定标记");
+  if (!blocks.some(hasFalsifiableFutureObservation)) issues.push("缺少可证伪的未来观察");
+  if (!questionPrompt) issues.push("缺少需要人判断的问题");
+  return issues;
+}
+
+function hasFalsifiableFutureObservation(block: DailyReviewBlock): boolean {
+  const text = `${block.label ?? ""} ${block.title} ${block.body}`;
+  const conditional = /\b(if|when|unless)\b|若|如果|一旦|假如/i.test(text);
+  const observableOutcome = /\b(would|should|will|could|increase|decrease|improve|worsen|strengthen|narrow|overturn|observe|expected)\b|应|会|将|可|上升|下降|改善|恶化|支持|收窄|推翻|观察/i.test(text);
+  return conditional && observableOutcome;
+}
+
 function normalizeParticipation(value: unknown): DailyReviewParticipationSpan[] {
   if (!Array.isArray(value)) return [];
   const spans: DailyReviewParticipationSpan[] = [];
@@ -516,6 +554,7 @@ function normalizeParticipation(value: unknown): DailyReviewParticipationSpan[] 
     const label = cleanText(record?.label, 240);
     if (!id || !label || seen.has(id)) continue;
     const kind = normalizeParticipationKind(record?.kind);
+    if (!kind) continue;
     const startAt = cleanTimestamp(record?.startAt);
     const endAt = cleanTimestamp(record?.endAt);
     spans.push({ id, kind, ...(startAt ? { startAt } : {}), ...(endAt ? { endAt } : {}), label });
@@ -524,8 +563,9 @@ function normalizeParticipation(value: unknown): DailyReviewParticipationSpan[] 
   return spans;
 }
 
-function normalizeParticipationKind(value: unknown): DailyReviewParticipationKind {
-  return value === "user" || value === "agent" || value === "collaborative" || value === "running" ? value : "uncertain";
+function normalizeParticipationKind(value: unknown): DailyReviewParticipationKind | undefined {
+  if (value === "user" || value === "agent" || value === "collaborative" || value === "uncertain" || value === "running") return value;
+  return value === "unknown" ? "uncertain" : undefined;
 }
 
 function normalizePlatform(value: unknown): AgentPlatform | undefined {
