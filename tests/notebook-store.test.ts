@@ -147,6 +147,20 @@ test("successful refresh appends a package generation and activates it without r
   assert.equal(page?.reflection, "用户自己的判断。");
 });
 
+test("same-fingerprint successful refreshes retain distinct active generations after reload", () => {
+  const firstPackage = reviewPackage();
+  const secondPackage = { ...reviewPackage(), rawOutput: { worklines: [], compilation: "second successful result" } };
+  const first = composeDailyPage(createEmptyNotebookDocument(), "2026-08-01", sessions, new Date("2026-08-01T18:00:00Z"), firstPackage);
+  const refreshed = composeDailyPage(first, "2026-08-01", sessions, new Date("2026-08-01T18:00:00Z"), secondPackage);
+  const reloaded = normalizeNotebookDocument(JSON.parse(JSON.stringify(refreshed)));
+  const page = reloaded.pages["2026-08-01"];
+
+  assert.equal(page?.packageGenerations?.length, 2);
+  assert.notEqual(page?.packageGenerations?.[0]?.id, page?.packageGenerations?.[1]?.id);
+  assert.equal(page?.activePackageGenerationId, page?.packageGenerations?.[1]?.id);
+  assert.deepEqual(page?.reviewPackage?.rawOutput, { worklines: [], compilation: "second successful result" });
+});
+
 test("failed compilation records a retryable error without replacing the active successful generation", () => {
   const composed = composeDailyPage(createEmptyNotebookDocument(), "2026-08-01", sessions, new Date("2026-08-01T18:00:00Z"), reviewPackage());
   const failed = recordDailyCompilationFailure(composed, "2026-08-01", "模型没有返回可用工作线。", new Date("2026-08-01T19:00:00Z"));

@@ -166,7 +166,7 @@ export function composeDailyPage(
   if (existing?.status === "sealed") throw new Error("这一天已经封页，不能重新整理。");
   const timestamp = now.toISOString();
   const existingGenerations = generationsFor(existing);
-  const appendedGeneration = reviewPackage ? createTodayBoardGeneration(reviewPackage, sessions) : undefined;
+  const appendedGeneration = reviewPackage ? createTodayBoardGeneration(reviewPackage, sessions, existingGenerations.length) : undefined;
   const packageGenerations = appendedGeneration ? [...existingGenerations, appendedGeneration] : existingGenerations;
   const activeGeneration = appendedGeneration ?? packageGenerations.at(-1);
   const exactReviewPackage = activeGeneration?.package;

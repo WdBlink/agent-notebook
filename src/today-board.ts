@@ -52,12 +52,16 @@ export function buildSessionEvidenceManifest(sessions: AgentWorkSession[]): Toda
   return [...unique.values()].sort((left, right) => left.identity.localeCompare(right.identity));
 }
 
-export function createTodayBoardGeneration(reviewPackage: DailyReviewPackage, sessions: AgentWorkSession[]): TodayBoardPackageGeneration {
+export function createTodayBoardGeneration(
+  reviewPackage: DailyReviewPackage,
+  sessions: AgentWorkSession[],
+  appendIndex = 0
+): TodayBoardPackageGeneration {
   const admittedEvidence = admittedSessionEvidence(reviewPackage.evidence, sessions, reviewPackage.evidenceCutoff);
   const fingerprint = stableHash(JSON.stringify({ id: reviewPackage.id, generatedAt: reviewPackage.generatedAt, admittedEvidence }));
   return {
     schemaVersion: 1,
-    id: `generation-${reviewPackage.id}-${fingerprint}`,
+    id: `generation-${reviewPackage.id}-${fingerprint}-${appendIndex + 1}`,
     generatedAt: reviewPackage.generatedAt,
     evidenceCutoff: reviewPackage.evidenceCutoff,
     admittedEvidence,
