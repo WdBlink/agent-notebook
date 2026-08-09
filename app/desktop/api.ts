@@ -3,6 +3,8 @@ import type { DailySessionActivity } from "../../src/session-activity";
 import type { DailyReviewPackage } from "../../src/workline-review";
 import type { TodayBoardPackageGeneration, TodayBoardProjection } from "../../src/today-board";
 
+export type DailyReviewPreparationMode = "compile" | "refresh";
+
 export interface DesktopState {
   data: CockpitData;
   activeDate: string;
@@ -149,6 +151,11 @@ export interface SessionTranscriptRequest {
   id: string;
   platform: AgentPlatform;
   path: string;
+  packageRef?: {
+    logicalDate: string;
+    generationId: string;
+    evidenceId: string;
+  };
 }
 
 export interface SessionTranscriptMessage {
@@ -179,6 +186,7 @@ export interface DesktopApi {
   exportNotebookNoteCard(noteId: string): Promise<{ notebook: DesktopNotebookState; path: string }>;
   routeNotebookNoteToWiki(noteId: string): Promise<{ notebook: DesktopNotebookState; path: string }>;
   routeNotebookNoteToProject(noteId: string, projectPath: string): Promise<{ notebook: DesktopNotebookState; path: string }>;
+  prepareDailyReview(date: string, mode: DailyReviewPreparationMode): Promise<DesktopNotebookState>;
   composeDailyPage(date: string): Promise<DesktopNotebookState>;
   saveDailyDraft(date: string, input: DailyDraftInput): Promise<DesktopNotebookState>;
   sealDailyPage(date: string, input: DailyDraftInput): Promise<DesktopNotebookState>;

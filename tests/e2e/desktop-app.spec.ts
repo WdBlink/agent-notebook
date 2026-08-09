@@ -67,7 +67,7 @@ async function installDesktopApi(page: Page): Promise<void> {
       logicalDate: activeDate,
       generatedAt: `${activeDate}T20:00:00+08:00`,
       evidenceCutoff: `${activeDate}T20:00:00+08:00`,
-      promptProfile: "ksi-workline-review-v1",
+      promptProfile: "traceink-review-v1",
       compilerProvider: "codex",
       model: "review-model",
       evidence: sessions.map((session: any) => ({
@@ -237,6 +237,10 @@ async function installDesktopApi(page: Page): Promise<void> {
         return { notebook: state.notebook, path: `/workspace/LLM-Wiki/raw/${noteId}.md` };
       },
       routeNotebookNoteToProject: async (noteId: string) => ({ notebook: state.notebook, path: `/workspace/work-continuity/ctx/scratch/inbox/${noteId}.md` }),
+      prepareDailyReview: async (_date: string, _mode: "compile" | "refresh") => {
+        state.notebook.page = { ...state.notebook.page, schemaVersion: 3, status: "draft", createdAt: "2026-07-20T20:00:00+08:00", updatedAt: "2026-07-20T20:00:00+08:00", evidenceCutoff: "2026-07-20T20:00:00+08:00", workRecords: state.notebook.previewRecords, reviewPackage: createReviewPackage(state.activeDate), worklineReflections: [] };
+        return state.notebook;
+      },
       composeDailyPage: async () => {
         state.notebook.page = { ...state.notebook.page, schemaVersion: 2, status: "draft", createdAt: "2026-07-20T20:00:00+08:00", updatedAt: "2026-07-20T20:00:00+08:00", evidenceCutoff: "2026-07-20T20:00:00+08:00", workRecords: state.notebook.previewRecords, reviewPackage: createReviewPackage(state.activeDate), worklineReflections: [] };
         return state.notebook;

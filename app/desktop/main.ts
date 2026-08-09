@@ -9,7 +9,8 @@ import { loadAgentWorkSnapshot, mergeSessionSummaries, type RuntimeFileStat, typ
 import { DEFAULT_SESSION_SCAN_ROOTS } from "../../src/constants";
 import { createEmptyData, localDateString, normalizeData, setWorkSessionSnapshot } from "../../src/state";
 import type { CockpitData, SessionProvider } from "../../src/types";
-import type { DailyDraftInput, DesktopNotebookState, DesktopSettingsPatch, DesktopState, DesktopSummaryJob, NotebookNote, NotebookNoteInput, ProjectContextDocument, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState } from "./api";
+import type { DailyDraftInput, DailyReviewPreparationMode, DesktopNotebookState, DesktopSettingsPatch, DesktopState, DesktopSummaryJob, NotebookNote, NotebookNoteInput, ProjectContextDocument, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState } from "./api";
+import { runDailyReviewPreparation } from "./daily-review-preparation";
 import { desktopCliRunner } from "./cli-runner";
 import {
   composeDailyPage,
@@ -20,12 +21,14 @@ import {
   markNotebookDelivery,
   normalizeNotebookDocument,
   notebookStateForDate,
+  recordDailyCompilationFailure,
   saveDailyDraft,
   sealDailyPage,
   setKnowledgeRoot,
   updateNotebookNote,
   type NotebookDocument
 } from "./notebook-store";
+import { authorizeSessionTranscriptRequest } from "./session-transcript-access";
 import {
   createEmptySessionSummaryCache,
   normalizeSessionSummaryCache,
@@ -199,22 +202,12 @@ ipcMain.handle("desktop:route-notebook-note-to-project", async (_event, noteId: 
   return { notebook: notebookView(activeDate), path: target };
 });
 
+ipcMain.handle("desktop:prepare-daily-review", async (_event, date: string, mode: DailyReviewPreparationMode) => {
+  return prepareDailyReviewForDate(date, mode);
+});
+
 ipcMain.handle("desktop:compose-daily-page", async (_event, date: string) => {
-  const logicalDate = cleanDate(date, activeDate);
-  const current = await ensureLoaded();
-  const reviewPackage = await compileDailyWorklineReview(
-    current.settings,
-    logicalDate,
-    current.workSessionSnapshot.sessions,
-    { runner: desktopCliRunner, evidenceCutoff: current.workSessionSnapshot.generatedAt }
-  );
-  return mutateNotebook(logicalDate, (document) => composeDailyPage(
-    document,
-    logicalDate,
-    current.workSessionSnapshot.sessions,
-    new Date(reviewPackage.generatedAt),
-    reviewPackage
-  ));
+  return prepareDailyReviewForDate(date);
 });
 
 ipcMain.handle("desktop:save-daily-draft", async (_event, date: string, input: DailyDraftInput) => {
@@ -269,6 +262,49 @@ ipcMain.handle("desktop:open-path", async (_event, target: string, reveal?: bool
     return false;
   }
 });
+
+async function prepareDailyReviewForDate(
+  requestedDate: string,
+  requestedMode?: DailyReviewPreparationMode
+): Promise<DesktopNotebookState> {
+  const logicalDate = String(requestedDate ?? "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(logicalDate)) throw new Error("回看日期无效。");
+  const current = await ensureLoaded();
+  const capturedSessions = structuredClone(current.workSessionSnapshot.sessions);
+  const board = notebookStateForDate(notebook, logicalDate, capturedSessions).todayBoard;
+  const mode = requestedMode ?? (board.mode === "raw" ? "compile" : "refresh");
+  return runDailyReviewPreparation({
+    logicalDate,
+    mode,
+    snapshotDate: current.workSessionSnapshot.date,
+    evidenceCutoff: current.workSessionSnapshot.generatedAt,
+    sessions: capturedSessions,
+    board
+  }, {
+    compile({ logicalDate: date, evidenceCutoff, capturedSessions: sessions }) {
+      return compileDailyWorklineReview(current.settings, date, sessions, {
+        runner: desktopCliRunner,
+        evidenceCutoff
+      });
+    },
+    commitSuccess({ reviewPackage, capturedSessions: sessions }) {
+      return mutateNotebook(logicalDate, (document) => composeDailyPage(
+        document,
+        logicalDate,
+        sessions,
+        new Date(reviewPackage.generatedAt),
+        reviewPackage
+      ));
+    },
+    recordFailure({ message }) {
+      return mutateNotebook(logicalDate, (document) => recordDailyCompilationFailure(
+        document,
+        logicalDate,
+        message
+      )).then(() => undefined);
+    }
+  });
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -725,11 +761,16 @@ const TRANSCRIPT_HEAD_BYTES = 8 * 1024 * 1024;
 
 async function loadSessionTranscript(request: SessionTranscriptRequest): Promise<SessionTranscriptState> {
   const current = await ensureLoaded();
-  const target = current.workSessionSnapshot.sessions.find((session) =>
-    session.id === request?.id && session.platform === request?.platform && session.path === request?.path
-  );
-  if (!target) throw new Error("这条会话不在当前只读快照中，拒绝读取未经验证的路径。");
-  const source = await readBoundedTranscript(target.path);
+  const target = authorizeSessionTranscriptRequest(request, current.workSessionSnapshot.sessions, notebook);
+  let source: { content: string; truncated: boolean };
+  try {
+    source = await readBoundedTranscript(target.path);
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      throw new Error("会话原文文件已不存在；封存证据仍保留引用，但当前无法读取原文。");
+    }
+    throw new Error(`会话原文当前无法读取：${errorMessage(error)}`);
+  }
   return parseSessionTranscript({
     content: source.content,
     platform: target.platform,
@@ -738,6 +779,10 @@ async function loadSessionTranscript(request: SessionTranscriptRequest): Promise
     path: target.path,
     truncated: source.truncated
   });
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "ENOENT");
 }
 
 async function loadDailySessionActivity(logicalDate: string, sessions: CockpitData["workSessionSnapshot"]["sessions"]) {

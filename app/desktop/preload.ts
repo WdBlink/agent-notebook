@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { DailyDraftInput, DesktopApi, DesktopNotebookState, DesktopSettingsPatch, DesktopState, NotebookNote, NotebookNoteInput, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState } from "./api";
+import type { DailyDraftInput, DailyReviewPreparationMode, DesktopApi, DesktopNotebookState, DesktopSettingsPatch, DesktopState, NotebookNote, NotebookNoteInput, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState } from "./api";
 
 const api: DesktopApi = {
   getState(date?: string): Promise<DesktopState> {
@@ -28,6 +28,9 @@ const api: DesktopApi = {
   },
   routeNotebookNoteToProject(noteId: string, projectPath: string): Promise<{ notebook: DesktopNotebookState; path: string }> {
     return ipcRenderer.invoke("desktop:route-notebook-note-to-project", noteId, projectPath) as Promise<{ notebook: DesktopNotebookState; path: string }>;
+  },
+  prepareDailyReview(date: string, mode: DailyReviewPreparationMode): Promise<DesktopNotebookState> {
+    return ipcRenderer.invoke("desktop:prepare-daily-review", date, mode) as Promise<DesktopNotebookState>;
   },
   composeDailyPage(date: string): Promise<DesktopNotebookState> {
     return ipcRenderer.invoke("desktop:compose-daily-page", date) as Promise<DesktopNotebookState>;
