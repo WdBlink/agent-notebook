@@ -47,13 +47,36 @@ try {
     if (!files.has(required)) throw new Error(`Packaged app is missing ${required}.`);
   }
   const main = asar.extractFile(appAsar, "main.js").toString("utf8");
+  const preload = asar.extractFile(appAsar, "preload.cjs").toString("utf8");
   const renderer = asar.extractFile(appAsar, "renderer.js").toString("utf8");
-  for (const snippet of ["notebook-v1.json", "desktop:create-notebook-note", "desktop:route-notebook-note-to-wiki", "desktop:seal-daily-page", "ksi-workline-review-v1"]) {
-    if (!main.includes(snippet)) throw new Error(`Packaged main process is missing ${snippet}.`);
-  }
-  for (const snippet of ["today-ledger", "note-share-menu", "daily-canvas", "review-layer", "review-workline", "review-reflection"]) {
-    if (!renderer.includes(snippet)) throw new Error(`Packaged renderer is missing ${snippet}.`);
-  }
+  const rendererCss = asar.extractFile(appAsar, "renderer.css").toString("utf8");
+
+  assertMarkers("main process", main, {
+    "explicit daily-review preparation": ["desktop:prepare-daily-review"],
+    "Traceink prompt profile": ["traceink-review-v1"],
+    "generation-preserving review store": ["packageGenerations", "activePackageGenerationId"],
+    "generation-safe reflection and sealing": ["desktop:save-daily-draft", "desktop:seal-daily-page", "expectedActiveGenerationId"],
+    "sealed evidence access": ["desktop:get-session-transcript", "sealed-package"]
+  });
+  assertStringLiterals("main process Today Board", main, ["raw", "compiled", "stale", "sealed"]);
+
+  assertMarkers("preload bridge", preload, {
+    "explicit daily-review preparation": ["prepareDailyReview", "desktop:prepare-daily-review"],
+    "generation-safe reflection and sealing": ["saveDailyDraft", "desktop:save-daily-draft", "sealDailyPage", "desktop:seal-daily-page"]
+  });
+
+  assertMarkers("renderer", renderer, {
+    "explicit daily-review preparation": ["prepareDailyReview"],
+    "Today workline board": ["today-board", "today-worklines", "workline-participation"],
+    "evidence reader": ["review-reader", "review-block-evidence"],
+    "generation-safe reflection and sealing": ["saveDailyDraft", "review-reflection", "review-seal", "expectedActiveGenerationId"]
+  });
+  assertStringLiterals("renderer Today Board", renderer, ["raw", "compiled", "stale", "sealed"]);
+  assertMarkers("renderer stylesheet", rendererCss, {
+    "Today workline board": [".today-board", ".today-worklines", ".workline-participation"],
+    "evidence reader": [".review-reader", ".review-block-evidence"],
+    "human reflection and sealing": [".review-reflection", ".review-seal"]
+  });
 
   const checksumPath = `${archive}.sha256`;
   if (await exists(checksumPath)) {
@@ -105,4 +128,22 @@ async function fileHash(file) {
 function valueAfter(tokens, flag) {
   const index = tokens.indexOf(flag);
   return index >= 0 ? tokens[index + 1] : undefined;
+}
+
+function assertMarkers(surface, source, groups) {
+  for (const [contract, markers] of Object.entries(groups)) {
+    const missing = markers.filter((marker) => !source.includes(marker));
+    if (missing.length > 0) {
+      throw new Error(`Packaged ${surface} is missing ${contract}: ${missing.join(", ")}.`);
+    }
+  }
+}
+
+function assertStringLiterals(surface, source, values) {
+  const missing = values.filter((value) => !new RegExp(`(["'])${escapeRegExp(value)}\\1`).test(source));
+  if (missing.length > 0) throw new Error(`Packaged ${surface} is missing states: ${missing.join(", ")}.`);
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
