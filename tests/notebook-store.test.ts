@@ -68,7 +68,11 @@ test("sealing freezes work records, reflection, and selected bookmarks", () => {
   const composed = composeDailyPage(empty, "2026-08-01", sessions, new Date("2026-08-01T18:00:00Z"), reviewPackage());
   const state = notebookStateForDate(composed, "2026-08-01", sessions);
   const selected = state.continuationCandidates.map((item) => item.id);
-  const drafted = saveDailyDraft(composed, "2026-08-01", { reflection: "今天到这里。", bookmarkIds: selected }, state.continuationCandidates, new Date("2026-08-01T18:05:00Z"));
+  const drafted = saveDailyDraft(composed, "2026-08-01", {
+    reflection: "今天到这里。",
+    bookmarkIds: selected,
+    expectedActiveGenerationId: composed.pages["2026-08-01"]?.activePackageGenerationId ?? null
+  }, state.continuationCandidates, new Date("2026-08-01T18:05:00Z"));
   const sealed = sealDailyPage(drafted, "2026-08-01", {
     reflection: "今天到这里。",
     bookmarkIds: selected,
@@ -100,7 +104,8 @@ test("review drafts preserve the exact generated package and one user reflection
         { worklineId: "workline-review", text: "我认为应该先验证真实任务。" },
         { worklineId: "invented-workline", text: "不能被保存。" }
       ],
-      bookmarkIds: []
+      bookmarkIds: [],
+      expectedActiveGenerationId: composed.pages["2026-08-01"]?.activePackageGenerationId ?? null
     },
     state.continuationCandidates,
     new Date("2026-08-01T18:05:00Z")
@@ -142,7 +147,11 @@ test("review drafts preserve the exact generated package and one user reflection
 
 test("successful refresh appends a package generation and activates it without replacing user data", () => {
   const first = composeDailyPage(createEmptyNotebookDocument(), "2026-08-01", sessions, new Date("2026-08-01T18:00:00Z"), reviewPackage());
-  const drafted = saveDailyDraft(first, "2026-08-01", { reflection: "用户自己的判断。", bookmarkIds: [] }, [], new Date("2026-08-01T18:01:00Z"));
+  const drafted = saveDailyDraft(first, "2026-08-01", {
+    reflection: "用户自己的判断。",
+    bookmarkIds: [],
+    expectedActiveGenerationId: first.pages["2026-08-01"]?.activePackageGenerationId ?? null
+  }, [], new Date("2026-08-01T18:01:00Z"));
   const nextPackage = { ...reviewPackage(), id: "review-package-2", generatedAt: "2026-08-01T19:00:00.000Z", evidenceCutoff: "2026-08-01T19:00:00.000Z" };
   const refreshed = composeDailyPage(drafted, "2026-08-01", sessions, new Date("2026-08-01T19:00:00Z"), nextPackage);
   const page = refreshed.pages["2026-08-01"];
@@ -213,6 +222,43 @@ test("out-of-order refresh cannot append over a newer active generation", () => 
   ), /已经变化|过期/);
   assert.equal(second.pages["2026-08-01"]?.activePackageGenerationId, secondGenerationId);
   assert.deepEqual(second.pages["2026-08-01"]?.packageGenerations?.map((item) => item.package.id), ["review-package", "review-package-2"]);
+});
+
+test("an opened generation cannot save or seal after a newer generation becomes active", () => {
+  const first = composeDailyPage(
+    createEmptyNotebookDocument(),
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:00:00.000Z"),
+    reviewPackage()
+  );
+  const openedGenerationId = first.pages["2026-08-01"]!.activePackageGenerationId!;
+  const second = appendDailyReviewGeneration(
+    first,
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:10:00.000Z"),
+    { ...reviewPackage(), id: "review-package-2", generatedAt: "2026-08-01T18:10:00.000Z" },
+    openedGenerationId
+  );
+  const before = JSON.stringify(second.pages["2026-08-01"]);
+  const staleInput = {
+    reflection: "",
+    worklineReflections: [{ worklineId: "workline-review", text: "只属于打开时那一代的未存墨迹" }],
+    bookmarkIds: [],
+    expectedActiveGenerationId: openedGenerationId
+  };
+
+  assert.throws(
+    () => saveDailyDraft(second, "2026-08-01", staleInput, [], new Date("2026-08-01T18:15:00.000Z")),
+    /已经变化|过期/
+  );
+  assert.throws(
+    () => sealDailyPage(second, "2026-08-01", staleInput, [], new Date("2026-08-01T18:15:00.000Z")),
+    /已经变化|过期/
+  );
+  assert.equal(JSON.stringify(second.pages["2026-08-01"]), before);
+  assert.deepEqual(second.pages["2026-08-01"]?.worklineReflections, []);
 });
 
 test("a late failed refresh cannot attach its diagnostic to a newer successful generation", () => {
@@ -297,7 +343,8 @@ test("refresh and reload preserve user reflections attached to older package gen
   const withInk = saveDailyDraft(first, "2026-08-01", {
     reflection: "",
     worklineReflections: [{ worklineId: "workline-review", text: "旧工作线上的用户判断。" }],
-    bookmarkIds: []
+    bookmarkIds: [],
+    expectedActiveGenerationId: first.pages["2026-08-01"]?.activePackageGenerationId ?? null
   }, [], new Date("2026-08-01T18:05:00Z"));
   const firstGenerationId = withInk.pages["2026-08-01"]?.activePackageGenerationId ?? null;
   const secondPackage: DailyReviewPackage = {
@@ -325,7 +372,8 @@ test("refresh and reload preserve user reflections attached to older package gen
   const rejectedNewWrite = saveDailyDraft(reloaded, "2026-08-01", {
     reflection: "",
     worklineReflections: [{ worklineId: "workline-review", text: "不能改写非当前工作线。" }],
-    bookmarkIds: []
+    bookmarkIds: [],
+    expectedActiveGenerationId: reloaded.pages["2026-08-01"]?.activePackageGenerationId ?? null
   }, [], new Date("2026-08-01T18:15:00Z"));
   assert.deepEqual(rejectedNewWrite.pages["2026-08-01"]?.worklineReflections, [{
     packageGenerationId: firstGenerationId,
@@ -347,7 +395,8 @@ test("the same workline id keeps independent ink in each package generation", ()
   const withFirstInk = saveDailyDraft(first, "2026-08-01", {
     reflection: "",
     worklineReflections: [{ worklineId: "workline-review", text: "A" }],
-    bookmarkIds: []
+    bookmarkIds: [],
+    expectedActiveGenerationId: firstGenerationId
   }, [], new Date("2026-08-01T18:05:00.000Z"));
   const second = appendDailyReviewGeneration(
     withFirstInk,
@@ -369,7 +418,8 @@ test("the same workline id keeps independent ink in each package generation", ()
   const withSecondInk = saveDailyDraft(second, "2026-08-01", {
     reflection: "",
     worklineReflections: [{ worklineId: "workline-review", text: "B" }],
-    bookmarkIds: []
+    bookmarkIds: [],
+    expectedActiveGenerationId: secondGenerationId
   }, [], new Date("2026-08-01T18:15:00.000Z"));
   const reloaded = normalizeNotebookDocument(JSON.parse(JSON.stringify(withSecondInk)));
 
@@ -547,6 +597,31 @@ test("a sealed page with an explicit missing or corrupt active generation id nev
   }
 });
 
+test("a page with package generations but no active id stays fail-closed after reload", () => {
+  const composed = composeDailyPage(
+    createEmptyNotebookDocument(),
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:00:00.000Z"),
+    reviewPackage()
+  );
+  const raw = JSON.parse(JSON.stringify(composed));
+  delete raw.pages["2026-08-01"].activePackageGenerationId;
+
+  const normalized = normalizeNotebookDocument(raw);
+  const page = normalized.pages["2026-08-01"]!;
+  const state = notebookStateForDate(normalized, "2026-08-01", sessions);
+
+  assert.equal(page.activePackageGenerationId, undefined);
+  assert.equal(page.reviewPackage, undefined);
+  assert.equal(state.todayBoard.activeGeneration, undefined);
+  assert.throws(() => sealDailyPage(normalized, "2026-08-01", {
+    reflection: "",
+    bookmarkIds: [],
+    expectedActiveGenerationId: null
+  }, [], new Date("2026-08-01T18:05:00.000Z")), /工作线材料|generation|整理/);
+});
+
 test("bookmark selection rejects an unresolved requested id and leaves the draft unchanged", () => {
   const draft = composeDailyPage(
     createEmptyNotebookDocument(),
@@ -559,7 +634,8 @@ test("bookmark selection rejects an unresolved requested id and leaves the draft
 
   assert.throws(() => saveDailyDraft(draft, "2026-08-01", {
     reflection: "",
-    bookmarkIds: ["missing-bookmark"]
+    bookmarkIds: ["missing-bookmark"],
+    expectedActiveGenerationId: draft.pages["2026-08-01"]?.activePackageGenerationId ?? null
   }, [], new Date("2026-08-01T18:05:00.000Z")), /书签|续上|不存在/);
   assert.equal(JSON.stringify(draft.pages["2026-08-01"]), before);
   assert.equal(draft.pages["2026-08-01"]?.status, "draft");
@@ -577,7 +653,8 @@ test("bookmark selection rejects duplicate requested ids", () => {
 
   assert.throws(() => saveDailyDraft(draft, "2026-08-01", {
     reflection: "",
-    bookmarkIds: [candidate.id, candidate.id]
+    bookmarkIds: [candidate.id, candidate.id],
+    expectedActiveGenerationId: draft.pages["2026-08-01"]?.activePackageGenerationId ?? null
   }, [candidate], new Date("2026-08-01T18:05:00.000Z")), /重复|唯一/);
 });
 
@@ -601,7 +678,8 @@ test("bookmark selection rejects more than three requested ids", () => {
 
   assert.throws(() => saveDailyDraft(draft, "2026-08-01", {
     reflection: "",
-    bookmarkIds: candidates.map((candidate) => candidate.id)
+    bookmarkIds: candidates.map((candidate) => candidate.id),
+    expectedActiveGenerationId: draft.pages["2026-08-01"]?.activePackageGenerationId ?? null
   }, candidates, new Date("2026-08-01T18:05:00.000Z")), /最多|3/);
 });
 

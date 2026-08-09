@@ -326,6 +326,8 @@ async function installDesktopApi(page: Page): Promise<void> {
     let scenario: TodayScenario = persistedSnapshot ? "sealed" : "raw";
     let prepareShouldFail = false;
     let prepareCalls = persistedSnapshot?.prepareCalls ?? 0;
+    let lastDraftGenerationCheck: { expected: string | null; active: string | null } | null = null;
+    let lastSealGenerationCheck: { expected: string | null; active: string | null } | null = null;
     const sideEffectCounts = persistedSnapshot?.sideEffectCounts ?? { wiki: 0, ctx: 0, background: 0 };
     let state = persistedSnapshot ? restorePersistedState(persistedSnapshot) : createState(undefined, undefined, scenario);
     const stateListeners: Array<(next: ReturnType<typeof createState>) => void> = [];
@@ -407,6 +409,10 @@ async function installDesktopApi(page: Page): Promise<void> {
       notifyState();
     };
     (window as unknown as { sealedPageJson: () => string }).sealedPageJson = () => JSON.stringify(state.notebook.page);
+    (window as unknown as { generationCheckSnapshot: () => unknown }).generationCheckSnapshot = () => structuredClone({
+      draft: lastDraftGenerationCheck,
+      seal: lastSealGenerationCheck
+    });
     (window as unknown as { mutateLiveInputs: () => void }).mutateLiveInputs = () => {
       const first = state.data.workSessionSnapshot.sessions[0];
       if (first) first.title = "封页后的 Session 新标题";
@@ -482,10 +488,12 @@ async function installDesktopApi(page: Page): Promise<void> {
         state = createState(state.data.settings.enabledSessionProviders, state.activeDate, scenario);
         return state.notebook;
       },
-      saveDailyDraft: async (_date: string, input: { reflection: string; worklineReflections?: Array<{ worklineId: string; text: string }>; bookmarkIds: string[] }) => {
+      saveDailyDraft: async (_date: string, input: { reflection: string; worklineReflections?: Array<{ worklineId: string; text: string }>; bookmarkIds: string[]; expectedActiveGenerationId: string | null }) => {
+        const activeGenerationId = state.notebook.page.activePackageGenerationId ?? null;
+        lastDraftGenerationCheck = { expected: input.expectedActiveGenerationId, active: activeGenerationId };
+        if (!activeGenerationId || input.expectedActiveGenerationId !== activeGenerationId) throw new Error("active generation mismatch");
         state.notebook.page.reflection = input.reflection;
         if (input.worklineReflections) {
-          const activeGenerationId = state.notebook.page.activePackageGenerationId;
           state.notebook.page.worklineReflections = [
             ...state.notebook.page.worklineReflections.filter((item: any) => item.packageGenerationId !== activeGenerationId),
             ...input.worklineReflections.map((item) => ({ ...item, packageGenerationId: activeGenerationId, updatedAt: "2026-07-20T21:00:00+08:00" }))
@@ -495,10 +503,11 @@ async function installDesktopApi(page: Page): Promise<void> {
         return state.notebook;
       },
       sealDailyPage: async (_date: string, input: { reflection: string; worklineReflections?: Array<{ worklineId: string; text: string }>; bookmarkIds: string[]; expectedActiveGenerationId: string | null }) => {
-        if (!state.notebook.page.activePackageGenerationId || input.expectedActiveGenerationId !== state.notebook.page.activePackageGenerationId) throw new Error("active generation mismatch");
+        const activeGenerationId = state.notebook.page.activePackageGenerationId ?? null;
+        lastSealGenerationCheck = { expected: input.expectedActiveGenerationId, active: activeGenerationId };
+        if (!activeGenerationId || input.expectedActiveGenerationId !== activeGenerationId) throw new Error("active generation mismatch");
         state.notebook.page.reflection = input.reflection;
         if (input.worklineReflections) {
-          const activeGenerationId = state.notebook.page.activePackageGenerationId;
           state.notebook.page.worklineReflections = [
             ...state.notebook.page.worklineReflections.filter((item: any) => item.packageGenerationId !== activeGenerationId),
             ...input.worklineReflections.map((item) => ({ ...item, packageGenerationId: activeGenerationId, updatedAt: "2026-07-20T22:16:00+08:00" }))
@@ -802,6 +811,48 @@ test("end-of-day flow stores personal ink and seals an immutable page", async ({
   await expect(page.getByText("今天到这里，明天继续验证闭环。")).toBeVisible();
   await expect(page.getByRole("button", { name: /整理工作脉络|更新工作脉络|今日收口/ })).toHaveCount(0);
   await expect(page.locator(".today-board")).toBeFocused();
+});
+
+test("an open reflection keeps its generation identity and rejects a save after refresh", async ({ page }) => {
+  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "compiled"): void }).setTodayScenario("compiled"));
+  const board = page.locator(".today-board");
+  await board.locator(".today-workline").first().getByRole("button", { name: "打开材料" }).click();
+  const review = page.getByRole("dialog", { name: "日终回看" });
+  await review.getByRole("button", { name: "看完了，开始思考" }).click();
+  const ink = review.getByRole("textbox", { name: "你的原始墨迹" });
+  await ink.fill("只属于打开时第一代的未存墨迹");
+
+  await page.evaluate(() => (window as unknown as { advanceTodayGeneration(): void }).advanceTodayGeneration());
+  await expect(ink).toHaveValue("只属于打开时第一代的未存墨迹");
+  await review.getByRole("button", { name: "收下这段思考" }).click();
+
+  await expect(review.locator(".review-error")).toContainText("active generation mismatch");
+  expect(await page.evaluate(() => (window as unknown as { generationCheckSnapshot(): unknown }).generationCheckSnapshot())).toEqual({
+    draft: { expected: "generation-2026-07-20-1", active: "generation-2026-07-20-2" },
+    seal: null
+  });
+  const storedPage = JSON.parse(await page.evaluate(() => (window as unknown as { sealedPageJson(): string }).sealedPageJson()));
+  expect(storedPage.status).toBe("draft");
+  expect(storedPage.worklineReflections).toEqual([]);
+});
+
+test("an open seal review keeps its generation identity and rejects sealing after refresh", async ({ page }) => {
+  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "compiled"): void }).setTodayScenario("compiled"));
+  const board = page.locator(".today-board");
+  await board.getByRole("button", { name: "今日收口" }).click();
+  const review = page.getByRole("dialog", { name: "日终回看" });
+
+  await page.evaluate(() => (window as unknown as { advanceTodayGeneration(): void }).advanceTodayGeneration());
+  await review.getByRole("button", { name: "收笔并封存" }).click();
+
+  await expect(review.locator(".review-error")).toContainText("active generation mismatch");
+  expect(await page.evaluate(() => (window as unknown as { generationCheckSnapshot(): unknown }).generationCheckSnapshot())).toEqual({
+    draft: null,
+    seal: { expected: "generation-2026-07-20-1", active: "generation-2026-07-20-2" }
+  });
+  const storedPage = JSON.parse(await page.evaluate(() => (window as unknown as { sealedPageJson(): string }).sealedPageJson()));
+  expect(storedPage.status).toBe("draft");
+  expect(storedPage.worklineReflections).toEqual([]);
 });
 
 test("generation-aware save, seal, reload, and history reopen preserve the exact sealed review", async ({ page }) => {

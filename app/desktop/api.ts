@@ -115,11 +115,10 @@ export interface DailyDraftInput {
   reflection: string;
   worklineReflections?: Array<Pick<DailyWorklineReflection, "worklineId" | "text">>;
   bookmarkIds: string[];
-}
-
-export interface DailySealInput extends DailyDraftInput {
   expectedActiveGenerationId: string | null;
 }
+
+export type DailySealInput = DailyDraftInput;
 
 export interface DesktopSummaryJob {
   status: "idle" | "running" | "complete" | "unavailable";

@@ -102,9 +102,14 @@ export function projectTodayBoard(page: TodayBoardPageAsset, sessions: AgentWork
 }
 
 function activeGenerationFor(page: TodayBoardPageAsset): TodayBoardPackageGeneration | undefined {
-  const generations = page.packageGenerations ?? (page.reviewPackage ? [legacyTodayBoardGeneration(page.reviewPackage)] : []);
+  const hasPackageGenerations = Object.prototype.hasOwnProperty.call(page, "packageGenerations");
+  const generations = hasPackageGenerations
+    ? page.packageGenerations ?? []
+    : page.reviewPackage ? [legacyTodayBoardGeneration(page.reviewPackage)] : [];
   if (generations.length === 0) return undefined;
-  if (page.activePackageGenerationId === undefined) return generations.at(-1);
+  if (!Object.prototype.hasOwnProperty.call(page, "activePackageGenerationId")) {
+    return hasPackageGenerations ? undefined : generations.at(-1);
+  }
   return generations.find((generation) => generation.id === page.activePackageGenerationId);
 }
 

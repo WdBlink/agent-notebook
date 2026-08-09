@@ -772,7 +772,9 @@ function DailyReviewWorkspace({
   onSave(input: DailyDraftInput): Promise<boolean>;
   onSeal(input: DailySealInput): Promise<void>;
 }): ReactElement {
-  const generation = notebook.todayBoard.activeGeneration;
+  const [generation] = useState(() => notebook.todayBoard.activeGeneration
+    ? structuredClone(notebook.todayBoard.activeGeneration)
+    : undefined);
   const review = generation?.package;
   const [stage, setStage] = useState<DailyReviewStage>(entry.stage);
   const [activeWorklineId] = useState(entry.stage === "dossier" ? entry.worklineId : review?.worklines[0]?.id ?? "");
@@ -792,7 +794,8 @@ function DailyReviewWorkspace({
       const text = reflections[workline.id]?.trim();
       return text ? [{ worklineId: workline.id, text }] : [];
     }),
-    bookmarkIds
+    bookmarkIds,
+    expectedActiveGenerationId: generation.id
   });
 
   function toggleBookmark(id: string): void {
@@ -834,10 +837,7 @@ function DailyReviewWorkspace({
         busy={busy}
         onBack={onClose}
         onToggleBookmark={toggleBookmark}
-        onSeal={() => void onSeal({
-          ...reflectionInput(),
-          expectedActiveGenerationId: generation.id
-        })}
+        onSeal={() => void onSeal(reflectionInput())}
       /> : null}
       {error ? <div className="review-error"><AlertTriangle size={15} />{error}</div> : null}
     </section>

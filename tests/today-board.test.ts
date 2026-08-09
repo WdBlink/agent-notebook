@@ -77,6 +77,24 @@ test("sealed projection never falls back when an explicit active generation id i
   assert.equal(projection.activeGeneration, undefined);
 });
 
+test("projection does not infer an active id when package generations are present", () => {
+  const generation = createTodayBoardGeneration(reviewPackage(), [session]);
+  const projection = projectTodayBoard(
+    { status: "draft", packageGenerations: [generation] },
+    [session]
+  );
+
+  assert.equal(projection.mode, "raw");
+  assert.equal(projection.activeGeneration, undefined);
+});
+
+test("projection still infers the single package for a genuine legacy page", () => {
+  const legacyPackage = reviewPackage();
+  const projection = projectTodayBoard({ status: "draft", reviewPackage: legacyPackage }, [session]);
+
+  assert.equal(projection.activeGeneration?.package.id, legacyPackage.id);
+});
+
 test("session evidence manifest changes when stable session revision metadata changes", () => {
   const original = buildSessionEvidenceManifest([session]);
   const changed = buildSessionEvidenceManifest([{ ...session, artifacts: ["notes.md", "result.md"] }]);

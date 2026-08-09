@@ -237,8 +237,8 @@ export function saveDailyDraft(
 ): NotebookDocument {
   const existing = document.pages[logicalDate];
   if (!existing || existing.status !== "draft") throw new Error("请先开始整理今天。");
+  const activeGeneration = requireExpectedActiveGeneration(existing, input.expectedActiveGenerationId);
   const bookmarks = selectBookmarks(input.bookmarkIds, uniqueBookmarks([...existing.bookmarks, ...candidates]));
-  const activeGeneration = activeGenerationForPage(existing);
   const worklineReflections = input.worklineReflections === undefined
     ? existing.worklineReflections
     : mergeActiveWorklineReflections(existing.worklineReflections, input.worklineReflections, activeGeneration, now);
@@ -261,13 +261,7 @@ export function sealDailyPage(
 ): NotebookDocument {
   const current = document.pages[logicalDate];
   if (!current || current.status !== "draft") throw new Error("请先开始整理今天。");
-  const activeGenerationId = current.activePackageGenerationId ?? null;
-  if (!activeGenerationId || !activeGenerationForPage(current)) {
-    throw new Error("请先整理出有效的工作线材料，再封存今天。");
-  }
-  if (activeGenerationId !== input.expectedActiveGenerationId) {
-    throw new Error("这一天的回看材料已经变化；当前封页请求已过期，请重新查看。");
-  }
+  requireExpectedActiveGeneration(current, input.expectedActiveGenerationId);
   const saved = saveDailyDraft(document, logicalDate, input, candidates, now);
   const page = saved.pages[logicalDate];
   if (!page) throw new Error("今天的页面不存在。");
@@ -374,14 +368,15 @@ function normalizePage(value: unknown, logicalDate: string): DailyNotebookPage {
   const raw = value as Partial<DailyNotebookPage>;
   const status = raw.status === "sealed" ? "sealed" : raw.status === "draft" ? "draft" : "unformed";
   const reviewPackage = normalizeDailyReviewPackage(raw.reviewPackage, logicalDate);
-  const packageGenerations = normalizePackageGenerations(raw.packageGenerations, logicalDate);
-  const legacyGeneration = !packageGenerations.length && reviewPackage ? legacyTodayBoardGeneration(reviewPackage) : undefined;
+  const hasPackageGenerations = Object.prototype.hasOwnProperty.call(raw, "packageGenerations");
+  const packageGenerations = hasPackageGenerations ? normalizePackageGenerations(raw.packageGenerations, logicalDate) : [];
+  const legacyGeneration = !hasPackageGenerations && reviewPackage ? legacyTodayBoardGeneration(reviewPackage) : undefined;
   const generations = packageGenerations.length ? packageGenerations : legacyGeneration ? [legacyGeneration] : [];
   const hasExplicitActiveGenerationId = Object.prototype.hasOwnProperty.call(raw, "activePackageGenerationId");
   const requestedActiveGenerationId = cleanText(raw.activePackageGenerationId, 400);
   const activeGeneration = hasExplicitActiveGenerationId
     ? generations.find((generation) => generation.id === requestedActiveGenerationId)
-    : generations.at(-1);
+    : hasPackageGenerations ? undefined : generations.at(-1);
   return {
     schemaVersion: 3,
     logicalDate,
@@ -409,15 +404,34 @@ function normalizePage(value: unknown, logicalDate: string): DailyNotebookPage {
 
 function generationsFor(page: DailyNotebookPage | undefined): TodayBoardPackageGeneration[] {
   if (!page) return [];
-  if (page.packageGenerations?.length) return structuredClone(page.packageGenerations);
+  if (Object.prototype.hasOwnProperty.call(page, "packageGenerations")) {
+    return page.packageGenerations?.length ? structuredClone(page.packageGenerations) : [];
+  }
   return page.reviewPackage ? [legacyTodayBoardGeneration(page.reviewPackage)] : [];
 }
 
 function activeGenerationForPage(page: DailyNotebookPage): TodayBoardPackageGeneration | undefined {
   const generations = generationsFor(page);
-  if (!Object.prototype.hasOwnProperty.call(page, "activePackageGenerationId")) return generations.at(-1);
+  if (!Object.prototype.hasOwnProperty.call(page, "activePackageGenerationId")) {
+    return Object.prototype.hasOwnProperty.call(page, "packageGenerations") ? undefined : generations.at(-1);
+  }
   const activeGenerationId = cleanText(page.activePackageGenerationId, 400);
   return generations.find((generation) => generation.id === activeGenerationId);
+}
+
+function requireExpectedActiveGeneration(
+  page: DailyNotebookPage,
+  expectedActiveGenerationId: string | null
+): TodayBoardPackageGeneration {
+  const activeGenerationId = cleanText(page.activePackageGenerationId, 400);
+  const activeGeneration = activeGenerationForPage(page);
+  if (!activeGenerationId || !activeGeneration) {
+    throw new Error("请先整理出有效的工作线材料，再保存或封存今天。");
+  }
+  if (activeGenerationId !== expectedActiveGenerationId) {
+    throw new Error("这一天的回看材料已经变化；当前保存或封页请求已过期，请重新查看。");
+  }
+  return activeGeneration;
 }
 
 function normalizePackageGenerations(value: unknown, logicalDate: string): TodayBoardPackageGeneration[] {
