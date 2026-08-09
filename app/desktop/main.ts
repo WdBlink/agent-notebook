@@ -35,7 +35,7 @@ import {
   type SummaryModelMap
 } from "./session-summary-cache";
 import { parseSessionTranscript } from "./transcript-reader";
-import { projectSessionActivityLane, summarizeDailySessionActivity, type SessionActivityLane } from "../../src/session-activity";
+import { createSessionActivityCache } from "./session-activity-cache";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.AGENT_WHITEBOARD_DEV === "1";
@@ -54,7 +54,19 @@ let activeDate = localDateString();
 let summaryCache = createEmptySessionSummaryCache();
 let summaryRunId = 0;
 let summaryJob: DesktopSummaryJob = { status: "idle", total: 0, completed: 0, models: summaryModels };
-const sessionActivityCache = new Map<string, SessionActivityLane>();
+const sessionActivityCache = createSessionActivityCache({
+  async readTranscript(session) {
+    const source = await readBoundedTranscript(session.path);
+    return parseSessionTranscript({
+      content: source.content,
+      platform: session.platform,
+      sessionId: session.id,
+      title: session.title,
+      path: session.path,
+      truncated: source.truncated
+    });
+  }
+});
 
 const runtimeFs: RuntimeFileSystem = {
   async stat(filePath: string): Promise<RuntimeFileStat> {
@@ -471,10 +483,11 @@ async function broadcastState(): Promise<void> {
 }
 
 async function buildState(): Promise<DesktopState> {
+  const requestDate = activeDate;
   const current = await ensureLoaded();
   const [providerActivityDates, activity] = await Promise.all([
     findActivityDates(current.settings.sessionScanRoots, current.settings.enabledSessionProviders),
-    loadDailySessionActivity(current.workSessionSnapshot.sessions)
+    loadDailySessionActivity(requestDate, current.workSessionSnapshot.sessions)
   ]);
   const activityDates = Array.from(new Set([
     ...providerActivityDates,
@@ -483,11 +496,11 @@ async function buildState(): Promise<DesktopState> {
   ])).sort((a, b) => b.localeCompare(a)).slice(0, 70);
   return {
     data: current,
-    activeDate,
+    activeDate: requestDate,
     activityDates,
     appVersion: app.getVersion(),
     userDataPath: app.getPath("userData"),
-    notebook: notebookStateForDate(notebook, activeDate, current.workSessionSnapshot.sessions),
+    notebook: notebookStateForDate(notebook, requestDate, current.workSessionSnapshot.sessions),
     activity,
     summaryJob
   };
@@ -727,47 +740,8 @@ async function loadSessionTranscript(request: SessionTranscriptRequest): Promise
   });
 }
 
-async function loadDailySessionActivity(sessions: CockpitData["workSessionSnapshot"]["sessions"]) {
-  const activeKeys = new Set(sessions.map(sessionActivityCacheKey));
-  const lanes = await Promise.all(sessions.map(async (session): Promise<SessionActivityLane> => {
-    const key = sessionActivityCacheKey(session);
-    const cached = sessionActivityCache.get(key);
-    if (cached) return { ...cached, operationalState: session.status === "active" ? "running" : "not-running" };
-    let transcript: SessionTranscriptState;
-    try {
-      const source = await readBoundedTranscript(session.path);
-      transcript = parseSessionTranscript({
-        content: source.content,
-        platform: session.platform,
-        sessionId: session.id,
-        title: session.title,
-        path: session.path,
-        truncated: source.truncated
-      });
-    } catch (error) {
-      transcript = {
-        sessionId: session.id,
-        platform: session.platform,
-        title: session.title,
-        path: session.path,
-        messages: [],
-        omittedToolEvents: 0,
-        truncated: true,
-        warning: `无法读取活动依据：${errorMessage(error)}`
-      };
-    }
-    const value = projectSessionActivityLane({ logicalDate: activeDate, source: { session, transcript } });
-    sessionActivityCache.set(key, value);
-    return value;
-  }));
-  for (const key of sessionActivityCache.keys()) {
-    if (!activeKeys.has(key)) sessionActivityCache.delete(key);
-  }
-  return summarizeDailySessionActivity({ logicalDate: activeDate, lanes });
-}
-
-function sessionActivityCacheKey(session: CockpitData["workSessionSnapshot"]["sessions"][number]): string {
-  return [activeDate, session.platform, session.id, session.path, session.updatedAt].map(encodeURIComponent).join("|");
+async function loadDailySessionActivity(logicalDate: string, sessions: CockpitData["workSessionSnapshot"]["sessions"]) {
+  return sessionActivityCache.load(logicalDate, sessions);
 }
 
 async function readBoundedTranscript(filePath: string): Promise<{ content: string; truncated: boolean }> {
