@@ -9,11 +9,11 @@ import { loadAgentWorkSnapshot, mergeSessionSummaries, type RuntimeFileStat, typ
 import { DEFAULT_SESSION_SCAN_ROOTS } from "../../src/constants";
 import { createEmptyData, localDateString, normalizeData, setWorkSessionSnapshot } from "../../src/state";
 import type { CockpitData, SessionProvider } from "../../src/types";
-import type { DailyDraftInput, DailyReviewPreparationMode, DesktopNotebookState, DesktopSettingsPatch, DesktopState, DesktopSummaryJob, NotebookNote, NotebookNoteInput, ProjectContextDocument, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState } from "./api";
+import type { DailyDraftInput, DailyReviewPreparationMode, DailySealInput, DesktopNotebookState, DesktopSettingsPatch, DesktopState, DesktopSummaryJob, NotebookNote, NotebookNoteInput, ProjectContextDocument, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState } from "./api";
 import { runDailyReviewPreparation } from "./daily-review-preparation";
 import { desktopCliRunner } from "./cli-runner";
 import {
-  composeDailyPage,
+  appendDailyReviewGeneration,
   createEmptyNotebookDocument,
   createNotebookNote,
   deleteNotebookNote,
@@ -28,7 +28,9 @@ import {
   updateNotebookNote,
   type NotebookDocument
 } from "./notebook-store";
+import { commitNotebookMutation } from "./notebook-mutation";
 import { authorizeSessionTranscriptRequest } from "./session-transcript-access";
+import { readBoundedTranscriptSource } from "./transcript-source-reader";
 import {
   createEmptySessionSummaryCache,
   normalizeSessionSummaryCache,
@@ -59,7 +61,7 @@ let summaryRunId = 0;
 let summaryJob: DesktopSummaryJob = { status: "idle", total: 0, completed: 0, models: summaryModels };
 const sessionActivityCache = createSessionActivityCache({
   async readTranscript(session) {
-    const source = await readBoundedTranscript(session.path);
+    const source = await readBoundedTranscriptSource(session.path, { origin: "current-snapshot" });
     return parseSessionTranscript({
       content: source.content,
       platform: session.platform,
@@ -130,8 +132,7 @@ ipcMain.handle("desktop:update-settings", async (_event, patch: DesktopSettingsP
   });
   await persistStore(data);
   if (patch.knowledgeRoot !== undefined) {
-    notebook = setKnowledgeRoot(notebook, patch.knowledgeRoot);
-    await persistNotebook();
+    await mutateNotebook(activeDate, (currentNotebook) => setKnowledgeRoot(currentNotebook, patch.knowledgeRoot!));
   }
   await refreshSnapshot(activeDate);
   return buildState();
@@ -213,15 +214,17 @@ ipcMain.handle("desktop:compose-daily-page", async (_event, date: string) => {
 ipcMain.handle("desktop:save-daily-draft", async (_event, date: string, input: DailyDraftInput) => {
   const logicalDate = cleanDate(date, activeDate);
   const current = await ensureLoaded();
-  const candidates = notebookStateForDate(notebook, logicalDate, current.workSessionSnapshot.sessions).continuationCandidates;
-  return mutateNotebook(logicalDate, (document) => saveDailyDraft(document, logicalDate, input, candidates));
+  const capturedSessions = current.workSessionSnapshot.date === logicalDate ? structuredClone(current.workSessionSnapshot.sessions) : [];
+  const candidates = notebookStateForDate(notebook, logicalDate, capturedSessions).continuationCandidates;
+  return mutateNotebook(logicalDate, (document) => saveDailyDraft(document, logicalDate, input, candidates), capturedSessions);
 });
 
-ipcMain.handle("desktop:seal-daily-page", async (_event, date: string, input: DailyDraftInput) => {
+ipcMain.handle("desktop:seal-daily-page", async (_event, date: string, input: DailySealInput) => {
   const logicalDate = cleanDate(date, activeDate);
   const current = await ensureLoaded();
-  const candidates = notebookStateForDate(notebook, logicalDate, current.workSessionSnapshot.sessions).continuationCandidates;
-  return mutateNotebook(logicalDate, (document) => sealDailyPage(document, logicalDate, input, candidates));
+  const capturedSessions = current.workSessionSnapshot.date === logicalDate ? structuredClone(current.workSessionSnapshot.sessions) : [];
+  const candidates = notebookStateForDate(notebook, logicalDate, capturedSessions).continuationCandidates;
+  return mutateNotebook(logicalDate, (document) => sealDailyPage(document, logicalDate, input, candidates), capturedSessions);
 });
 
 ipcMain.handle("desktop:get-project-context", async (_event, projectPath: string) => {
@@ -287,21 +290,24 @@ async function prepareDailyReviewForDate(
         evidenceCutoff
       });
     },
-    commitSuccess({ reviewPackage, capturedSessions: sessions }) {
-      return mutateNotebook(logicalDate, (document) => composeDailyPage(
+    commitSuccess({ reviewPackage, capturedSessions: sessions, expectedActiveGenerationId }) {
+      return mutateNotebook(logicalDate, (document) => appendDailyReviewGeneration(
         document,
         logicalDate,
         sessions,
         new Date(reviewPackage.generatedAt),
-        reviewPackage
-      ));
+        reviewPackage,
+        expectedActiveGenerationId
+      ), sessions);
     },
-    recordFailure({ message }) {
+    recordFailure({ message, expectedActiveGenerationId }) {
       return mutateNotebook(logicalDate, (document) => recordDailyCompilationFailure(
         document,
         logicalDate,
-        message
-      )).then(() => undefined);
+        message,
+        new Date(),
+        expectedActiveGenerationId
+      ), capturedSessions).then(() => undefined);
     }
   });
 }
@@ -365,21 +371,30 @@ async function loadNotebook(): Promise<NotebookDocument> {
   }
 }
 
-async function persistNotebook(): Promise<void> {
+async function persistNotebook(next: NotebookDocument): Promise<void> {
   await fs.mkdir(app.getPath("userData"), { recursive: true });
   const temporary = `${notebookPath()}.tmp`;
-  await fs.writeFile(temporary, `${JSON.stringify(notebook, null, 2)}\n`, "utf8");
+  await fs.writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, "utf8");
   await fs.rename(temporary, notebookPath());
 }
 
 let notebookWriteQueue: Promise<void> = Promise.resolve();
 
-async function mutateNotebook(logicalDate: string, operation: (current: NotebookDocument) => NotebookDocument): Promise<DesktopNotebookState> {
+async function mutateNotebook(
+  logicalDate: string,
+  operation: (current: NotebookDocument) => NotebookDocument,
+  viewSessions = snapshotSessionsForDate(logicalDate)
+): Promise<DesktopNotebookState> {
   let result: DesktopNotebookState | undefined;
   const write = notebookWriteQueue.then(async () => {
-    notebook = normalizeNotebookDocument(operation(notebook));
-    await persistNotebook();
-    result = notebookView(logicalDate);
+    result = await commitNotebookMutation({
+      current: notebook,
+      logicalDate,
+      viewSessions,
+      operation,
+      persist: persistNotebook,
+      publish(next) { notebook = next; }
+    });
   });
   notebookWriteQueue = write.catch(() => undefined);
   await write;
@@ -388,7 +403,11 @@ async function mutateNotebook(logicalDate: string, operation: (current: Notebook
 }
 
 function notebookView(logicalDate: string): DesktopNotebookState {
-  return notebookStateForDate(notebook, logicalDate, data?.workSessionSnapshot.sessions ?? []);
+  return notebookStateForDate(notebook, logicalDate, snapshotSessionsForDate(logicalDate));
+}
+
+function snapshotSessionsForDate(logicalDate: string): CockpitData["workSessionSnapshot"]["sessions"] {
+  return data?.workSessionSnapshot.date === logicalDate ? structuredClone(data.workSessionSnapshot.sessions) : [];
 }
 
 async function loadSummaryCache(): Promise<SessionSummaryCacheDocument> {
@@ -756,18 +775,21 @@ async function loadProjectContext(input: string): Promise<ProjectContextState> {
   return { projectPath, storePath, documents, warnings };
 }
 
-const MAX_TRANSCRIPT_BYTES = 24 * 1024 * 1024;
-const TRANSCRIPT_HEAD_BYTES = 8 * 1024 * 1024;
-
 async function loadSessionTranscript(request: SessionTranscriptRequest): Promise<SessionTranscriptState> {
   const current = await ensureLoaded();
   const target = authorizeSessionTranscriptRequest(request, current.workSessionSnapshot.sessions, notebook);
   let source: { content: string; truncated: boolean };
   try {
-    source = await readBoundedTranscript(target.path);
+    source = await readBoundedTranscriptSource(target.path, {
+      origin: target.origin,
+      ...(target.evidenceUpdatedAt ? { expectedModifiedAt: target.evidenceUpdatedAt } : {})
+    });
   } catch (error) {
     if (isMissingFileError(error)) {
-      throw new Error("会话原文文件已不存在；封存证据仍保留引用，但当前无法读取原文。");
+      if (target.origin === "sealed-package") {
+        throw new Error("会话原文文件已不存在；封存证据仍保留引用，但当前无法读取原文。");
+      }
+      throw new Error("当前只读快照中的会话原文文件已不存在，请刷新会话。");
     }
     throw new Error(`会话原文当前无法读取：${errorMessage(error)}`);
   }
@@ -787,29 +809,6 @@ function isMissingFileError(error: unknown): boolean {
 
 async function loadDailySessionActivity(logicalDate: string, sessions: CockpitData["workSessionSnapshot"]["sessions"]) {
   return sessionActivityCache.load(logicalDate, sessions);
-}
-
-async function readBoundedTranscript(filePath: string): Promise<{ content: string; truncated: boolean }> {
-  const stat = await fs.stat(filePath);
-  if (!stat.isFile()) throw new Error("会话记录不是可读取的普通文件。");
-  if (stat.size <= MAX_TRANSCRIPT_BYTES) return { content: await fs.readFile(filePath, "utf8"), truncated: false };
-
-  const handle = await fs.open(filePath, "r");
-  try {
-    const tailBytes = MAX_TRANSCRIPT_BYTES - TRANSCRIPT_HEAD_BYTES;
-    const head = Buffer.alloc(TRANSCRIPT_HEAD_BYTES);
-    const tail = Buffer.alloc(tailBytes);
-    const headRead = await handle.read(head, 0, head.length, 0);
-    const tailRead = await handle.read(tail, 0, tail.length, Math.max(0, stat.size - tailBytes));
-    const headText = head.subarray(0, headRead.bytesRead).toString("utf8");
-    const tailText = tail.subarray(0, tailRead.bytesRead).toString("utf8");
-    const safeHead = headText.slice(0, Math.max(0, headText.lastIndexOf("\n")));
-    const firstTailLine = tailText.indexOf("\n");
-    const safeTail = firstTailLine >= 0 ? tailText.slice(firstTailLine + 1) : tailText;
-    return { content: `${safeHead}\n${safeTail}`, truncated: true };
-  } finally {
-    await handle.close();
-  }
 }
 
 function markdownTitle(content: string): string | undefined {

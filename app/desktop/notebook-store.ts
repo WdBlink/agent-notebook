@@ -7,6 +7,7 @@ import type {
   DailyContinuationBookmark,
   DailyDraftInput,
   DailyNotebookPage,
+  DailySealInput,
   DailyWorklineReflection,
   DailyWorkRecord,
   DesktopNotebookState,
@@ -188,14 +189,35 @@ export function composeDailyPage(
   return { ...document, pages: { ...document.pages, [logicalDate]: page } };
 }
 
+export function appendDailyReviewGeneration(
+  document: NotebookDocument,
+  logicalDate: string,
+  sessions: AgentWorkSession[],
+  now: Date,
+  reviewPackage: DailyReviewPackage,
+  expectedActiveGenerationId: string | null
+): NotebookDocument {
+  const existing = document.pages[logicalDate];
+  if (existing?.status === "sealed") throw new Error("这一天已经封页，不能重新整理。");
+  const activeGenerationId = existing?.activePackageGenerationId ?? null;
+  if (activeGenerationId !== expectedActiveGenerationId) {
+    throw new Error("这一天的回看材料已经变化；当前整理结果已过期，请重新刷新。");
+  }
+  return composeDailyPage(document, logicalDate, sessions, now, reviewPackage);
+}
+
 export function recordDailyCompilationFailure(
   document: NotebookDocument,
   logicalDate: string,
   error: string,
-  now = new Date()
+  now = new Date(),
+  expectedActiveGenerationId?: string | null
 ): NotebookDocument {
   const existing = document.pages[logicalDate];
   if (!existing || existing.status !== "draft") throw new Error("请先开始整理今天。");
+  if (expectedActiveGenerationId !== undefined && (existing.activePackageGenerationId ?? null) !== expectedActiveGenerationId) {
+    return document;
+  }
   const lastCompilationError = cleanText(error, 2_000) || "整理失败，请重试。";
   return {
     ...document,
@@ -218,7 +240,7 @@ export function saveDailyDraft(
   const bookmarks = selectBookmarks(input.bookmarkIds, uniqueBookmarks([...existing.bookmarks, ...candidates]));
   const worklineReflections = input.worklineReflections === undefined
     ? existing.worklineReflections
-    : selectWorklineReflections(input.worklineReflections, existing.reviewPackage, now);
+    : mergeActiveWorklineReflections(existing.worklineReflections, input.worklineReflections, existing.reviewPackage, now);
   const page: DailyNotebookPage = {
     ...existing,
     reflection: cleanText(input.reflection, 12_000),
@@ -232,10 +254,16 @@ export function saveDailyDraft(
 export function sealDailyPage(
   document: NotebookDocument,
   logicalDate: string,
-  input: DailyDraftInput,
+  input: DailySealInput,
   candidates: DailyContinuationBookmark[],
   now = new Date()
 ): NotebookDocument {
+  const current = document.pages[logicalDate];
+  if (!current || current.status !== "draft") throw new Error("请先开始整理今天。");
+  const activeGenerationId = current.activePackageGenerationId ?? null;
+  if (activeGenerationId !== input.expectedActiveGenerationId) {
+    throw new Error("这一天的回看材料已经变化；当前封页请求已过期，请重新查看。");
+  }
   const saved = saveDailyDraft(document, logicalDate, input, candidates, now);
   const page = saved.pages[logicalDate];
   if (!page) throw new Error("今天的页面不存在。");
@@ -360,8 +388,8 @@ function normalizePage(value: unknown, logicalDate: string): DailyNotebookPage {
     ...(generations.length ? { packageGenerations: generations } : {}),
     ...(activeGeneration ? { activePackageGenerationId: activeGeneration.id } : {}),
     ...(cleanText(raw.lastCompilationError, 2_000) ? { lastCompilationError: cleanText(raw.lastCompilationError, 2_000) } : {}),
-    worklineReflections: activeGeneration && Array.isArray(raw.worklineReflections)
-      ? normalizeWorklineReflections(raw.worklineReflections, activeGeneration.package)
+    worklineReflections: generations.length && Array.isArray(raw.worklineReflections)
+      ? normalizeWorklineReflections(raw.worklineReflections, generations.flatMap((generation) => generation.package.worklines.map((workline) => workline.id)))
       : [],
     bookmarks: Array.isArray(raw.bookmarks) ? raw.bookmarks.map(normalizeBookmark).filter((item): item is DailyContinuationBookmark => Boolean(item)).slice(0, 3) : []
   };
@@ -418,8 +446,20 @@ function selectWorklineReflections(
   });
 }
 
-function normalizeWorklineReflections(value: unknown[], reviewPackage: DailyReviewPackage): DailyWorklineReflection[] {
-  const allowed = new Set(reviewPackage.worklines.map((workline) => workline.id));
+function mergeActiveWorklineReflections(
+  existing: DailyWorklineReflection[],
+  values: Array<Pick<DailyWorklineReflection, "worklineId" | "text">>,
+  reviewPackage: DailyReviewPackage | undefined,
+  now: Date
+): DailyWorklineReflection[] {
+  if (!reviewPackage) return existing;
+  const activeIds = new Set(reviewPackage.worklines.map((workline) => workline.id));
+  const historical = existing.filter((reflection) => !activeIds.has(reflection.worklineId));
+  return [...historical, ...selectWorklineReflections(values, reviewPackage, now)];
+}
+
+function normalizeWorklineReflections(value: unknown[], allowedWorklineIds: string[]): DailyWorklineReflection[] {
+  const allowed = new Set(allowedWorklineIds);
   const seen = new Set<string>();
   return value.flatMap((item) => {
     if (!item || typeof item !== "object") return [];

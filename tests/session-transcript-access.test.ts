@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { authorizeSessionTranscriptRequest } from "../app/desktop/session-transcript-access";
-import { composeDailyPage, createEmptyNotebookDocument } from "../app/desktop/notebook-store";
+import { composeDailyPage, createEmptyNotebookDocument, sealDailyPage } from "../app/desktop/notebook-store";
 import type { SessionTranscriptRequest } from "../app/desktop/api";
 import type { AgentWorkSession } from "../src/types";
 import type { DailyReviewPackage } from "../src/workline-review";
@@ -27,7 +27,8 @@ test("current snapshot tuple is authorized without a package reference", () => {
     id: historical.id,
     platform: historical.platform,
     path: historical.path,
-    title: historical.title
+    title: historical.title,
+    origin: "current-snapshot"
   });
 });
 
@@ -41,6 +42,13 @@ test("exact evidence in the active historical package authorizes transcript reop
   );
   const generation = document.pages[logicalDate]?.packageGenerations?.[0];
   assert.ok(generation);
+  const sealed = sealDailyPage(
+    document,
+    logicalDate,
+    { reflection: "历史判断", bookmarkIds: [], expectedActiveGenerationId: generation.id },
+    [],
+    new Date("2026-08-09T18:05:00.000Z")
+  );
   const request: SessionTranscriptRequest = {
     id: historical.id,
     platform: historical.platform,
@@ -52,14 +60,34 @@ test("exact evidence in the active historical package authorizes transcript reop
     }
   };
 
-  const authorized = authorizeSessionTranscriptRequest(request, [], document);
+  const authorized = authorizeSessionTranscriptRequest(request, [], sealed);
 
   assert.deepEqual(authorized, {
     id: historical.id,
     platform: historical.platform,
     path: historical.path,
-    title: historical.title
+    title: historical.title,
+    origin: "sealed-package",
+    evidenceUpdatedAt: historical.updatedAt
   });
+});
+
+test("a draft package cannot authorize historical transcript fallback", () => {
+  const document = composeDailyPage(
+    createEmptyNotebookDocument(),
+    logicalDate,
+    [historical],
+    new Date("2026-08-09T18:00:00.000Z"),
+    reviewPackage()
+  );
+  const generationId = document.pages[logicalDate]?.activePackageGenerationId ?? "";
+
+  assert.throws(() => authorizeSessionTranscriptRequest({
+    id: historical.id,
+    platform: historical.platform,
+    path: historical.path,
+    packageRef: { logicalDate, generationId, evidenceId: "session:claude:historical-session" }
+  }, [], document), /尚未封页/);
 });
 
 test("historical authorization rejects a tampered path, generation, or evidence id", () => {
@@ -71,6 +99,13 @@ test("historical authorization rejects a tampered path, generation, or evidence 
     reviewPackage()
   );
   const generationId = document.pages[logicalDate]?.activePackageGenerationId ?? "";
+  const sealed = sealDailyPage(
+    document,
+    logicalDate,
+    { reflection: "历史判断", bookmarkIds: [], expectedActiveGenerationId: generationId },
+    [],
+    new Date("2026-08-09T18:05:00.000Z")
+  );
   const base: SessionTranscriptRequest = {
     id: historical.id,
     platform: historical.platform,
@@ -79,15 +114,15 @@ test("historical authorization rejects a tampered path, generation, or evidence 
   };
 
   assert.throws(
-    () => authorizeSessionTranscriptRequest({ ...base, path: "/tmp/tampered.jsonl" }, [], document),
+    () => authorizeSessionTranscriptRequest({ ...base, path: "/tmp/tampered.jsonl" }, [], sealed),
     /不匹配/
   );
   assert.throws(
-    () => authorizeSessionTranscriptRequest({ ...base, packageRef: { ...base.packageRef!, generationId: "generation-tampered" } }, [], document),
+    () => authorizeSessionTranscriptRequest({ ...base, packageRef: { ...base.packageRef!, generationId: "generation-tampered" } }, [], sealed),
     /不是当前封存证据包/
   );
   assert.throws(
-    () => authorizeSessionTranscriptRequest({ ...base, packageRef: { ...base.packageRef!, evidenceId: "artifact:claude:historical-session:0" } }, [], document),
+    () => authorizeSessionTranscriptRequest({ ...base, packageRef: { ...base.packageRef!, evidenceId: "artifact:claude:historical-session:0" } }, [], sealed),
     /没有找到这条会话证据/
   );
 });
@@ -108,7 +143,8 @@ function reviewPackage(): DailyReviewPackage {
       label: historical.title,
       path: historical.path,
       platform: historical.platform,
-      sessionId: historical.id
+      sessionId: historical.id,
+      updatedAt: historical.updatedAt
     }],
     worklines: [{
       id: "historical-workline",

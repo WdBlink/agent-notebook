@@ -36,7 +36,7 @@ import type { CSSProperties, ReactElement } from "react";
 import { buildResumeCommand } from "../../src/resume";
 import type { AgentSessionStatus, AgentWorkSession, SessionProvider } from "../../src/types";
 import type { DailyReviewBlock, DailyReviewEvidence, DailyWorklineReview } from "../../src/workline-review";
-import type { DailyDraftInput, DailyWorkRecord, DesktopNotebookState, DesktopState, NotebookNote, ProjectContextDocument, ProjectContextState, SessionTranscriptState } from "./api";
+import type { DailyDraftInput, DailySealInput, DailyWorkRecord, DesktopNotebookState, DesktopState, NotebookNote, ProjectContextDocument, ProjectContextState, SessionTranscriptState } from "./api";
 
 type ViewKey = "brief" | "sessions" | "timeline" | "map" | "sources";
 type StatusFilter = "all" | AgentSessionStatus;
@@ -662,7 +662,7 @@ function DailyReviewWorkspace({
   onEvidence(session: AgentWorkSession): void;
   onClose(): void;
   onSave(input: DailyDraftInput): Promise<void>;
-  onSeal(input: DailyDraftInput): Promise<void>;
+  onSeal(input: DailySealInput): Promise<void>;
 }): ReactElement {
   const review = notebook.page.reviewPackage;
   const [stage, setStage] = useState<DailyReviewStage>("index");
@@ -728,7 +728,10 @@ function DailyReviewWorkspace({
         busy={busy}
         onBack={() => setStage("index")}
         onToggleBookmark={toggleBookmark}
-        onSeal={() => void onSeal(reflectionInput())}
+        onSeal={() => void onSeal({
+          ...reflectionInput(),
+          expectedActiveGenerationId: notebook.page.activePackageGenerationId ?? null
+        })}
       /> : null}
       {error ? <div className="review-error"><AlertTriangle size={15} />{error}</div> : null}
     </section>

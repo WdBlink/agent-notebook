@@ -22,8 +22,13 @@ export interface DailyReviewPreparationDependencies<TResult = DesktopNotebookSta
     logicalDate: string;
     reviewPackage: DailyReviewPackage;
     capturedSessions: AgentWorkSession[];
+    expectedActiveGenerationId: string | null;
   }): Promise<TResult>;
-  recordFailure(input: { logicalDate: string; message: string }): Promise<void>;
+  recordFailure(input: {
+    logicalDate: string;
+    message: string;
+    expectedActiveGenerationId: string | null;
+  }): Promise<void>;
 }
 
 export async function runDailyReviewPreparation<TResult>(
@@ -38,6 +43,7 @@ export async function runDailyReviewPreparation<TResult>(
   if (input.board.mode !== "raw" && input.mode !== "refresh") throw new Error("这一天已有工作线，请使用刷新。");
 
   const capturedSessions = structuredClone(input.sessions);
+  const expectedActiveGenerationId = input.board.activeGeneration?.id ?? null;
   let reviewPackage: DailyReviewPackage;
   try {
     reviewPackage = await dependencies.compile({
@@ -48,14 +54,19 @@ export async function runDailyReviewPreparation<TResult>(
     if (reviewPackage.logicalDate !== input.logicalDate) throw new Error("模型返回的回看日期与请求日期不一致。");
   } catch (error) {
     if (input.board.mode !== "raw") {
-      await dependencies.recordFailure({ logicalDate: input.logicalDate, message: errorMessage(error) });
+      await dependencies.recordFailure({
+        logicalDate: input.logicalDate,
+        message: errorMessage(error),
+        expectedActiveGenerationId
+      });
     }
     throw error;
   }
   return dependencies.commitSuccess({
     logicalDate: input.logicalDate,
     reviewPackage,
-    capturedSessions
+    capturedSessions,
+    expectedActiveGenerationId
   });
 }
 

@@ -3,6 +3,7 @@ import test from "node:test";
 import type { AgentWorkSession } from "../src/types";
 import type { DailyReviewPackage } from "../src/workline-review";
 import {
+  appendDailyReviewGeneration,
   compileWorkRecords,
   composeDailyPage,
   createEmptyNotebookDocument,
@@ -68,7 +69,11 @@ test("sealing freezes work records, reflection, and selected bookmarks", () => {
   const state = notebookStateForDate(composed, "2026-08-01", sessions);
   const selected = state.continuationCandidates.map((item) => item.id);
   const drafted = saveDailyDraft(composed, "2026-08-01", { reflection: "今天到这里。", bookmarkIds: selected }, state.continuationCandidates, new Date("2026-08-01T18:05:00Z"));
-  const sealed = sealDailyPage(drafted, "2026-08-01", { reflection: "今天到这里。", bookmarkIds: selected }, state.continuationCandidates, new Date("2026-08-01T18:10:00Z"));
+  const sealed = sealDailyPage(drafted, "2026-08-01", {
+    reflection: "今天到这里。",
+    bookmarkIds: selected,
+    expectedActiveGenerationId: drafted.pages["2026-08-01"]?.activePackageGenerationId ?? null
+  }, state.continuationCandidates, new Date("2026-08-01T18:10:00Z"));
   assert.equal(sealed.pages["2026-08-01"]?.status, "sealed");
   assert.equal(sealed.pages["2026-08-01"]?.reflection, "今天到这里。");
   assert.equal(sealed.pages["2026-08-01"]?.workRecords.length, 1);
@@ -117,7 +122,8 @@ test("review drafts preserve the exact generated package and one user reflection
     {
       reflection: "",
       worklineReflections: [{ worklineId: "workline-review", text: "我认为应该先验证真实任务。" }],
-      bookmarkIds: []
+      bookmarkIds: [],
+      expectedActiveGenerationId: drafted.pages["2026-08-01"]?.activePackageGenerationId ?? null
     },
     state.continuationCandidates,
     new Date("2026-08-01T18:10:00Z")
@@ -170,6 +176,160 @@ test("failed compilation records a retryable error without replacing the active 
   assert.equal(page?.activePackageGenerationId, composed.pages["2026-08-01"]?.activePackageGenerationId);
   assert.equal(page?.reviewPackage?.id, "review-package");
   assert.equal(page?.lastCompilationError, "模型没有返回可用工作线。");
+});
+
+test("out-of-order refresh cannot append over a newer active generation", () => {
+  const first = composeDailyPage(
+    createEmptyNotebookDocument(),
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:00:00Z"),
+    reviewPackage()
+  );
+  const firstGenerationId = first.pages["2026-08-01"]?.activePackageGenerationId ?? null;
+  const secondPackage = {
+    ...reviewPackage(),
+    id: "review-package-2",
+    generatedAt: "2026-08-01T18:10:00.000Z"
+  };
+  const second = appendDailyReviewGeneration(
+    first,
+    "2026-08-01",
+    sessions,
+    new Date(secondPackage.generatedAt),
+    secondPackage,
+    firstGenerationId
+  );
+  const secondGenerationId = second.pages["2026-08-01"]?.activePackageGenerationId;
+
+  assert.throws(() => appendDailyReviewGeneration(
+    second,
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:20:00.000Z"),
+    { ...reviewPackage(), id: "late-package", generatedAt: "2026-08-01T18:20:00.000Z" },
+    firstGenerationId
+  ), /已经变化|过期/);
+  assert.equal(second.pages["2026-08-01"]?.activePackageGenerationId, secondGenerationId);
+  assert.deepEqual(second.pages["2026-08-01"]?.packageGenerations?.map((item) => item.package.id), ["review-package", "review-package-2"]);
+});
+
+test("a late failed refresh cannot attach its diagnostic to a newer successful generation", () => {
+  const first = composeDailyPage(
+    createEmptyNotebookDocument(),
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:00:00Z"),
+    reviewPackage()
+  );
+  const firstGenerationId = first.pages["2026-08-01"]?.activePackageGenerationId ?? null;
+  const second = appendDailyReviewGeneration(
+    first,
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:10:00.000Z"),
+    { ...reviewPackage(), id: "review-package-2", generatedAt: "2026-08-01T18:10:00.000Z" },
+    firstGenerationId
+  );
+
+  const afterLateFailure = recordDailyCompilationFailure(
+    second,
+    "2026-08-01",
+    "较早的刷新刚刚失败",
+    new Date("2026-08-01T18:15:00.000Z"),
+    firstGenerationId
+  );
+
+  assert.equal(afterLateFailure.pages["2026-08-01"]?.lastCompilationError, undefined);
+  assert.equal(afterLateFailure.pages["2026-08-01"]?.activePackageGenerationId, second.pages["2026-08-01"]?.activePackageGenerationId);
+});
+
+test("sealing requires the active generation the user actually reviewed", () => {
+  const first = composeDailyPage(
+    createEmptyNotebookDocument(),
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:00:00Z"),
+    reviewPackage()
+  );
+  const firstGenerationId = first.pages["2026-08-01"]?.activePackageGenerationId ?? null;
+  const second = appendDailyReviewGeneration(
+    first,
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:10:00.000Z"),
+    { ...reviewPackage(), id: "review-package-2", generatedAt: "2026-08-01T18:10:00.000Z" },
+    firstGenerationId
+  );
+
+  assert.throws(() => sealDailyPage(second, "2026-08-01", {
+    reflection: "我只看过第一版。",
+    bookmarkIds: [],
+    expectedActiveGenerationId: firstGenerationId
+  }, [], new Date("2026-08-01T18:15:00.000Z")), /已经变化|过期/);
+  assert.equal(second.pages["2026-08-01"]?.status, "draft");
+
+  const sealed = sealDailyPage(first, "2026-08-01", {
+    reflection: "我确认了这一版。",
+    bookmarkIds: [],
+    expectedActiveGenerationId: firstGenerationId
+  }, [], new Date("2026-08-01T18:15:00.000Z"));
+  assert.throws(() => appendDailyReviewGeneration(
+    sealed,
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:20:00.000Z"),
+    { ...reviewPackage(), id: "too-late", generatedAt: "2026-08-01T18:20:00.000Z" },
+    firstGenerationId
+  ), /已经封页/);
+});
+
+test("refresh and reload preserve user reflections attached to older package generations", () => {
+  const firstPackage = reviewPackage();
+  const first = composeDailyPage(
+    createEmptyNotebookDocument(),
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:00:00Z"),
+    firstPackage
+  );
+  const withInk = saveDailyDraft(first, "2026-08-01", {
+    reflection: "",
+    worklineReflections: [{ worklineId: "workline-review", text: "旧工作线上的用户判断。" }],
+    bookmarkIds: []
+  }, [], new Date("2026-08-01T18:05:00Z"));
+  const firstGenerationId = withInk.pages["2026-08-01"]?.activePackageGenerationId ?? null;
+  const secondPackage: DailyReviewPackage = {
+    ...reviewPackage(),
+    id: "review-package-2",
+    generatedAt: "2026-08-01T18:10:00.000Z",
+    worklines: [{ ...reviewPackage().worklines[0]!, id: "workline-new", title: "新的工作线" }]
+  };
+  const refreshed = appendDailyReviewGeneration(
+    withInk,
+    "2026-08-01",
+    sessions,
+    new Date(secondPackage.generatedAt),
+    secondPackage,
+    firstGenerationId
+  );
+  const reloaded = normalizeNotebookDocument(JSON.parse(JSON.stringify(refreshed)));
+
+  assert.deepEqual(reloaded.pages["2026-08-01"]?.worklineReflections, [{
+    worklineId: "workline-review",
+    text: "旧工作线上的用户判断。",
+    updatedAt: "2026-08-01T18:05:00.000Z"
+  }]);
+  const rejectedNewWrite = saveDailyDraft(reloaded, "2026-08-01", {
+    reflection: "",
+    worklineReflections: [{ worklineId: "workline-review", text: "不能改写非当前工作线。" }],
+    bookmarkIds: []
+  }, [], new Date("2026-08-01T18:15:00Z"));
+  assert.deepEqual(rejectedNewWrite.pages["2026-08-01"]?.worklineReflections, [{
+    worklineId: "workline-review",
+    text: "旧工作线上的用户判断。",
+    updatedAt: "2026-08-01T18:05:00.000Z"
+  }]);
 });
 
 test("normalization upgrades schema 1 and 2 pages without losing legacy notes or page data", () => {

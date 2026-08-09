@@ -7,6 +7,8 @@ export interface AuthorizedSessionTranscriptReference {
   platform: AgentPlatform;
   path: string;
   title: string;
+  origin: "current-snapshot" | "sealed-package";
+  evidenceUpdatedAt?: string;
 }
 
 export function authorizeSessionTranscriptRequest(
@@ -22,6 +24,9 @@ export function authorizeSessionTranscriptRequest(
   const packageRef = request?.packageRef;
   if (!packageRef) throw new Error("这条会话不在当前只读快照中，也没有封存证据授权。");
   const page = document.pages[packageRef.logicalDate];
+  if (!page || page.status !== "sealed") {
+    throw new Error("指定日期尚未封页，不能用工作包回开历史会话。");
+  }
   if (!page || page.activePackageGenerationId !== packageRef.generationId) {
     throw new Error("指定的证据包不是当前封存证据包，拒绝读取。");
   }
@@ -38,10 +43,12 @@ export function authorizeSessionTranscriptRequest(
     id: evidence.sessionId,
     platform: evidence.platform,
     path: evidence.path,
-    title: evidence.label
+    title: evidence.label,
+    origin: "sealed-package",
+    ...(evidence.updatedAt ? { evidenceUpdatedAt: evidence.updatedAt } : {})
   };
 }
 
 function pickReference(session: AgentWorkSession): AuthorizedSessionTranscriptReference {
-  return { id: session.id, platform: session.platform, path: session.path, title: session.title };
+  return { id: session.id, platform: session.platform, path: session.path, title: session.title, origin: "current-snapshot" };
 }

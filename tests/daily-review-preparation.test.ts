@@ -5,6 +5,7 @@ import {
   type DailyReviewPreparationDependencies
 } from "../app/desktop/daily-review-preparation";
 import {
+  appendDailyReviewGeneration,
   composeDailyPage,
   createEmptyNotebookDocument,
   notebookStateForDate,
@@ -121,7 +122,11 @@ test("sealed day rejects before the compiler is invoked", async () => {
     new Date("2026-08-09T10:05:00.000Z"),
     reviewPackage("package-1", "2026-08-09T10:05:00.000Z")
   );
-  const sealed = sealDailyPage(drafted, logicalDate, { reflection: "今天到这里。", bookmarkIds: [] }, [], new Date("2026-08-09T18:00:00.000Z"));
+  const sealed = sealDailyPage(drafted, logicalDate, {
+    reflection: "今天到这里。",
+    bookmarkIds: [],
+    expectedActiveGenerationId: drafted.pages[logicalDate]?.activePackageGenerationId ?? null
+  }, [], new Date("2026-08-09T18:00:00.000Z"));
   const harness = createHarness(sealed, [reviewPackage("forbidden", "2026-08-09T18:05:00.000Z")]);
 
   await assert.rejects(harness.prepare("refresh"), /已经封页/);
@@ -193,6 +198,26 @@ test("an impossible calendar date is rejected before the compiler is invoked", a
   assert.equal(compileCalls, 0);
 });
 
+test("an unknown preparation mode is rejected before the compiler is invoked", async () => {
+  let compileCalls = 0;
+  await assert.rejects(runDailyReviewPreparation({
+    logicalDate,
+    mode: "unknown" as "compile",
+    snapshotDate: logicalDate,
+    evidenceCutoff: "2026-08-09T10:00:00.000Z",
+    sessions,
+    board: { mode: "raw", uncompiledEvidence: [] }
+  }, {
+    async compile() {
+      compileCalls += 1;
+      return reviewPackage("forbidden", "2026-08-09T10:05:00.000Z");
+    },
+    async commitSuccess() { throw new Error("不应提交"); },
+    async recordFailure() { throw new Error("不应记录"); }
+  }), /方式无效/);
+  assert.equal(compileCalls, 0);
+});
+
 function createHarness(
   initialDocument: NotebookDocument,
   compilerResults: Array<DailyReviewPackage | Error | Promise<DailyReviewPackage>>
@@ -209,14 +234,27 @@ function createHarness(
       if (!result) throw new Error("测试没有提供编译结果");
       return result;
     },
-    async commitSuccess({ reviewPackage: nextPackage, capturedSessions }) {
+    async commitSuccess({ reviewPackage: nextPackage, capturedSessions, expectedActiveGenerationId }) {
       commitCalls += 1;
-      document = composeDailyPage(document, logicalDate, capturedSessions, new Date(nextPackage.generatedAt), nextPackage);
+      document = appendDailyReviewGeneration(
+        document,
+        logicalDate,
+        capturedSessions,
+        new Date(nextPackage.generatedAt),
+        nextPackage,
+        expectedActiveGenerationId
+      );
       return notebookStateForDate(document, logicalDate, capturedSessions);
     },
-    async recordFailure({ message }) {
+    async recordFailure({ message, expectedActiveGenerationId }) {
       failureCalls += 1;
-      document = recordDailyCompilationFailure(document, logicalDate, message, new Date("2026-08-09T12:00:00.000Z"));
+      document = recordDailyCompilationFailure(
+        document,
+        logicalDate,
+        message,
+        new Date("2026-08-09T12:00:00.000Z"),
+        expectedActiveGenerationId
+      );
     }
   };
   return {

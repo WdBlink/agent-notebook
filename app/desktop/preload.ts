@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { DailyDraftInput, DailyReviewPreparationMode, DesktopApi, DesktopNotebookState, DesktopSettingsPatch, DesktopState, NotebookNote, NotebookNoteInput, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState } from "./api";
+import type { DailyDraftInput, DailyReviewPreparationMode, DailySealInput, DesktopApi, DesktopNotebookState, DesktopSettingsPatch, DesktopState, NotebookNote, NotebookNoteInput, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState } from "./api";
 
 const api: DesktopApi = {
   getState(date?: string): Promise<DesktopState> {
@@ -38,7 +38,7 @@ const api: DesktopApi = {
   saveDailyDraft(date: string, input: DailyDraftInput): Promise<DesktopNotebookState> {
     return ipcRenderer.invoke("desktop:save-daily-draft", date, input) as Promise<DesktopNotebookState>;
   },
-  sealDailyPage(date: string, input: DailyDraftInput): Promise<DesktopNotebookState> {
+  sealDailyPage(date: string, input: DailySealInput): Promise<DesktopNotebookState> {
     return ipcRenderer.invoke("desktop:seal-daily-page", date, input) as Promise<DesktopNotebookState>;
   },
   getProjectContext(projectPath: string): Promise<ProjectContextState> {

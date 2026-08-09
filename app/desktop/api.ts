@@ -116,6 +116,10 @@ export interface DailyDraftInput {
   bookmarkIds: string[];
 }
 
+export interface DailySealInput extends DailyDraftInput {
+  expectedActiveGenerationId: string | null;
+}
+
 export interface DesktopSummaryJob {
   status: "idle" | "running" | "complete" | "unavailable";
   total: number;
@@ -189,7 +193,7 @@ export interface DesktopApi {
   prepareDailyReview(date: string, mode: DailyReviewPreparationMode): Promise<DesktopNotebookState>;
   composeDailyPage(date: string): Promise<DesktopNotebookState>;
   saveDailyDraft(date: string, input: DailyDraftInput): Promise<DesktopNotebookState>;
-  sealDailyPage(date: string, input: DailyDraftInput): Promise<DesktopNotebookState>;
+  sealDailyPage(date: string, input: DailySealInput): Promise<DesktopNotebookState>;
   getProjectContext(projectPath: string): Promise<ProjectContextState>;
   getSessionTranscript(request: SessionTranscriptRequest): Promise<SessionTranscriptState>;
   chooseDirectory(): Promise<string | null>;
