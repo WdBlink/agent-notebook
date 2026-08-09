@@ -1,27 +1,29 @@
 ---
-name: ksi-daily-review
-description: Use when the user wants to review a day of Codex, Claude Code, or other Agent work, inspect a reconstructed workline, write their own reflection, or arrange that reflection into proposals, especially when work is scattered across many Sessions, documents, code changes, tests, or experiments.
+name: traceink
+description: Use when the user wants to review a day, week, or custom period of Codex, Claude Code, or other Agent work; inspect a reconstructed workline; write their own reflection; or arrange that reflection into proposals, especially when work is scattered across many Sessions, documents, code changes, tests, or experiments.
 ---
 
-# KSI Daily Review
+# Traceink
 
 ## Overview
 
 Turn scattered Agent traces into material a person can think with. AI reconstructs the work scene; the user supplies the judgment.
 
-This is a read-only Prompt laboratory for the Daily Review product. It may arrange proposals after the user reflects, but it never performs destination writes, starts background work, or seals a page. Do not turn it into an automatic daily-report writer.
+This is a read-only Prompt laboratory for evidence-led work review. It may arrange proposals after the user reflects, but it never performs destination writes, starts background work, or seals a page. Do not turn it into an automatic report writer.
 
-Prompt profile: `ksi-daily-review-skill-v1`.
+Prompt profile: `traceink-review-v1`.
 
 ## Required contract
 
-Before compiling a review, read [references/ksi-review-contract.md](references/ksi-review-contract.md) completely and follow it as the semantic and authority contract.
+Before compiling a review, read [references/editorial-contract.md](references/editorial-contract.md) completely and follow it as the semantic and authority contract.
 
 ## Review modes
 
 | User intent | Response |
 | --- | --- |
-| “回看今天 / 某天” | Discover evidence and show only the workline index. |
+| “回看今天 / 某天” | Discover evidence for that local day and show only the workline index. |
+| “回看本周 / 上周” | Use local calendar-week boundaries, reconstruct cross-day worklines, and show only the index. |
+| Gives a date range | Freeze that exact local range, report its boundaries, and show only the index. |
 | Selects a workline | Show that workline's evidence dossier, then stop at one human question. |
 | “一次性展开” | Show every dossier, but still do not answer the human questions. |
 | Writes their reflection | Preserve their wording, then arrange non-binding judgment and carry-forward proposals. |
@@ -31,11 +33,12 @@ Before compiling a review, read [references/ksi-review-contract.md](references/k
 
 ### 1. Freeze the review scope
 
-- Use the requested local date; otherwise use today in the user's timezone.
+- Resolve the requested review period before reading evidence. Support one local day, a local calendar week, or an explicit date range. If the user says only “回看” without a period, use today in the user's timezone and state that choice.
+- For a week, state the inclusive local start and end dates. Do not silently reinterpret “本周” as the last seven rolling days.
 - Resolve the Codex home from a non-empty `CODEX_HOME`; fall back to `~/.codex` only when it is unset. Prefer explicitly named Session IDs or paths. Otherwise discover candidates under `<codex-home>/sessions`, `<codex-home>/archived_sessions`, and `~/.claude/projects` with `rg --files` and file/session timestamps.
-- Use canonical message or event timestamps to decide whether a Session contributes to the requested date; file modification time is only a discovery hint. Deduplicate active and archived copies by provider plus Session ID, and report which canonical copy was read.
+- Use canonical message or event timestamps to decide whether a Session contributes to the requested period; file modification time is only a discovery hint. Deduplicate active and archived copies by provider plus Session ID, and report which canonical copy was read.
 - Read both Codex and Claude Code unless the user limits providers.
-- Treat the review request as read-only permission for provider-native transcripts on that date, not as permission to open every path or URL mentioned inside them. Open linked local material only when the user named it or when it is necessary for a selected dossier and lies within that Session's recorded working directory; ask before reading anything outside that boundary. Do not fetch URLs by default.
+- Treat the review request as read-only permission for provider-native transcripts in that period, not as permission to open every path or URL mentioned inside them. Open linked local material only when the user named it or when it is necessary for a selected dossier and lies within that Session's recorded working directory; ask before reading anything outside that boundary. Do not fetch URLs by default.
 - Read long transcripts in bounded batches and maintain a coverage register. Detect and report truncation, unparsed ranges, duplicates, and missing files rather than silently treating partial reading as complete. If `rg` is unavailable, use a local filesystem fallback and report it.
 - Build an evidence register before interpretation. Record provider, Session ID, canonical path, relevant message/event time range, working directory, and linked material actually opened.
 - Report what was read, what was skipped, and any read/parse failure. Never silently fill a gap.

@@ -1,4 +1,4 @@
-# KSI-informed Daily Review contract
+# Evidence-led review contract
 
 ## Purpose
 
@@ -6,15 +6,15 @@ Prepare a bounded, evidence-linked reconstruction of Agent work so the user can 
 
 ## Research lineage and source corrections
 
-KSI contributes a Prompt-led editorial discipline, not this product's human closeout lifecycle.
+The Knowledge-Centric Self-Improvement research protocol contributes a Prompt-led editorial discipline, not this product's human closeout lifecycle.
 
-- The formal KSI per-task Prompt requests exactly six values: one load-bearing assumption, evidence, optional `evidence_post_id`, one concrete next-generation change, one falsifiable predicted outcome, and confidence.
+- Its formal per-task Prompt requests exactly six values: one load-bearing assumption, evidence, optional `evidence_post_id`, one concrete next-generation change, one falsifiable predicted outcome, and confidence.
 - `evidence_post_id` cites evidence. It is not `parent_post_id` and does not point to a prior human decision.
 - The formal cross-task relations are `AGREE`, `DISAGREE`, and `SYNTHESIZE`. `refine` appears in project-page explanatory prose, not as a fourth formal paper operator.
-- KSI distillation favors actionable, scoped, evidence-grounded claims with applicability boundaries and calibrated confidence.
-- KSI does not supply human reflection, adoption, migration, sealing, or background-work authority. Those are product interactions added after evidence preparation.
+- Its distillation favors actionable, scoped, evidence-grounded claims with applicability boundaries and calibrated confidence.
+- The research protocol does not supply human reflection, adoption, migration, sealing, or background-work authority. Those are product interactions added after evidence preparation.
 
-Do not copy the six KSI values into a rigid wire schema. Use them as an editing rubric that can benefit from future model improvements.
+Do not copy the six values into a rigid wire schema. Use them as an editing rubric that can benefit from future model improvements.
 
 ## Editorial recipe
 

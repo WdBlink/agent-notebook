@@ -50,7 +50,7 @@
 
 - Modify: `src/workline-review.ts`
 - Modify: `tests/workline-review.test.ts`
-- Reuse: `skills/ksi-daily-review/references/ksi-review-contract.md`
+- Reuse: `skills/traceink/references/editorial-contract.md`
 - Modify: `app/desktop/main.ts`
 
 - [ ] Add failing compiler tests that compare behavior to the validated Skill contract: cross-Session grouping, evidence fidelity, possible-change language, conflict/scope retention, participation boundaries, and a real human question.

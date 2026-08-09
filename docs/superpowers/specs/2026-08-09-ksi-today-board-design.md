@@ -8,7 +8,7 @@ The product turns a day of scattered Codex and Claude Code activity into a durab
 
 It is not a note application, an Agent runtime, or an automatically written diary. The application prepares the work scene; the user supplies the judgment.
 
-The validated `ksi-daily-review` Skill is the semantic oracle. Given the same admitted evidence, the client compiler must preserve the Skill's observable qualities: cross-Session worklines, clean removal of execution noise, reopenable evidence, visible user/Agent participation, possible changes rather than invented decisions, and one real question left for the user.
+The validated `traceink` Skill is the semantic oracle. Given the same admitted evidence, the client compiler must preserve the Skill's observable qualities: cross-Session worklines, clean removal of execution noise, reopenable evidence, visible user/Agent participation, possible changes rather than invented decisions, and one real question left for the user.
 
 ## One surface, four durable states
 
