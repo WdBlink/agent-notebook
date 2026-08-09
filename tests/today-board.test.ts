@@ -66,6 +66,17 @@ test("sealed projection stays read-only even when newer evidence arrives", () =>
   assert.equal(projection.uncompiledEvidence.length, 1);
 });
 
+test("sealed projection never falls back when an explicit active generation id is corrupt", () => {
+  const generation = createTodayBoardGeneration(reviewPackage(), [session]);
+  const projection = projectTodayBoard(
+    { status: "sealed", packageGenerations: [generation], activePackageGenerationId: "generation-does-not-exist" },
+    [session]
+  );
+
+  assert.equal(projection.mode, "sealed");
+  assert.equal(projection.activeGeneration, undefined);
+});
+
 test("session evidence manifest changes when stable session revision metadata changes", () => {
   const original = buildSessionEvidenceManifest([session]);
   const changed = buildSessionEvidenceManifest([{ ...session, artifacts: ["notes.md", "result.md"] }]);

@@ -660,9 +660,10 @@ function DailyRecordRow({ record, sessions, onSession }: { record: DailyWorkReco
 
 function SealedReviewSummary({ notebook }: { notebook: DesktopNotebookState }): ReactElement {
   const review = notebook.page.reviewPackage;
+  const generationId = notebook.page.activePackageGenerationId;
   if (!review) return <div className="daily-records" />;
   return <section className="sealed-review-summary"><span className="folio-label">SEALED REVIEW · {review.worklines.length} WORKLINES</span>{review.worklines.map((workline) => {
-    const reflection = notebook.page.worklineReflections.find((item) => item.worklineId === workline.id);
+    const reflection = notebook.page.worklineReflections.find((item) => item.packageGenerationId === generationId && item.worklineId === workline.id);
     return <article key={workline.id}><small>{worklineStatusLabel(workline.status)}</small><h3>{workline.title}</h3><p>{workline.summary}</p>{reflection ? <blockquote>{reflection.text}</blockquote> : null}</article>;
   })}</section>;
 }
@@ -775,7 +776,9 @@ function DailyReviewWorkspace({
   const review = generation?.package;
   const [stage, setStage] = useState<DailyReviewStage>(entry.stage);
   const [activeWorklineId] = useState(entry.stage === "dossier" ? entry.worklineId : review?.worklines[0]?.id ?? "");
-  const [reflections, setReflections] = useState<Record<string, string>>(() => Object.fromEntries(notebook.page.worklineReflections.map((item) => [item.worklineId, item.text])));
+  const [reflections, setReflections] = useState<Record<string, string>>(() => Object.fromEntries(notebook.page.worklineReflections
+    .filter((item) => item.packageGenerationId === generation?.id)
+    .map((item) => [item.worklineId, item.text])));
   const [bookmarkIds, setBookmarkIds] = useState(notebook.page.bookmarks.map((item) => item.id));
   const activeWorkline = review?.worklines.find((item) => item.id === activeWorklineId) ?? review?.worklines[0];
 

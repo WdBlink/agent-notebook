@@ -65,7 +65,7 @@ test("notes remain durable user ink and delivery is explicit", () => {
 
 test("sealing freezes work records, reflection, and selected bookmarks", () => {
   const empty = createEmptyNotebookDocument();
-  const composed = composeDailyPage(empty, "2026-08-01", sessions, new Date("2026-08-01T18:00:00Z"));
+  const composed = composeDailyPage(empty, "2026-08-01", sessions, new Date("2026-08-01T18:00:00Z"), reviewPackage());
   const state = notebookStateForDate(composed, "2026-08-01", sessions);
   const selected = state.continuationCandidates.map((item) => item.id);
   const drafted = saveDailyDraft(composed, "2026-08-01", { reflection: "今天到这里。", bookmarkIds: selected }, state.continuationCandidates, new Date("2026-08-01T18:05:00Z"));
@@ -110,6 +110,7 @@ test("review drafts preserve the exact generated package and one user reflection
   assert.deepEqual(drafted.pages["2026-08-01"]?.reviewPackage, review);
   assert.deepEqual(drafted.pages["2026-08-01"]?.worklineReflections, [
     {
+      packageGenerationId: composed.pages["2026-08-01"]!.activePackageGenerationId!,
       worklineId: "workline-review",
       text: "我认为应该先验证真实任务。",
       updatedAt: "2026-08-01T18:05:00.000Z"
@@ -316,6 +317,7 @@ test("refresh and reload preserve user reflections attached to older package gen
   const reloaded = normalizeNotebookDocument(JSON.parse(JSON.stringify(refreshed)));
 
   assert.deepEqual(reloaded.pages["2026-08-01"]?.worklineReflections, [{
+    packageGenerationId: firstGenerationId,
     worklineId: "workline-review",
     text: "旧工作线上的用户判断。",
     updatedAt: "2026-08-01T18:05:00.000Z"
@@ -326,10 +328,321 @@ test("refresh and reload preserve user reflections attached to older package gen
     bookmarkIds: []
   }, [], new Date("2026-08-01T18:15:00Z"));
   assert.deepEqual(rejectedNewWrite.pages["2026-08-01"]?.worklineReflections, [{
+    packageGenerationId: firstGenerationId,
     worklineId: "workline-review",
     text: "旧工作线上的用户判断。",
     updatedAt: "2026-08-01T18:05:00.000Z"
   }]);
+});
+
+test("the same workline id keeps independent ink in each package generation", () => {
+  const first = composeDailyPage(
+    createEmptyNotebookDocument(),
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:00:00.000Z"),
+    reviewPackage()
+  );
+  const firstGenerationId = first.pages["2026-08-01"]!.activePackageGenerationId!;
+  const withFirstInk = saveDailyDraft(first, "2026-08-01", {
+    reflection: "",
+    worklineReflections: [{ worklineId: "workline-review", text: "A" }],
+    bookmarkIds: []
+  }, [], new Date("2026-08-01T18:05:00.000Z"));
+  const second = appendDailyReviewGeneration(
+    withFirstInk,
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:10:00.000Z"),
+    { ...reviewPackage(), id: "review-package-2", generatedAt: "2026-08-01T18:10:00.000Z" },
+    firstGenerationId
+  );
+  const secondGenerationId = second.pages["2026-08-01"]!.activePackageGenerationId!;
+
+  assert.deepEqual(second.pages["2026-08-01"]?.worklineReflections, [{
+    packageGenerationId: firstGenerationId,
+    worklineId: "workline-review",
+    text: "A",
+    updatedAt: "2026-08-01T18:05:00.000Z"
+  }]);
+
+  const withSecondInk = saveDailyDraft(second, "2026-08-01", {
+    reflection: "",
+    worklineReflections: [{ worklineId: "workline-review", text: "B" }],
+    bookmarkIds: []
+  }, [], new Date("2026-08-01T18:15:00.000Z"));
+  const reloaded = normalizeNotebookDocument(JSON.parse(JSON.stringify(withSecondInk)));
+
+  assert.deepEqual(reloaded.pages["2026-08-01"]?.worklineReflections, [
+    {
+      packageGenerationId: firstGenerationId,
+      worklineId: "workline-review",
+      text: "A",
+      updatedAt: "2026-08-01T18:05:00.000Z"
+    },
+    {
+      packageGenerationId: secondGenerationId,
+      worklineId: "workline-review",
+      text: "B",
+      updatedAt: "2026-08-01T18:15:00.000Z"
+    }
+  ]);
+});
+
+test("legacy generation-less ink migrates once to the latest containing generation no later than its update", () => {
+  const first = composeDailyPage(
+    createEmptyNotebookDocument(),
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:00:00.000Z"),
+    reviewPackage()
+  );
+  const firstGenerationId = first.pages["2026-08-01"]!.activePackageGenerationId!;
+  const second = appendDailyReviewGeneration(
+    first,
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:10:00.000Z"),
+    { ...reviewPackage(), id: "review-package-2", generatedAt: "2026-08-01T18:10:00.000Z" },
+    firstGenerationId
+  );
+  const raw = JSON.parse(JSON.stringify(second));
+  raw.pages["2026-08-01"].worklineReflections = [{
+    worklineId: "workline-review",
+    text: "legacy A",
+    updatedAt: "2026-08-01T18:05:00.000Z"
+  }];
+
+  const normalized = normalizeNotebookDocument(raw);
+
+  assert.deepEqual(normalized.pages["2026-08-01"]?.worklineReflections, [{
+    packageGenerationId: firstGenerationId,
+    worklineId: "workline-review",
+    text: "legacy A",
+    updatedAt: "2026-08-01T18:05:00.000Z"
+  }]);
+});
+
+test("legacy generation-less ink falls back to exactly the active generation", () => {
+  const first = composeDailyPage(
+    createEmptyNotebookDocument(),
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:00:00.000Z"),
+    reviewPackage()
+  );
+  const firstGenerationId = first.pages["2026-08-01"]!.activePackageGenerationId!;
+  const second = appendDailyReviewGeneration(
+    first,
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:10:00.000Z"),
+    { ...reviewPackage(), id: "review-package-2", generatedAt: "2026-08-01T18:10:00.000Z" },
+    firstGenerationId
+  );
+  const secondGenerationId = second.pages["2026-08-01"]!.activePackageGenerationId!;
+  const raw = JSON.parse(JSON.stringify(second));
+  raw.pages["2026-08-01"].worklineReflections = [{
+    worklineId: "workline-review",
+    text: "legacy before packages",
+    updatedAt: "2026-08-01T17:00:00.000Z"
+  }];
+
+  const normalized = normalizeNotebookDocument(raw);
+
+  assert.deepEqual(normalized.pages["2026-08-01"]?.worklineReflections, [{
+    packageGenerationId: secondGenerationId,
+    worklineId: "workline-review",
+    text: "legacy before packages",
+    updatedAt: "2026-08-01T17:00:00.000Z"
+  }]);
+});
+
+test("legacy generation-less ink never falls back to an active generation without its workline", () => {
+  const first = composeDailyPage(
+    createEmptyNotebookDocument(),
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:00:00.000Z"),
+    reviewPackage()
+  );
+  const firstGenerationId = first.pages["2026-08-01"]!.activePackageGenerationId!;
+  const secondPackage: DailyReviewPackage = {
+    ...reviewPackage(),
+    id: "review-package-2",
+    generatedAt: "2026-08-01T18:10:00.000Z",
+    worklines: [{ ...reviewPackage().worklines[0]!, id: "workline-new" }]
+  };
+  const second = appendDailyReviewGeneration(
+    first,
+    "2026-08-01",
+    sessions,
+    new Date(secondPackage.generatedAt),
+    secondPackage,
+    firstGenerationId
+  );
+  const raw = JSON.parse(JSON.stringify(second));
+  raw.pages["2026-08-01"].worklineReflections = [{
+    worklineId: "workline-review",
+    text: "legacy before packages",
+    updatedAt: "2026-08-01T17:00:00.000Z"
+  }];
+
+  const normalized = normalizeNotebookDocument(raw);
+
+  assert.deepEqual(normalized.pages["2026-08-01"]?.worklineReflections, [{
+    packageGenerationId: firstGenerationId,
+    worklineId: "workline-review",
+    text: "legacy before packages",
+    updatedAt: "2026-08-01T17:00:00.000Z"
+  }]);
+});
+
+test("sealing rejects a draft without a non-null active package generation", () => {
+  const draftWithoutGeneration = composeDailyPage(
+    createEmptyNotebookDocument(),
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:00:00.000Z")
+  );
+
+  assert.throws(() => sealDailyPage(draftWithoutGeneration, "2026-08-01", {
+    reflection: "",
+    bookmarkIds: [],
+    expectedActiveGenerationId: null
+  }, [], new Date("2026-08-01T18:05:00.000Z")), /工作线材料|generation|整理/);
+  assert.equal(draftWithoutGeneration.pages["2026-08-01"]?.status, "draft");
+});
+
+test("a sealed page with an explicit missing or corrupt active generation id never falls back", () => {
+  const first = composeDailyPage(
+    createEmptyNotebookDocument(),
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:00:00.000Z"),
+    reviewPackage()
+  );
+  const firstGenerationId = first.pages["2026-08-01"]!.activePackageGenerationId!;
+  const second = appendDailyReviewGeneration(
+    first,
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:10:00.000Z"),
+    { ...reviewPackage(), id: "review-package-2", generatedAt: "2026-08-01T18:10:00.000Z" },
+    firstGenerationId
+  );
+  for (const [tamperedId, normalizedId] of [["generation-does-not-exist", "generation-does-not-exist"], [null, ""]] as const) {
+    const raw = JSON.parse(JSON.stringify(second));
+    raw.pages["2026-08-01"].status = "sealed";
+    raw.pages["2026-08-01"].sealedAt = "2026-08-01T18:15:00.000Z";
+    raw.pages["2026-08-01"].activePackageGenerationId = tamperedId;
+
+    const normalized = normalizeNotebookDocument(raw);
+    const state = notebookStateForDate(normalized, "2026-08-01", sessions);
+
+    assert.equal(normalized.pages["2026-08-01"]?.activePackageGenerationId, normalizedId);
+    assert.equal(normalized.pages["2026-08-01"]?.reviewPackage, undefined);
+    assert.equal(state.todayBoard.mode, "sealed");
+    assert.equal(state.todayBoard.activeGeneration, undefined);
+  }
+});
+
+test("bookmark selection rejects an unresolved requested id and leaves the draft unchanged", () => {
+  const draft = composeDailyPage(
+    createEmptyNotebookDocument(),
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:00:00.000Z"),
+    reviewPackage()
+  );
+  const before = JSON.stringify(draft.pages["2026-08-01"]);
+
+  assert.throws(() => saveDailyDraft(draft, "2026-08-01", {
+    reflection: "",
+    bookmarkIds: ["missing-bookmark"]
+  }, [], new Date("2026-08-01T18:05:00.000Z")), /书签|续上|不存在/);
+  assert.equal(JSON.stringify(draft.pages["2026-08-01"]), before);
+  assert.equal(draft.pages["2026-08-01"]?.status, "draft");
+});
+
+test("bookmark selection rejects duplicate requested ids", () => {
+  const draft = composeDailyPage(
+    createEmptyNotebookDocument(),
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:00:00.000Z"),
+    reviewPackage()
+  );
+  const candidate = notebookStateForDate(draft, "2026-08-01", sessions).continuationCandidates[0]!;
+
+  assert.throws(() => saveDailyDraft(draft, "2026-08-01", {
+    reflection: "",
+    bookmarkIds: [candidate.id, candidate.id]
+  }, [candidate], new Date("2026-08-01T18:05:00.000Z")), /重复|唯一/);
+});
+
+test("bookmark selection rejects more than three requested ids", () => {
+  const draft = composeDailyPage(
+    createEmptyNotebookDocument(),
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:00:00.000Z"),
+    reviewPackage()
+  );
+  const candidates = Array.from({ length: 4 }, (_, index) => ({
+    id: `bookmark-${index}`,
+    title: `bookmark ${index}`,
+    projectName: "work-continuity",
+    provider: "codex" as const,
+    sessionId: `session-${index}`,
+    sessionPath: `/tmp/session-${index}.jsonl`,
+    resumeCommand: `codex resume session-${index}`
+  }));
+
+  assert.throws(() => saveDailyDraft(draft, "2026-08-01", {
+    reflection: "",
+    bookmarkIds: candidates.map((candidate) => candidate.id)
+  }, candidates, new Date("2026-08-01T18:05:00.000Z")), /最多|3/);
+});
+
+test("normal seal and reload preserve the exact immutable package provenance and user data", () => {
+  const composed = composeDailyPage(
+    createEmptyNotebookDocument(),
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:00:00.000Z"),
+    reviewPackage()
+  );
+  const generationId = composed.pages["2026-08-01"]!.activePackageGenerationId!;
+  const candidate = notebookStateForDate(composed, "2026-08-01", sessions).continuationCandidates[0]!;
+  const sealed = sealDailyPage(composed, "2026-08-01", {
+    reflection: "整页墨迹",
+    worklineReflections: [{ worklineId: "workline-review", text: "generation ink" }],
+    bookmarkIds: [candidate.id],
+    expectedActiveGenerationId: generationId
+  }, [candidate], new Date("2026-08-01T18:10:00.000Z"));
+  const sealedPage = sealed.pages["2026-08-01"]!;
+
+  const reloaded = normalizeNotebookDocument(JSON.parse(JSON.stringify(sealed)));
+
+  assert.deepEqual({
+    reviewPackage: reloaded.pages["2026-08-01"]?.reviewPackage,
+    packageGenerations: reloaded.pages["2026-08-01"]?.packageGenerations,
+    activePackageGenerationId: reloaded.pages["2026-08-01"]?.activePackageGenerationId,
+    worklineReflections: reloaded.pages["2026-08-01"]?.worklineReflections,
+    bookmarks: reloaded.pages["2026-08-01"]?.bookmarks,
+    sealedAt: reloaded.pages["2026-08-01"]?.sealedAt
+  }, {
+    reviewPackage: sealedPage.reviewPackage,
+    packageGenerations: sealedPage.packageGenerations,
+    activePackageGenerationId: sealedPage.activePackageGenerationId,
+    worklineReflections: sealedPage.worklineReflections,
+    bookmarks: sealedPage.bookmarks,
+    sealedAt: sealedPage.sealedAt
+  });
+  assert.equal(reloaded.pages["2026-08-01"]?.sealedAt, "2026-08-01T18:10:00.000Z");
+  assert.equal(reloaded.pages["2026-08-01"]?.packageGenerations?.[0]?.id, generationId);
+  assert.deepEqual(reloaded.pages["2026-08-01"]?.packageGenerations?.[0]?.admittedEvidence, sealedPage.packageGenerations?.[0]?.admittedEvidence);
 });
 
 test("normalization upgrades schema 1 and 2 pages without losing legacy notes or page data", () => {

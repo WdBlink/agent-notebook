@@ -74,6 +74,9 @@ export function TodayBoard({
   const board = state.notebook.todayBoard;
   const generation = board.activeGeneration;
   const review = generation?.package;
+  const activeReflections = generation
+    ? state.notebook.page.worklineReflections.filter((reflection) => reflection.packageGenerationId === generation.id)
+    : [];
 
   useEffect(() => {
     setExpandedWorklines(new Set());
@@ -184,6 +187,7 @@ export function TodayBoard({
       {displayedError ? <div className="today-board-alert" role="alert"><strong>{generation ? "整理没有替换现有材料" : "没有生成工作脉络"}</strong><span>{displayedError}</span></div> : null}
 
       <div className="today-board-scroll">
+        {board.mode === "sealed" ? <SealedPageDetails notebook={state.notebook} /> : null}
         {board.mode === "raw" ? (
           <SessionLaneList
             sessions={rawSessions}
@@ -204,7 +208,7 @@ export function TodayBoard({
                   laneByIdentity={board.mode === "sealed" ? new Map() : laneByIdentity}
                   expanded={expandedWorklines.has(workline.id)}
                   sealed={board.mode === "sealed"}
-                  reflections={state.notebook.page.worklineReflections}
+                  reflections={activeReflections}
                   onToggle={() => toggleWorkline(workline.id)}
                   onReview={(returnFocus) => onOpenReview({ stage: "dossier", worklineId: workline.id }, returnFocus)}
                   onTranscript={onTranscript}
@@ -334,7 +338,7 @@ function WorklineRow({ workline, sources, ambiguousSessionKeys, generation, lane
   onReview(returnFocus: HTMLElement): void;
   onTranscript(target: TodayTranscriptTarget, returnFocus: HTMLElement): void;
 }): ReactElement {
-  const reflection = reflections.find((item) => item.worklineId === workline.id);
+  const reflection = reflections.find((item) => item.packageGenerationId === generation.id && item.worklineId === workline.id);
   const change = workline.dossier.blocks.find((block) => /(^|[-_:])(change|transition)([-_:]|$)/i.test(block.kind));
   const sourcePanelId = `workline-sources-${useId().replace(/:/g, "")}`;
   return (
@@ -377,6 +381,20 @@ function WorklineRow({ workline, sources, ambiguousSessionKeys, generation, lane
       ) : null}
     </article>
   );
+}
+
+function SealedPageDetails({ notebook }: { notebook: DesktopNotebookState }): ReactElement {
+  const reflection = notebook.page.reflection.trim();
+  return <>
+    {reflection ? <section className="sealed-page-reflection personal-ink" aria-label="整页墨迹"><span>整页墨迹</span><blockquote>{reflection}</blockquote></section> : null}
+    {notebook.page.bookmarks.length ? <section className="sealed-continuation sealed-bookmarks" aria-label="封存续上"><span>明天从这里继续</span>{notebook.page.bookmarks.map((bookmark) => <button
+      type="button"
+      key={bookmark.id}
+      aria-label={`复制续上命令：${bookmark.title}`}
+      disabled={!bookmark.resumeCommand}
+      onClick={() => { if (bookmark.resumeCommand) void window.agentWhiteboard.copyText(bookmark.resumeCommand); }}
+    ><strong>{bookmark.title}</strong><small>{bookmark.projectName} · {platformLabel(bookmark.provider)}</small>{bookmark.resumeCommand ? <code>{bookmark.resumeCommand}</code> : <em>没有可复制的续上命令</em>}</button>)}</section> : null}
+  </>;
 }
 
 function WorklineParticipation({ workline }: { workline: DailyWorklineReview }): ReactElement {

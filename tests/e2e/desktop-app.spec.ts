@@ -66,13 +66,14 @@ const baseSessions = [
 async function installDesktopApi(page: Page): Promise<void> {
   await page.addInitScript(({ sessions }) => {
     const storedPackageSessions = sessions.map((session: any) => ({ ...session }));
+    let reviewPromptProfile = "traceink-review-v1";
     const createReviewPackage = (activeDate: string, includeDuplicate = false): any => ({
       schemaVersion: 1,
       id: `review-${activeDate}`,
       logicalDate: activeDate,
       generatedAt: `${activeDate}T20:00:00+08:00`,
       evidenceCutoff: `${activeDate}T20:00:00+08:00`,
-      promptProfile: "traceink-review-v1",
+      promptProfile: reviewPromptProfile,
       compilerProvider: "codex",
       model: "review-model",
       evidence: [...storedPackageSessions.map((session: any) => ({
@@ -212,6 +213,18 @@ async function installDesktopApi(page: Page): Promise<void> {
         admittedEvidence: scopedSessions.map((session: any) => ({ identity: sessionIdentity(session), revision: `revision:${session.updatedAt}` })),
         package: reviewPackage
       };
+      const previousGeneration = {
+        ...generation,
+        id: `generation-${activeDate}-0`,
+        generatedAt: `${activeDate}T19:00:00+08:00`,
+        evidenceCutoff: `${activeDate}T19:00:00+08:00`,
+        package: {
+          ...reviewPackage,
+          id: `review-${activeDate}-previous`,
+          generatedAt: `${activeDate}T19:00:00+08:00`,
+          evidenceCutoff: `${activeDate}T19:00:00+08:00`
+        }
+      };
       const hasPackage = scenario !== "raw";
       const boardMode = scenario === "duplicate" ? "compiled" : scenario;
       const pageStatus = scenario === "sealed" ? "sealed" : hasPackage ? "draft" : "unformed";
@@ -228,14 +241,17 @@ async function installDesktopApi(page: Page): Promise<void> {
           status: pageStatus,
           workRecords: hasPackage ? previewRecords : [],
           reflection: scenario === "sealed" ? "封页以后仍保留人的原始判断。" : "",
-          worklineReflections: scenario === "sealed" ? [{ worklineId: "daily-review-direction", text: "封页以后仍保留人的原始判断。", updatedAt: `${activeDate}T22:16:00+08:00` }] : [],
-          bookmarks: [],
+          worklineReflections: scenario === "sealed" ? [
+            { packageGenerationId: previousGeneration.id, worklineId: "daily-review-direction", text: "旧代墨迹不应展示。", updatedAt: `${activeDate}T19:30:00+08:00` },
+            { packageGenerationId: generation.id, worklineId: "daily-review-direction", text: "封页以后仍保留人的原始判断。", updatedAt: `${activeDate}T22:16:00+08:00` }
+          ] : [],
+          bookmarks: scenario === "sealed" ? continuationCandidates.slice(0, 1) : [],
           ...(hasPackage ? {
             createdAt: `${activeDate}T20:00:00+08:00`,
             updatedAt: `${activeDate}T20:00:00+08:00`,
             evidenceCutoff: generation.evidenceCutoff,
             reviewPackage,
-            packageGenerations: [generation],
+            packageGenerations: scenario === "sealed" ? [previousGeneration, generation] : [generation],
             activePackageGenerationId: generation.id
           } : {}),
           ...(scenario === "sealed" ? { sealedAt: `${activeDate}T22:16:00+08:00` } : {})
@@ -287,20 +303,122 @@ async function installDesktopApi(page: Page): Promise<void> {
       activity: createActivity(activeDate, scopedSessions)
     });
     };
-    let scenario: TodayScenario = "raw";
+    const readPersistedSnapshot = (): any | null => {
+      try {
+        const value = JSON.parse(window.name || "null");
+        return value?.marker === "traceink-e2e-sealed-v1" ? value : null;
+      } catch {
+        return null;
+      }
+    };
+    const restorePersistedState = (snapshot: any): ReturnType<typeof createState> => {
+      const restored = createState(undefined, snapshot.activeDate, "sealed");
+      restored.notebook.page = structuredClone(snapshot.page);
+      const activeGeneration = restored.notebook.page.packageGenerations?.find((generation: any) => generation.id === restored.notebook.page.activePackageGenerationId);
+      restored.notebook.todayBoard = {
+        mode: "sealed",
+        ...(activeGeneration ? { activeGeneration } : {}),
+        uncompiledEvidence: []
+      };
+      return restored;
+    };
+    let persistedSnapshot = readPersistedSnapshot();
+    let scenario: TodayScenario = persistedSnapshot ? "sealed" : "raw";
     let prepareShouldFail = false;
-    let prepareCalls = 0;
-    let state = createState(undefined, undefined, scenario);
+    let prepareCalls = persistedSnapshot?.prepareCalls ?? 0;
+    const sideEffectCounts = persistedSnapshot?.sideEffectCounts ?? { wiki: 0, ctx: 0, background: 0 };
+    let state = persistedSnapshot ? restorePersistedState(persistedSnapshot) : createState(undefined, undefined, scenario);
     const stateListeners: Array<(next: ReturnType<typeof createState>) => void> = [];
+    const notifyState = (): void => { for (const listener of stateListeners) listener(state); };
+    const persistSealedState = (): void => {
+      persistedSnapshot = {
+        marker: "traceink-e2e-sealed-v1",
+        activeDate: state.activeDate,
+        page: structuredClone(state.notebook.page),
+        prepareCalls,
+        sideEffectCounts: structuredClone(sideEffectCounts)
+      };
+      window.name = JSON.stringify(persistedSnapshot);
+    };
+    const loadState = (date?: string): ReturnType<typeof createState> => {
+      if (!date || date === state.activeDate) return state;
+      if (persistedSnapshot && date === persistedSnapshot.activeDate) {
+        scenario = "sealed";
+        state = restorePersistedState(persistedSnapshot);
+      } else {
+        scenario = "raw";
+        state = createState(state.data.settings.enabledSessionProviders, date, scenario);
+      }
+      return state;
+    };
     (window as unknown as { openedPaths: string[] }).openedPaths = [];
     (window as unknown as { transcriptRequests: unknown[] }).transcriptRequests = [];
+    (window as unknown as { copiedTexts: string[] }).copiedTexts = [];
     (window as unknown as { setTodayScenario: (next: TodayScenario) => void }).setTodayScenario = (next: TodayScenario) => {
+      persistedSnapshot = null;
+      window.name = "";
       scenario = next;
       state = createState(state.data.settings.enabledSessionProviders, state.activeDate, scenario);
-      for (const listener of stateListeners) listener(state);
+      notifyState();
     };
     (window as unknown as { setPrepareFailure: (fail: boolean) => void }).setPrepareFailure = (fail: boolean) => { prepareShouldFail = fail; };
     (window as unknown as { prepareCallCount: () => number }).prepareCallCount = () => prepareCalls;
+    (window as unknown as { advanceTodayGeneration: () => void }).advanceTodayGeneration = () => {
+      const current = state.notebook.todayBoard.activeGeneration;
+      if (!current) throw new Error("No active generation");
+      const nextIndex = (state.notebook.page.packageGenerations?.length ?? 0) + 1;
+      const nextPackage = structuredClone(current.package);
+      nextPackage.id = `review-${state.activeDate}-${nextIndex}`;
+      nextPackage.generatedAt = `${state.activeDate}T21:00:00+08:00`;
+      nextPackage.evidenceCutoff = `${state.activeDate}T21:00:00+08:00`;
+      nextPackage.promptProfile = reviewPromptProfile;
+      const nextGeneration = {
+        ...structuredClone(current),
+        id: `generation-${state.activeDate}-${nextIndex}`,
+        generatedAt: nextPackage.generatedAt,
+        evidenceCutoff: nextPackage.evidenceCutoff,
+        package: nextPackage
+      };
+      state.notebook.page.packageGenerations = [...(state.notebook.page.packageGenerations ?? []), nextGeneration];
+      state.notebook.page.activePackageGenerationId = nextGeneration.id;
+      state.notebook.page.reviewPackage = nextPackage;
+      state.notebook.todayBoard = { mode: "compiled", activeGeneration: nextGeneration, uncompiledEvidence: [] };
+      state = structuredClone(state);
+      notifyState();
+    };
+    (window as unknown as { setLegacyPageReflection: (text: string) => void }).setLegacyPageReflection = (text: string) => {
+      state.notebook.page.reflection = text;
+      state = structuredClone(state);
+      notifyState();
+    };
+    (window as unknown as { setLegacySealedPage: (text: string) => void }).setLegacySealedPage = (text: string) => {
+      state.notebook.page = {
+        schemaVersion: 3,
+        logicalDate: state.activeDate,
+        status: "sealed",
+        sealedAt: `${state.activeDate}T22:16:00+08:00`,
+        workRecords: [],
+        reflection: text,
+        worklineReflections: [],
+        bookmarks: state.notebook.continuationCandidates.slice(0, 1)
+      };
+      state.notebook.todayBoard = { mode: "sealed", uncompiledEvidence: [] };
+      state = structuredClone(state);
+      notifyState();
+    };
+    (window as unknown as { sealedPageJson: () => string }).sealedPageJson = () => JSON.stringify(state.notebook.page);
+    (window as unknown as { mutateLiveInputs: () => void }).mutateLiveInputs = () => {
+      const first = state.data.workSessionSnapshot.sessions[0];
+      if (first) first.title = "封页后的 Session 新标题";
+      reviewPromptProfile = "traceink-review-v2-after-seal";
+      state = structuredClone(state);
+      notifyState();
+    };
+    (window as unknown as { liveInputSnapshot: () => unknown }).liveInputSnapshot = () => ({
+      sessionTitle: state.data.workSessionSnapshot.sessions[0]?.title,
+      promptProfile: reviewPromptProfile
+    });
+    (window as unknown as { e2eSideEffectCounts: () => unknown }).e2eSideEffectCounts = () => structuredClone(sideEffectCounts);
     (window as unknown as { emitSmartTitle: (title: string) => void }).emitSmartTitle = (title: string) => {
       state = createState(state.data.settings.enabledSessionProviders, state.activeDate, scenario);
       const first = state.data.workSessionSnapshot.sessions[0];
@@ -312,8 +430,8 @@ async function installDesktopApi(page: Page): Promise<void> {
       for (const listener of stateListeners) listener(state);
     };
     (window as unknown as { agentWhiteboard: unknown }).agentWhiteboard = {
-      getState: async (date?: string) => { state = createState(state.data.settings.enabledSessionProviders, date ?? state.activeDate, scenario); return state; },
-      refreshSessions: async (date?: string) => { state = createState(state.data.settings.enabledSessionProviders, date ?? state.activeDate, scenario); return state; },
+      getState: async (date?: string) => loadState(date),
+      refreshSessions: async (date?: string) => loadState(date),
       updateSettings: async (patch: { enabledSessionProviders?: string[]; sessionScanRoots?: string[]; knowledgeRoot?: string }) => {
         state = createState(patch.enabledSessionProviders ?? state.data.settings.enabledSessionProviders, state.activeDate, scenario);
         if (patch.sessionScanRoots) state.data.settings.sessionScanRoots = patch.sessionScanRoots;
@@ -338,21 +456,25 @@ async function installDesktopApi(page: Page): Promise<void> {
       },
       exportNotebookNoteCard: async (noteId: string) => ({ notebook: state.notebook, path: `/tmp/${noteId}.svg` }),
       routeNotebookNoteToWiki: async (noteId: string) => {
+        sideEffectCounts.wiki += 1;
         const note = state.notebook.notes.find((item: any) => item.id === noteId);
         note?.deliveries.push({ kind: "wiki", deliveredAt: "2026-07-20T20:12:00+08:00", target: `/workspace/LLM-Wiki/raw/${noteId}.md`, status: "queued" });
         return { notebook: state.notebook, path: `/workspace/LLM-Wiki/raw/${noteId}.md` };
       },
-      routeNotebookNoteToProject: async (noteId: string) => ({ notebook: state.notebook, path: `/workspace/work-continuity/ctx/scratch/inbox/${noteId}.md` }),
+      routeNotebookNoteToProject: async (noteId: string) => {
+        sideEffectCounts.ctx += 1;
+        return { notebook: state.notebook, path: `/workspace/work-continuity/ctx/scratch/inbox/${noteId}.md` };
+      },
       prepareDailyReview: async (_date: string, _mode: "compile" | "refresh") => {
         prepareCalls += 1;
         if (prepareShouldFail) {
           state.notebook.todayBoard.compilationError = "整理模型暂时不可用；上一版仍然可读。";
-          for (const listener of stateListeners) listener(state);
+          notifyState();
           throw new Error("整理模型暂时不可用；上一版仍然可读。");
         }
         scenario = "compiled";
         state = createState(state.data.settings.enabledSessionProviders, state.activeDate, scenario);
-        for (const listener of stateListeners) listener(state);
+        notifyState();
         return state.notebook;
       },
       composeDailyPage: async () => {
@@ -362,18 +484,32 @@ async function installDesktopApi(page: Page): Promise<void> {
       },
       saveDailyDraft: async (_date: string, input: { reflection: string; worklineReflections?: Array<{ worklineId: string; text: string }>; bookmarkIds: string[] }) => {
         state.notebook.page.reflection = input.reflection;
-        if (input.worklineReflections) state.notebook.page.worklineReflections = input.worklineReflections.map((item) => ({ ...item, updatedAt: "2026-07-20T21:00:00+08:00" }));
+        if (input.worklineReflections) {
+          const activeGenerationId = state.notebook.page.activePackageGenerationId;
+          state.notebook.page.worklineReflections = [
+            ...state.notebook.page.worklineReflections.filter((item: any) => item.packageGenerationId !== activeGenerationId),
+            ...input.worklineReflections.map((item) => ({ ...item, packageGenerationId: activeGenerationId, updatedAt: "2026-07-20T21:00:00+08:00" }))
+          ];
+        }
         state.notebook.page.bookmarks = state.notebook.continuationCandidates.filter((item: any) => input.bookmarkIds.includes(item.id));
         return state.notebook;
       },
-      sealDailyPage: async (_date: string, input: { reflection: string; worklineReflections?: Array<{ worklineId: string; text: string }>; bookmarkIds: string[] }) => {
+      sealDailyPage: async (_date: string, input: { reflection: string; worklineReflections?: Array<{ worklineId: string; text: string }>; bookmarkIds: string[]; expectedActiveGenerationId: string | null }) => {
+        if (!state.notebook.page.activePackageGenerationId || input.expectedActiveGenerationId !== state.notebook.page.activePackageGenerationId) throw new Error("active generation mismatch");
         state.notebook.page.reflection = input.reflection;
-        if (input.worklineReflections) state.notebook.page.worklineReflections = input.worklineReflections.map((item) => ({ ...item, updatedAt: "2026-07-20T22:16:00+08:00" }));
+        if (input.worklineReflections) {
+          const activeGenerationId = state.notebook.page.activePackageGenerationId;
+          state.notebook.page.worklineReflections = [
+            ...state.notebook.page.worklineReflections.filter((item: any) => item.packageGenerationId !== activeGenerationId),
+            ...input.worklineReflections.map((item) => ({ ...item, packageGenerationId: activeGenerationId, updatedAt: "2026-07-20T22:16:00+08:00" }))
+          ];
+        }
         state.notebook.page.bookmarks = state.notebook.continuationCandidates.filter((item: any) => input.bookmarkIds.includes(item.id));
         state.notebook.page.status = "sealed";
         state.notebook.page.sealedAt = "2026-07-20T22:16:00+08:00";
         state.notebook.todayBoard.mode = "sealed";
         state.notebook.todayBoard.uncompiledEvidence = [];
+        persistSealedState();
         return state.notebook;
       },
       getProjectContext: async (projectPath: string) => ({
@@ -401,7 +537,10 @@ async function installDesktopApi(page: Page): Promise<void> {
       });
       },
       chooseDirectory: async () => null,
-      copyText: async () => true,
+      copyText: async (text: string) => {
+        (window as unknown as { copiedTexts: string[] }).copiedTexts.push(text);
+        return true;
+      },
       openPath: async (targetPath: string) => {
         (window as unknown as { openedPaths: string[] }).openedPaths.push(targetPath);
         return true;
@@ -555,6 +694,14 @@ test("sealed board is read-only and transcript actions send the exact stored pac
   await expect(board.locator(".today-activity-summary")).toHaveCount(0);
   await expect(board.getByRole("button", { name: /整理工作脉络|更新工作脉络/ })).toHaveCount(0);
   expect(await page.evaluate(() => (window as unknown as { prepareCallCount(): number }).prepareCallCount())).toBe(0);
+  await expect(board.getByText("旧代墨迹不应展示。", { exact: true })).toHaveCount(0);
+  await expect(board.locator(".today-workline").getByText("封页以后仍保留人的原始判断。", { exact: true })).toBeVisible();
+  const continuation = board.getByRole("region", { name: "封存续上" });
+  await expect(continuation).toContainText("迁移第一版视觉骨架");
+  await expect(continuation).toContainText("codex resume 019f-work-continuity");
+  await continuation.getByRole("button", { name: /复制续上命令/ }).click();
+  expect(await page.evaluate(() => (window as unknown as { copiedTexts: string[] }).copiedTexts)).toEqual(["codex resume 019f-work-continuity"]);
+  await expect(board.getByRole("region", { name: "整页墨迹" })).toContainText("封页以后仍保留人的原始判断。");
 
   const direction = board.locator(".today-workline").filter({ hasText: "Daily Review · 产品方向" });
   await direction.getByRole("button", { name: /展开来源会话/ }).click();
@@ -567,6 +714,15 @@ test("sealed board is read-only and transcript actions send the exact stored pac
     generationId: "generation-2026-07-20-1",
     evidenceId: "session:codex:019f-work-continuity"
   });
+});
+
+test("legacy sealed board shows whole-page ink without requiring a package generation", async ({ page }) => {
+  await page.evaluate(() => (window as unknown as { setLegacySealedPage(text: string): void }).setLegacySealedPage("只有旧版整页墨迹。"));
+
+  const board = page.locator(".today-board");
+  await expect(board.getByText("已封存", { exact: true }).first()).toBeVisible();
+  await expect(board.getByRole("region", { name: "整页墨迹" })).toContainText("只有旧版整页墨迹。");
+  await expect(board.getByRole("region", { name: "封存续上" })).toContainText("codex resume 019f-work-continuity");
 });
 
 test("today board keeps the native shell and independently scrolling evidence regions", async ({ page }) => {
@@ -646,6 +802,87 @@ test("end-of-day flow stores personal ink and seals an immutable page", async ({
   await expect(page.getByText("今天到这里，明天继续验证闭环。")).toBeVisible();
   await expect(page.getByRole("button", { name: /整理工作脉络|更新工作脉络|今日收口/ })).toHaveCount(0);
   await expect(page.locator(".today-board")).toBeFocused();
+});
+
+test("generation-aware save, seal, reload, and history reopen preserve the exact sealed review", async ({ page }) => {
+  const board = page.locator(".today-board");
+  await board.getByRole("button", { name: "整理工作脉络" }).click();
+
+  await board.locator(".today-workline").first().getByRole("button", { name: "打开材料" }).click();
+  let review = page.getByRole("dialog", { name: "日终回看" });
+  await review.getByRole("button", { name: "看完了，开始思考" }).click();
+  await review.getByRole("textbox", { name: "你的原始墨迹" }).fill("A · 第一代判断");
+  await review.getByRole("button", { name: "收下这段思考" }).click();
+  await expect(board.locator(".today-workline").first()).toContainText("A · 第一代判断");
+
+  await page.evaluate(() => (window as unknown as { advanceTodayGeneration(): void }).advanceTodayGeneration());
+  await expect(board.locator(".today-workline").first()).not.toContainText("A · 第一代判断");
+  await board.locator(".today-workline").first().getByRole("button", { name: "打开材料" }).click();
+  review = page.getByRole("dialog", { name: "日终回看" });
+  await review.getByRole("button", { name: "看完了，开始思考" }).click();
+  const activeInk = review.getByRole("textbox", { name: "你的原始墨迹" });
+  await expect(activeInk).toHaveValue("");
+  await activeInk.fill("B · 第二代判断");
+  await review.getByRole("button", { name: "收下这段思考" }).click();
+  await expect(board.locator(".today-workline").first()).toContainText("B · 第二代判断");
+  await expect(board.locator(".today-workline").first()).not.toContainText("A · 第一代判断");
+
+  await page.evaluate(() => (window as unknown as { setLegacyPageReflection(text: string): void }).setLegacyPageReflection("旧版整页反思仍可阅读。"));
+  const prepareCountBeforeSeal = await page.evaluate(() => (window as unknown as { prepareCallCount(): number }).prepareCallCount());
+  await board.getByRole("button", { name: "今日收口" }).click();
+  review = page.getByRole("dialog", { name: "日终回看" });
+  await review.locator(".bookmark-choices button").first().click();
+  await review.getByRole("button", { name: "收笔并封存" }).click();
+
+  await expect(board.getByText("已封存", { exact: true }).first()).toBeVisible();
+  await expect(board.locator(".today-workline").first()).toContainText("B · 第二代判断");
+  await expect(board.locator(".today-workline").first()).not.toContainText("A · 第一代判断");
+  await expect(board.getByRole("region", { name: "整页墨迹" })).toContainText("旧版整页反思仍可阅读。");
+  const continuation = board.getByRole("region", { name: "封存续上" });
+  await expect(continuation).toContainText("迁移第一版视觉骨架");
+  await expect(continuation).toContainText("codex resume 019f-work-continuity");
+
+  const sealedJson = await page.evaluate(() => (window as unknown as { sealedPageJson(): string }).sealedPageJson());
+  const sealedPage = JSON.parse(sealedJson);
+  expect(sealedPage.packageGenerations).toHaveLength(2);
+  expect(sealedPage.activePackageGenerationId).toBe("generation-2026-07-20-2");
+  expect(sealedPage.worklineReflections.map((item: any) => [item.packageGenerationId, item.text])).toEqual([
+    ["generation-2026-07-20-1", "A · 第一代判断"],
+    ["generation-2026-07-20-2", "B · 第二代判断"]
+  ]);
+  expect(sealedPage.bookmarks).toHaveLength(1);
+  expect(sealedPage.sealedAt).toBe("2026-07-20T22:16:00+08:00");
+
+  await board.locator(".today-workline").first().getByRole("button", { name: "打开封存材料" }).click();
+  review = page.getByRole("dialog", { name: "日终回看" });
+  await expect(review.getByText("从 Agent 看板转向人的日终回看工作簿", { exact: true })).toBeVisible();
+  await expect(review.getByText("原来的判断", { exact: true })).toBeVisible();
+  await expect(review.getByText("发生了什么", { exact: true })).toBeVisible();
+  await expect(review.getByText("未来观察", { exact: true })).toBeVisible();
+  await review.getByRole("button", { name: /返回工作线/ }).click();
+
+  await page.evaluate(() => (window as unknown as { mutateLiveInputs(): void }).mutateLiveInputs());
+  expect(await page.evaluate(() => (window as unknown as { liveInputSnapshot(): unknown }).liveInputSnapshot())).toEqual({
+    sessionTitle: "封页后的 Session 新标题",
+    promptProfile: "traceink-review-v2-after-seal"
+  });
+  expect(await page.evaluate(() => (window as unknown as { sealedPageJson(): string }).sealedPageJson())).toBe(sealedJson);
+  expect(await page.evaluate(() => (window as unknown as { prepareCallCount(): number }).prepareCallCount())).toBe(prepareCountBeforeSeal);
+
+  await page.reload();
+  await expect(page.locator(".today-board").getByText("已封存", { exact: true }).first()).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { sealedPageJson(): string }).sealedPageJson())).toBe(sealedJson);
+  expect(await page.evaluate(() => (window as unknown as { prepareCallCount(): number }).prepareCallCount())).toBe(prepareCountBeforeSeal);
+  await expect(page.locator(".today-workline").first()).toContainText("B · 第二代判断");
+  await expect(page.locator(".today-workline").first()).not.toContainText("A · 第一代判断");
+
+  await page.getByRole("button", { name: "查看前一天" }).click();
+  await expect(page.locator(".today-board").getByRole("button", { name: "整理工作脉络" })).toBeVisible();
+  await page.getByRole("button", { name: "查看后一天" }).click();
+  await expect(page.locator(".today-board").getByText("已封存", { exact: true }).first()).toBeVisible();
+  await expect(page.locator(".today-workline").first()).toContainText("B · 第二代判断");
+  expect(await page.evaluate(() => (window as unknown as { prepareCallCount(): number }).prepareCallCount())).toBe(prepareCountBeforeSeal);
+  expect(await page.evaluate(() => (window as unknown as { e2eSideEffectCounts(): unknown }).e2eSideEffectCounts())).toEqual({ wiki: 0, ctx: 0, background: 0 });
 });
 
 test("daily review reconstructs worklines before the user writes their own reflection", async ({ page }) => {

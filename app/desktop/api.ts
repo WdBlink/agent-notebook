@@ -88,6 +88,7 @@ export interface DailyNotebookPage {
 }
 
 export interface DailyWorklineReflection {
+  packageGenerationId: string;
   worklineId: string;
   text: string;
   updatedAt: string;

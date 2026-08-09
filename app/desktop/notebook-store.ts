@@ -238,9 +238,10 @@ export function saveDailyDraft(
   const existing = document.pages[logicalDate];
   if (!existing || existing.status !== "draft") throw new Error("请先开始整理今天。");
   const bookmarks = selectBookmarks(input.bookmarkIds, uniqueBookmarks([...existing.bookmarks, ...candidates]));
+  const activeGeneration = activeGenerationForPage(existing);
   const worklineReflections = input.worklineReflections === undefined
     ? existing.worklineReflections
-    : mergeActiveWorklineReflections(existing.worklineReflections, input.worklineReflections, existing.reviewPackage, now);
+    : mergeActiveWorklineReflections(existing.worklineReflections, input.worklineReflections, activeGeneration, now);
   const page: DailyNotebookPage = {
     ...existing,
     reflection: cleanText(input.reflection, 12_000),
@@ -261,6 +262,9 @@ export function sealDailyPage(
   const current = document.pages[logicalDate];
   if (!current || current.status !== "draft") throw new Error("请先开始整理今天。");
   const activeGenerationId = current.activePackageGenerationId ?? null;
+  if (!activeGenerationId || !activeGenerationForPage(current)) {
+    throw new Error("请先整理出有效的工作线材料，再封存今天。");
+  }
   if (activeGenerationId !== input.expectedActiveGenerationId) {
     throw new Error("这一天的回看材料已经变化；当前封页请求已过期，请重新查看。");
   }
@@ -373,7 +377,11 @@ function normalizePage(value: unknown, logicalDate: string): DailyNotebookPage {
   const packageGenerations = normalizePackageGenerations(raw.packageGenerations, logicalDate);
   const legacyGeneration = !packageGenerations.length && reviewPackage ? legacyTodayBoardGeneration(reviewPackage) : undefined;
   const generations = packageGenerations.length ? packageGenerations : legacyGeneration ? [legacyGeneration] : [];
-  const activeGeneration = generations.find((generation) => generation.id === cleanText(raw.activePackageGenerationId, 400)) ?? generations.at(-1);
+  const hasExplicitActiveGenerationId = Object.prototype.hasOwnProperty.call(raw, "activePackageGenerationId");
+  const requestedActiveGenerationId = cleanText(raw.activePackageGenerationId, 400);
+  const activeGeneration = hasExplicitActiveGenerationId
+    ? generations.find((generation) => generation.id === requestedActiveGenerationId)
+    : generations.at(-1);
   return {
     schemaVersion: 3,
     logicalDate,
@@ -386,12 +394,16 @@ function normalizePage(value: unknown, logicalDate: string): DailyNotebookPage {
     reflection: cleanText(raw.reflection, 12_000),
     ...(activeGeneration ? { reviewPackage: activeGeneration.package } : {}),
     ...(generations.length ? { packageGenerations: generations } : {}),
-    ...(activeGeneration ? { activePackageGenerationId: activeGeneration.id } : {}),
+    ...(hasExplicitActiveGenerationId
+      ? { activePackageGenerationId: requestedActiveGenerationId }
+      : activeGeneration ? { activePackageGenerationId: activeGeneration.id } : {}),
     ...(cleanText(raw.lastCompilationError, 2_000) ? { lastCompilationError: cleanText(raw.lastCompilationError, 2_000) } : {}),
     worklineReflections: generations.length && Array.isArray(raw.worklineReflections)
-      ? normalizeWorklineReflections(raw.worklineReflections, generations.flatMap((generation) => generation.package.worklines.map((workline) => workline.id)))
+      ? normalizeWorklineReflections(raw.worklineReflections, generations, activeGeneration)
       : [],
-    bookmarks: Array.isArray(raw.bookmarks) ? raw.bookmarks.map(normalizeBookmark).filter((item): item is DailyContinuationBookmark => Boolean(item)).slice(0, 3) : []
+    bookmarks: Array.isArray(raw.bookmarks)
+      ? uniqueBookmarks(raw.bookmarks.map(normalizeBookmark).filter((item): item is DailyContinuationBookmark => Boolean(item))).slice(0, 3)
+      : []
   };
 }
 
@@ -399,6 +411,13 @@ function generationsFor(page: DailyNotebookPage | undefined): TodayBoardPackageG
   if (!page) return [];
   if (page.packageGenerations?.length) return structuredClone(page.packageGenerations);
   return page.reviewPackage ? [legacyTodayBoardGeneration(page.reviewPackage)] : [];
+}
+
+function activeGenerationForPage(page: DailyNotebookPage): TodayBoardPackageGeneration | undefined {
+  const generations = generationsFor(page);
+  if (!Object.prototype.hasOwnProperty.call(page, "activePackageGenerationId")) return generations.at(-1);
+  const activeGenerationId = cleanText(page.activePackageGenerationId, 400);
+  return generations.find((generation) => generation.id === activeGenerationId);
 }
 
 function normalizePackageGenerations(value: unknown, logicalDate: string): TodayBoardPackageGeneration[] {
@@ -430,11 +449,11 @@ function normalizePackageGenerations(value: unknown, logicalDate: string): Today
 
 function selectWorklineReflections(
   values: Array<Pick<DailyWorklineReflection, "worklineId" | "text">>,
-  reviewPackage: DailyReviewPackage | undefined,
+  generation: TodayBoardPackageGeneration | undefined,
   now: Date
 ): DailyWorklineReflection[] {
-  if (!reviewPackage) return [];
-  const allowed = new Set(reviewPackage.worklines.map((workline) => workline.id));
+  if (!generation) return [];
+  const allowed = new Set(generation.package.worklines.map((workline) => workline.id));
   const seen = new Set<string>();
   const updatedAt = now.toISOString();
   return values.flatMap((value) => {
@@ -442,39 +461,91 @@ function selectWorklineReflections(
     const text = cleanText(value?.text, 12_000);
     if (!worklineId || !text || !allowed.has(worklineId) || seen.has(worklineId)) return [];
     seen.add(worklineId);
-    return [{ worklineId, text, updatedAt }];
+    return [{ packageGenerationId: generation.id, worklineId, text, updatedAt }];
   });
 }
 
 function mergeActiveWorklineReflections(
   existing: DailyWorklineReflection[],
   values: Array<Pick<DailyWorklineReflection, "worklineId" | "text">>,
-  reviewPackage: DailyReviewPackage | undefined,
+  generation: TodayBoardPackageGeneration | undefined,
   now: Date
 ): DailyWorklineReflection[] {
-  if (!reviewPackage) return existing;
-  const activeIds = new Set(reviewPackage.worklines.map((workline) => workline.id));
-  const historical = existing.filter((reflection) => !activeIds.has(reflection.worklineId));
-  return [...historical, ...selectWorklineReflections(values, reviewPackage, now)];
+  if (!generation) return existing;
+  const historical = existing.filter((reflection) => reflection.packageGenerationId !== generation.id);
+  return [...historical, ...selectWorklineReflections(values, generation, now)];
 }
 
-function normalizeWorklineReflections(value: unknown[], allowedWorklineIds: string[]): DailyWorklineReflection[] {
-  const allowed = new Set(allowedWorklineIds);
+function normalizeWorklineReflections(
+  value: unknown[],
+  generations: TodayBoardPackageGeneration[],
+  activeGeneration: TodayBoardPackageGeneration | undefined
+): DailyWorklineReflection[] {
   const seen = new Set<string>();
   return value.flatMap((item) => {
     if (!item || typeof item !== "object") return [];
     const raw = item as Partial<DailyWorklineReflection>;
     const worklineId = cleanText(raw.worklineId, 240);
     const text = cleanText(raw.text, 12_000);
-    if (!worklineId || !text || !allowed.has(worklineId) || seen.has(worklineId)) return [];
-    seen.add(worklineId);
-    return [{ worklineId, text, updatedAt: cleanTimestamp(raw.updatedAt) }];
+    const updatedAt = cleanTimestamp(raw.updatedAt);
+    if (!worklineId || !text) return [];
+    const hasGenerationId = Object.prototype.hasOwnProperty.call(raw, "packageGenerationId");
+    const requestedGenerationId = cleanText(raw.packageGenerationId, 400);
+    const generation = hasGenerationId
+      ? generations.find((candidate) => candidate.id === requestedGenerationId && generationHasWorkline(candidate, worklineId))
+      : legacyReflectionGeneration(worklineId, updatedAt, generations, activeGeneration);
+    if (!generation) return [];
+    const identity = `${generation.id}\0${worklineId}`;
+    if (seen.has(identity)) return [];
+    seen.add(identity);
+    return [{ packageGenerationId: generation.id, worklineId, text, updatedAt }];
   });
 }
 
+function legacyReflectionGeneration(
+  worklineId: string,
+  updatedAt: string,
+  generations: TodayBoardPackageGeneration[],
+  activeGeneration: TodayBoardPackageGeneration | undefined
+): TodayBoardPackageGeneration | undefined {
+  const updatedAtMs = Date.parse(updatedAt);
+  let latestEligible: TodayBoardPackageGeneration | undefined;
+  let latestGeneratedAt = Number.NEGATIVE_INFINITY;
+  let latestContaining: TodayBoardPackageGeneration | undefined;
+  let latestContainingGeneratedAt = Number.NEGATIVE_INFINITY;
+  for (const generation of generations) {
+    const generatedAt = Date.parse(generation.generatedAt);
+    if (!generationHasWorkline(generation, worklineId)) continue;
+    if (generatedAt >= latestContainingGeneratedAt) {
+      latestContaining = generation;
+      latestContainingGeneratedAt = generatedAt;
+    }
+    if (generatedAt > updatedAtMs) continue;
+    if (generatedAt >= latestGeneratedAt) {
+      latestEligible = generation;
+      latestGeneratedAt = generatedAt;
+    }
+  }
+  return latestEligible
+    ?? (activeGeneration && generationHasWorkline(activeGeneration, worklineId) ? activeGeneration : undefined)
+    ?? latestContaining;
+}
+
+function generationHasWorkline(generation: TodayBoardPackageGeneration, worklineId: string): boolean {
+  return generation.package.worklines.some((workline) => workline.id === worklineId);
+}
+
 function selectBookmarks(ids: string[], candidates: DailyContinuationBookmark[]): DailyContinuationBookmark[] {
-  const wanted = new Set(Array.isArray(ids) ? ids.slice(0, 3) : []);
-  return candidates.filter((candidate) => wanted.has(candidate.id)).slice(0, 3).map((item) => structuredClone(item));
+  if (!Array.isArray(ids)) throw new Error("续上书签请求无效。");
+  if (ids.length > 3) throw new Error("续上书签最多只能选择 3 项。");
+  const wanted = ids.map((id) => cleanText(id, 2_000));
+  if (new Set(wanted).size !== wanted.length) throw new Error("续上书签必须保持唯一，不能重复选择。");
+  const available = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+  return wanted.map((id) => {
+    const bookmark = available.get(id);
+    if (!bookmark) throw new Error(`续上书签不存在或已经失效：${id || "<empty>"}`);
+    return structuredClone(bookmark);
+  });
 }
 
 function uniqueBookmarks(bookmarks: DailyContinuationBookmark[]): DailyContinuationBookmark[] {
