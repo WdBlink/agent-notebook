@@ -178,7 +178,7 @@ test("relative artifact evidence is resolved against the provider-owned working 
             dek: "",
             blocks: [
               { id: "one", kind: "evidence", title: "结果", body: "读取结果。", evidenceIds: ["artifact:codex:codex-relative:0"] },
-              { id: "future", kind: "validation-window", title: "未来验证", body: "若重开相对路径，读取应继续指向会话工作目录。", evidenceIds: ["artifact:codex:codex-relative:0"] }
+              { id: "future", kind: "validation-window", title: "未来验证", body: "若重开相对路径，路径解析应该通过并继续指向会话工作目录。", evidenceIds: ["artifact:codex:codex-relative:0"] }
             ],
             question: { prompt: "是否需要保留这条材料路径作为后续复核入口？" }
           }
@@ -262,6 +262,51 @@ test("rejects a workline that omits any required Prompt-profile semantic gate", 
   }
 });
 
+test("rejects a vague modal continuation as a future observation", async () => {
+  const vague = semanticWorkline({
+    dossier: {
+      blocks: [
+        { id: "material", kind: "material", title: "当前材料", body: "证据支持重新评估。", evidenceIds: ["session:codex:codex-one"] },
+        { id: "vague", kind: "open-ended", title: "后续", body: "如果需要，可以继续优化", evidenceIds: ["session:codex:codex-one"] }
+      ]
+    }
+  });
+
+  await assert.rejects(
+    () => runReview({ worklines: [vague] }),
+    /没有返回可用的跨会话工作线/
+  );
+});
+
+test("rejects a newly compiled workline when any substantive block lacks admitted evidence", async () => {
+  const unsupported = semanticWorkline({
+    dossier: {
+      blocks: [
+        { id: "material", kind: "material", title: "当前材料", body: "证据支持重新评估。", evidenceIds: ["session:codex:codex-one"] },
+        { id: "unsupported", kind: "new-role", title: "没有依据的解释", body: "这是另一个实质解释。", evidenceIds: [] },
+        { id: "future", kind: "future-check", title: "未来验证", body: "若约束失败再次出现，适用范围应该收窄。", evidenceIds: ["session:codex:codex-one"] }
+      ]
+    }
+  });
+
+  await assert.rejects(
+    () => runReview({ worklines: [unsupported] }),
+    /没有返回可用的跨会话工作线/
+  );
+});
+
+test("reload keeps a semantically incomplete legacy workline and surfaces an incompleteness warning", () => {
+  const stored = legacyStoredPackage();
+
+  const reloaded = normalizeDailyReviewPackage(stored, "2026-08-09");
+
+  assert.equal(reloaded?.worklines.length, 1);
+  assert.equal(reloaded?.worklines[0]?.id, "legacy-workline");
+  assert.deepEqual(reloaded?.worklines[0]?.participation, []);
+  assert.equal(reloaded?.worklines[0]?.dossier.question, undefined);
+  assert.match(reloaded?.warnings.join(" ") ?? "", /incomplete/i);
+});
+
 test("reload preserves a historically versioned provenance record when canonical facts still match", async () => {
   const review = await runReview({ worklines: [semanticWorkline()] });
   const stored = JSON.parse(JSON.stringify(review)) as DailyReviewPackage;
@@ -285,6 +330,19 @@ test("reload surfaces malformed provenance instead of silently erasing it", asyn
   const reloaded = normalizeDailyReviewPackage(stored, "2026-08-09");
 
   assert.equal(reloaded?.provenance, undefined);
+  assert.match(reloaded?.warnings.join(" ") ?? "", /provenance/i);
+});
+
+test("reload reserves warning capacity for provenance diagnostics", async () => {
+  const review = await runReview({ worklines: [semanticWorkline()] });
+  const stored = JSON.parse(JSON.stringify(review)) as DailyReviewPackage;
+  stored.warnings = Array.from({ length: 12 }, (_, index) => `ordinary warning ${index + 1}`);
+  stored.provenance!.evidence.completenessWarnings = [...stored.warnings];
+  stored.provenance!.evidence.sourceRefs[0]!.path = "/tmp/not-the-admitted-path.jsonl";
+
+  const reloaded = normalizeDailyReviewPackage(stored, "2026-08-09");
+
+  assert.equal(reloaded?.warnings.length, 12);
   assert.match(reloaded?.warnings.join(" ") ?? "", /provenance/i);
 });
 
@@ -351,6 +409,52 @@ function semanticWorkline(overrides: { participation?: unknown; dossier?: Record
     sourceSessionIds: ["codex:codex-one"],
     participation: overrides.participation ?? [{ id: "uncertain", kind: "uncertain", label: "无法确定用户参与边界。" }],
     dossier
+  };
+}
+
+function legacyStoredPackage(): DailyReviewPackage {
+  return {
+    schemaVersion: 1,
+    id: "review-2026-08-09-legacy",
+    logicalDate: "2026-08-09",
+    generatedAt: "2026-08-09T12:00:00.000Z",
+    evidenceCutoff: "2026-08-09T11:55:00.000Z",
+    promptProfile: "ksi-workline-review-v1",
+    compilerProvider: "codex",
+    model: "legacy-review-model",
+    evidence: [{
+      id: "session:codex:legacy-session",
+      kind: "session",
+      label: "旧会话",
+      path: "/tmp/legacy-session.jsonl",
+      platform: "codex",
+      sessionId: "legacy-session",
+      startedAt: "2026-08-09T01:00:00.000Z",
+      updatedAt: "2026-08-09T02:00:00.000Z"
+    }],
+    worklines: [{
+      id: "legacy-workline",
+      title: "旧工作线",
+      summary: "历史包只有基础整理结果。",
+      status: "uncertain",
+      sourceSessionIds: ["codex:legacy-session"],
+      participation: [],
+      dossier: {
+        title: "旧 dossier",
+        dek: "",
+        blocks: [{
+          id: "legacy-block",
+          kind: "legacy-note",
+          title: "当时发生了什么",
+          body: "旧编译器保留了这个有依据的事实块。",
+          evidenceIds: ["session:codex:legacy-session"],
+          payload: { historical: true }
+        }]
+      },
+      payload: {}
+    }],
+    warnings: [],
+    rawOutput: { worklines: [{ id: "legacy-workline" }] }
   };
 }
 
