@@ -10,6 +10,7 @@ import {
 import type {
   AgentPlatform,
   AgentSessionStatus,
+  AgentTranscriptCapture,
   AgentWorkSession,
   AgentWorkSnapshot,
   CockpitData,
@@ -665,7 +666,7 @@ function normalizeWorkSession(session: unknown): AgentWorkSession | null {
   const source = session as Partial<AgentWorkSession>;
   const title = cleanText(source.title, "");
   const summary = cleanText(source.summary, "");
-  const path = cleanText(source.path, "");
+  const path = normalizeStoredFilePath(source.path);
   if (!title || !path) return null;
   const id = cleanText(source.id, fallbackSessionId(path));
 
@@ -699,7 +700,33 @@ function normalizeWorkSession(session: unknown): AgentWorkSession | null {
   if (worktreePath) normalized.worktreePath = worktreePath;
   if (branch) normalized.branch = branch;
   if (resumeHint) normalized.resumeHint = resumeHint;
+  const transcriptCapture = normalizeTranscriptCapture(source.transcriptCapture);
+  if (transcriptCapture?.canonicalPath === path) normalized.transcriptCapture = transcriptCapture;
   return normalized;
+}
+
+function normalizeTranscriptCapture(value: unknown): AgentTranscriptCapture | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const source = value as Partial<AgentTranscriptCapture>;
+  const canonicalPath = typeof source.canonicalPath === "string" ? source.canonicalPath : "";
+  const sha256 = cleanText(source.sha256, "").toLowerCase();
+  const byteLength = source.byteLength;
+  const coverage = source.coverage;
+  if (!/^(?:\/|[A-Za-z]:[\\/])/.test(canonicalPath) || /[\0\r\n]/.test(canonicalPath) || !/^[a-f0-9]{64}$/.test(sha256)) return undefined;
+  if (!Number.isSafeInteger(byteLength) || (byteLength ?? -1) < 0) return undefined;
+  if (!coverage || typeof coverage !== "object") return undefined;
+  if (coverage.startByte !== 0 || coverage.endByte !== byteLength) return undefined;
+  return {
+    canonicalPath,
+    sha256,
+    byteLength: byteLength as number,
+    coverage: { startByte: 0, endByte: byteLength as number }
+  };
+}
+
+function normalizeStoredFilePath(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0 || value.length > 4_000 || /[\0\r\n]/.test(value)) return "";
+  return value;
 }
 
 function isPartialPlan(plan: unknown): plan is IntentPlan {

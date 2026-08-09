@@ -851,7 +851,10 @@ function ReviewDossier({ workline, evidence, logicalDate, generationId, hasRefle
 function ReviewBlock({ block, evidence, logicalDate, generationId, onTranscript }: { block: DailyReviewBlock; evidence: DailyReviewEvidence[]; logicalDate: string; generationId: string; onTranscript(target: TodayTranscriptTarget, returnFocus: HTMLElement): void }): ReactElement {
   const sources = block.evidenceIds.map((id) => evidence.find((item) => item.id === id)).filter((item): item is DailyReviewEvidence => Boolean(item));
   return <article className="review-block" data-kind={block.kind}><span>{block.label ?? humanizeBlockKind(block.kind)}</span><h2>{block.title}</h2><p>{block.body}</p>{sources.length ? <div className="review-block-evidence">{sources.map((source) => {
-    return <button type="button" key={source.id} onClick={(event) => source.kind === "session" ? onTranscript({
+    if (source.kind === "artifact") {
+      return <span className="review-evidence-reference" key={source.id} title="旧工作包只保存了文件路径，没有冻结当时的文件内容。"><FileText size={13} />当前文件引用（未冻结） · {source.label}</span>;
+    }
+    return <button type="button" key={source.id} onClick={(event) => onTranscript({
       title: source.label,
       platform: source.platform,
       request: {
@@ -860,7 +863,7 @@ function ReviewBlock({ block, evidence, logicalDate, generationId, onTranscript 
         path: source.path,
         packageRef: { logicalDate, generationId, evidenceId: source.id }
       }
-    }, event.currentTarget) : void window.agentWhiteboard.openPath(source.path)}><FileText size={13} />{source.kind === "session" ? "打开原始会话" : "打开材料"} · {source.label}</button>;
+    }, event.currentTarget)}><FileText size={13} />打开原始会话 · {source.label}</button>;
   })}</div> : <small className="review-missing-evidence">这段生成内容没有可打开的直接证据。</small>}</article>;
 }
 

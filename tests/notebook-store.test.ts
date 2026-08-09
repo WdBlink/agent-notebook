@@ -723,6 +723,25 @@ test("normal seal and reload preserve the exact immutable package provenance and
   assert.deepEqual(reloaded.pages["2026-08-01"]?.packageGenerations?.[0]?.admittedEvidence, sealedPage.packageGenerations?.[0]?.admittedEvidence);
 });
 
+test("reload preserves exact admitted evidence identity whitespace", () => {
+  const composed = composeDailyPage(
+    createEmptyNotebookDocument(),
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:00:00Z"),
+    reviewPackage()
+  );
+  const generation = composed.pages["2026-08-01"]!.packageGenerations![0]!;
+  generation.admittedEvidence[0]!.identity = "codex:codex-1:/tmp/session with trailing space ";
+
+  const reloaded = normalizeNotebookDocument(JSON.parse(JSON.stringify(composed)));
+
+  assert.equal(
+    reloaded.pages["2026-08-01"]?.packageGenerations?.[0]?.admittedEvidence[0]?.identity,
+    "codex:codex-1:/tmp/session with trailing space "
+  );
+});
+
 test("normalization upgrades schema 1 and 2 pages without losing legacy notes or page data", () => {
   const legacy = normalizeNotebookDocument({
     schemaVersion: 1,

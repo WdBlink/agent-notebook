@@ -4,6 +4,7 @@ import {
   runDailyReviewPreparation,
   type DailyReviewPreparationDependencies
 } from "../app/desktop/daily-review-preparation";
+import { loadFreshDailyReviewSnapshot } from "../app/desktop/daily-review-snapshot";
 import {
   appendDailyReviewGeneration,
   composeDailyPage,
@@ -31,6 +32,39 @@ const sessions: AgentWorkSession[] = [{
   artifacts: [],
   status: "active"
 }];
+
+test("explicit preparation refreshes the requested date before loading its evidence snapshot", async () => {
+  let storedSnapshot = {
+    date: "2026-08-08",
+    generatedAt: "2026-08-08T10:00:00.000Z",
+    sessions: [{ ...sessions[0]!, id: "stale-session" }],
+    sources: [],
+    warnings: []
+  };
+  const events: string[] = [];
+
+  const snapshot = await loadFreshDailyReviewSnapshot(logicalDate, {
+    async refreshSnapshot(requestedDate) {
+      events.push(`refresh:${requestedDate}`);
+      storedSnapshot = {
+        date: requestedDate,
+        generatedAt: "2026-08-09T10:01:00.000Z",
+        sessions: [{ ...sessions[0]!, id: "fresh-session" }],
+        sources: [],
+        warnings: []
+      };
+    },
+    async loadSnapshot() {
+      events.push("load");
+      return structuredClone(storedSnapshot);
+    }
+  });
+
+  assert.deepEqual(events, [`refresh:${logicalDate}`, "load"]);
+  assert.equal(snapshot.date, logicalDate);
+  assert.equal(snapshot.generatedAt, "2026-08-09T10:01:00.000Z");
+  assert.equal(snapshot.sessions[0]?.id, "fresh-session");
+});
 
 test("raw compile appends the first package generation only after the compiler succeeds", async () => {
   const harness = createHarness(createEmptyNotebookDocument(), [reviewPackage("package-1", "2026-08-09T10:05:00.000Z")]);

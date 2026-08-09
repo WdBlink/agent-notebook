@@ -38,15 +38,17 @@ export function buildSessionEvidenceManifest(sessions: AgentWorkSession[]): Toda
     const identity = sessionIdentity(session.platform, session.id, session.path);
     unique.set(identity, {
       identity,
-      revision: stableHash(JSON.stringify({
-        startedAt: session.startedAt ?? null,
-        updatedAt: session.updatedAt,
-        title: session.title,
-        summary: session.summary,
-        artifacts: [...session.artifacts].sort(),
-        status: session.status,
-        branch: session.branch ?? null
-      }))
+      revision: session.transcriptCapture
+        ? `sha256:${session.transcriptCapture.sha256}:${session.transcriptCapture.byteLength}`
+        : stableHash(JSON.stringify({
+            startedAt: session.startedAt ?? null,
+            updatedAt: session.updatedAt,
+            title: session.title,
+            summary: session.summary,
+            artifacts: [...session.artifacts].sort(),
+            status: session.status,
+            branch: session.branch ?? null
+          }))
     });
   }
   return [...unique.values()].sort((left, right) => left.identity.localeCompare(right.identity));
@@ -74,7 +76,9 @@ export function legacyTodayBoardGeneration(reviewPackage: DailyReviewPackage): T
     .filter((evidence) => evidence.kind === "session")
     .map((evidence) => ({
       identity: sessionIdentity(evidence.platform, evidence.sessionId, evidence.path),
-      revision: `legacy-cutoff:${reviewPackage.evidenceCutoff}`
+      revision: evidence.transcriptCapture
+        ? `sha256:${evidence.transcriptCapture.sha256}:${evidence.transcriptCapture.byteLength}`
+        : `legacy-cutoff:${reviewPackage.evidenceCutoff}`
     }))
     .sort((left, right) => left.identity.localeCompare(right.identity));
   return {
@@ -123,6 +127,12 @@ function admittedSessionEvidence(
     .filter((evidence) => evidence.kind === "session")
     .map((evidence) => {
       const identity = sessionIdentity(evidence.platform, evidence.sessionId, evidence.path);
+      if (evidence.transcriptCapture) {
+        return {
+          identity,
+          revision: `sha256:${evidence.transcriptCapture.sha256}:${evidence.transcriptCapture.byteLength}`
+        };
+      }
       return snapshot.get(identity) ?? { identity, revision: `legacy-cutoff:${evidenceCutoff}` };
     })
     .sort((left, right) => left.identity.localeCompare(right.identity));

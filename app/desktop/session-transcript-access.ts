@@ -1,14 +1,17 @@
 import type { SessionTranscriptRequest } from "./api";
 import type { NotebookDocument } from "./notebook-store";
-import type { AgentPlatform, AgentWorkSession } from "../../src/types";
+import type { AgentPlatform, AgentTranscriptCapture, AgentWorkSession } from "../../src/types";
+import type { DailyReviewEvidence } from "../../src/workline-review";
 
 export interface AuthorizedSessionTranscriptReference {
   id: string;
   platform: AgentPlatform;
   path: string;
+  readPath: string;
   title: string;
   origin: "current-snapshot" | "sealed-package";
   evidenceUpdatedAt?: string;
+  transcriptCapture?: AgentTranscriptCapture;
 }
 
 export function authorizeSessionTranscriptRequest(
@@ -37,6 +40,10 @@ export function authorizeSessionTranscriptRequest(
   if (evidence.sessionId !== request.id || evidence.platform !== request.platform || evidence.path !== request.path) {
     throw new Error("请求的会话元组与封存证据不匹配，拒绝读取。");
   }
+  if (evidence.transcriptCapture && evidence.transcriptCapture.canonicalPath !== evidence.path) {
+    throw new Error("封存证据的 canonical path 与会话元组不匹配，拒绝读取。");
+  }
+  if (evidence.transcriptCapture) return pickPackageReference(evidence);
   if (page.status !== "sealed") {
     const current = currentSessions.find((session) =>
       session.id === evidence.sessionId && session.platform === evidence.platform && session.path === evidence.path
@@ -44,16 +51,31 @@ export function authorizeSessionTranscriptRequest(
     if (!current) throw new Error("指定日期尚未封页，不能用工作包回开历史会话。");
     return pickReference(current);
   }
+  return pickPackageReference(evidence);
+}
+
+function pickPackageReference(evidence: DailyReviewEvidence): AuthorizedSessionTranscriptReference {
   return {
     id: evidence.sessionId,
     platform: evidence.platform,
     path: evidence.path,
+    readPath: evidence.transcriptCapture?.canonicalPath ?? evidence.path,
     title: evidence.label,
     origin: "sealed-package",
-    ...(evidence.updatedAt ? { evidenceUpdatedAt: evidence.updatedAt } : {})
+    ...(evidence.transcriptCapture
+      ? { transcriptCapture: structuredClone(evidence.transcriptCapture) }
+      : evidence.updatedAt ? { evidenceUpdatedAt: evidence.updatedAt } : {})
   };
 }
 
 function pickReference(session: AgentWorkSession): AuthorizedSessionTranscriptReference {
-  return { id: session.id, platform: session.platform, path: session.path, title: session.title, origin: "current-snapshot" };
+  return {
+    id: session.id,
+    platform: session.platform,
+    path: session.path,
+    readPath: session.transcriptCapture?.canonicalPath ?? session.path,
+    title: session.title,
+    origin: "current-snapshot",
+    ...(session.transcriptCapture ? { transcriptCapture: structuredClone(session.transcriptCapture) } : {})
+  };
 }

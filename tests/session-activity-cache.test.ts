@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createSessionActivityCache } from "../app/desktop/session-activity-cache";
+import { createSessionActivityCache, sessionActivityCacheKey } from "../app/desktop/session-activity-cache";
 import type { SessionTranscriptState } from "../app/desktop/api";
 import type { AgentWorkSession } from "../src/types";
 
@@ -35,6 +35,41 @@ test("keeps blocked date loads and cached lanes bound to their request dates", a
   assert.deepEqual(cachedAugust9.lanes[0]?.timeRange, { start: "2026-08-09T09:00:00+08:00", end: "2026-08-09T09:02:00+08:00" });
   assert.deepEqual(cachedAugust10.lanes[0]?.timeRange, { start: "2026-08-10T09:00:00+08:00", end: "2026-08-10T09:03:00+08:00" });
   assert.equal(reads, 2);
+});
+
+test("uses captured transcript content as the activity-cache revision instead of mutable metadata", () => {
+  const captured = {
+    ...session(),
+    transcriptCapture: {
+      canonicalPath: "/tmp/shared.jsonl",
+      sha256: "a".repeat(64),
+      byteLength: 128,
+      coverage: { startByte: 0, endByte: 128 }
+    }
+  } satisfies AgentWorkSession;
+  const metadataOnly = {
+    ...captured,
+    title: "重新生成的标题",
+    summary: "重新生成的摘要",
+    status: "active" as const,
+    updatedAt: "2026-08-10T12:00:00+08:00"
+  };
+  const contentChanged = {
+    ...metadataOnly,
+    transcriptCapture: {
+      ...metadataOnly.transcriptCapture,
+      sha256: "b".repeat(64)
+    }
+  };
+
+  assert.equal(
+    sessionActivityCacheKey("2026-08-10", captured),
+    sessionActivityCacheKey("2026-08-10", metadataOnly)
+  );
+  assert.notEqual(
+    sessionActivityCacheKey("2026-08-10", captured),
+    sessionActivityCacheKey("2026-08-10", contentChanged)
+  );
 });
 
 function session(): AgentWorkSession {

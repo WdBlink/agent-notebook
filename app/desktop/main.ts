@@ -11,6 +11,7 @@ import { createEmptyData, localDateString, normalizeData, setWorkSessionSnapshot
 import type { CockpitData, SessionProvider } from "../../src/types";
 import type { DailyDraftInput, DailyReviewPreparationMode, DailySealInput, DesktopNotebookState, DesktopSettingsPatch, DesktopState, DesktopSummaryJob, NotebookNote, NotebookNoteInput, ProjectContextDocument, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState } from "./api";
 import { runDailyReviewPreparation } from "./daily-review-preparation";
+import { loadFreshDailyReviewSnapshot } from "./daily-review-snapshot";
 import { desktopCliRunner } from "./cli-runner";
 import {
   appendDailyReviewGeneration,
@@ -61,7 +62,10 @@ let summaryRunId = 0;
 let summaryJob: DesktopSummaryJob = { status: "idle", total: 0, completed: 0, models: summaryModels };
 const sessionActivityCache = createSessionActivityCache({
   async readTranscript(session) {
-    const source = await readBoundedTranscriptSource(session.path, { origin: "current-snapshot" });
+    const source = await readBoundedTranscriptSource(session.path, {
+      origin: "current-snapshot",
+      ...(session.transcriptCapture ? { transcriptCapture: session.transcriptCapture } : {})
+    });
     return parseSessionTranscript({
       content: source.content,
       platform: session.platform,
@@ -82,6 +86,12 @@ const runtimeFs: RuntimeFileSystem = {
   },
   async readFile(filePath: string, encoding: "utf8"): Promise<string> {
     return fs.readFile(filePath, encoding);
+  },
+  async readBytes(filePath: string): Promise<Uint8Array> {
+    return fs.readFile(filePath);
+  },
+  async realpath(filePath: string): Promise<string> {
+    return fs.realpath(filePath);
   }
 };
 
@@ -272,15 +282,21 @@ async function prepareDailyReviewForDate(
 ): Promise<DesktopNotebookState> {
   const logicalDate = String(requestedDate ?? "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(logicalDate)) throw new Error("回看日期无效。");
+  const snapshot = await loadFreshDailyReviewSnapshot(logicalDate, {
+    refreshSnapshot,
+    async loadSnapshot() {
+      return (await ensureLoaded()).workSessionSnapshot;
+    }
+  });
   const current = await ensureLoaded();
-  const capturedSessions = structuredClone(current.workSessionSnapshot.sessions);
+  const capturedSessions = structuredClone(snapshot.sessions);
   const board = notebookStateForDate(notebook, logicalDate, capturedSessions).todayBoard;
   const mode = requestedMode ?? (board.mode === "raw" ? "compile" : "refresh");
   return runDailyReviewPreparation({
     logicalDate,
     mode,
-    snapshotDate: current.workSessionSnapshot.date,
-    evidenceCutoff: current.workSessionSnapshot.generatedAt,
+    snapshotDate: snapshot.date,
+    evidenceCutoff: snapshot.generatedAt,
     sessions: capturedSessions,
     board
   }, {
@@ -780,9 +796,11 @@ async function loadSessionTranscript(request: SessionTranscriptRequest): Promise
   const target = authorizeSessionTranscriptRequest(request, current.workSessionSnapshot.sessions, notebook);
   let source: { content: string; truncated: boolean };
   try {
-    source = await readBoundedTranscriptSource(target.path, {
+    source = await readBoundedTranscriptSource(target.readPath, {
       origin: target.origin,
-      ...(target.evidenceUpdatedAt ? { expectedModifiedAt: target.evidenceUpdatedAt } : {})
+      ...(target.transcriptCapture
+        ? { transcriptCapture: target.transcriptCapture }
+        : target.evidenceUpdatedAt ? { expectedModifiedAt: target.evidenceUpdatedAt } : {})
     });
   } catch (error) {
     if (isMissingFileError(error)) {

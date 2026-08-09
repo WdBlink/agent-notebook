@@ -85,7 +85,14 @@ async function installDesktopApi(page: Page): Promise<void> {
         sessionId: session.id,
         startedAt: session.startedAt,
         updatedAt: session.updatedAt
-      })), ...(includeDuplicate ? [{
+      })), {
+        id: "artifact:legacy:daily-review-notes",
+        kind: "artifact",
+        label: "旧项目文档.md",
+        path: "/workspace/work-continuity/旧项目文档.md",
+        platform: "codex",
+        sessionId: "019f-work-continuity"
+      }, ...(includeDuplicate ? [{
         id: "session:codex:019f-work-continuity:alternate",
         kind: "session",
         label: "同 ID 的另一条路径",
@@ -112,7 +119,7 @@ async function installDesktopApi(page: Page): Promise<void> {
             title: "从 Agent 看板转向人的日终回看工作簿",
             dek: "由 3 条跨平台会话按发生顺序重建；这里只呈现材料，不替用户下结论。",
             blocks: [
-              { id: "prior", kind: "prior-assumption", label: "原来的判断", title: "首页需要展示 Agent 的运行状态", body: "最初把 Session、运行状态和项目摘要放在同一主界面。", evidenceIds: ["session:codex:019f-work-continuity"], payload: {} },
+              { id: "prior", kind: "prior-assumption", label: "原来的判断", title: "首页需要展示 Agent 的运行状态", body: "最初把 Session、运行状态和项目摘要放在同一主界面。", evidenceIds: ["session:codex:019f-work-continuity", "artifact:legacy:daily-review-notes"], payload: {} },
               { id: "change", kind: "evidence-change", label: "发生了什么", title: "真实使用仍需要重新翻 Session", body: "薄摘要没有减少理解成本，用户无法形成自己的判断。", evidenceIds: ["session:codex:019f-work-continuity", "session:claude:claude-map-review"], payload: {} },
               { id: "scope", kind: "scope-tension", label: "未来观察", title: "十五分钟内能否完成一条工作线的回看", body: "如果材料包有效，用户应能少翻原始 Session，同时仍亲自完成思考。", evidenceIds: ["session:claude:claude-finished"], payload: { futureField: "preserved" } }
             ],
@@ -651,6 +658,8 @@ test("compiled board discloses exact source topology and opens the selected doss
   await openMaterial.click();
   const dossier = page.getByRole("dialog", { name: "日终回看" });
   await expect(dossier.getByText("从 Agent 看板转向人的日终回看工作簿", { exact: true })).toBeVisible();
+  await expect(dossier.getByText("当前文件引用（未冻结） · 旧项目文档.md", { exact: true })).toBeVisible();
+  await expect(dossier.getByRole("button", { name: /旧项目文档\.md/ })).toHaveCount(0);
   await expect(dossier.locator(".review-workline")).toHaveCount(0);
   await expect(dossier.getByRole("button", { name: /返回工作线/ })).toBeFocused();
   await dossier.getByRole("button", { name: "看完了，开始思考" }).focus();

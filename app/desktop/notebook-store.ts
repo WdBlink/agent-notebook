@@ -446,7 +446,7 @@ function normalizePackageGenerations(value: unknown, logicalDate: string): Today
     seen.add(id);
     const admittedEvidence = Array.isArray(raw.admittedEvidence) ? raw.admittedEvidence.flatMap((entry) => {
       if (!entry || typeof entry !== "object") return [];
-      const identity = cleanText(entry.identity, 4_000);
+      const identity = normalizeStoredIdentity(entry.identity);
       const revision = cleanText(entry.revision, 400);
       return identity && revision ? [{ identity, revision }] : [];
     }) : [];
@@ -646,6 +646,11 @@ function cloneNote(note: NotebookNote): NotebookNote { return structuredClone(no
 function uniqueNotes(notes: NotebookNote[]): NotebookNote[] { const seen = new Set<string>(); return notes.filter((note) => { if (seen.has(note.id)) return false; seen.add(note.id); return true; }); }
 function emptyPage(logicalDate: string): DailyNotebookPage { return { schemaVersion: 1, logicalDate, status: "unformed", workRecords: [], reflection: "", worklineReflections: [], bookmarks: [] }; }
 function cleanText(value: unknown, limit: number): string { return typeof value === "string" ? value.replace(/\0/g, "").trim().slice(0, limit) : ""; }
+
+function normalizeStoredIdentity(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0 || value.length > 4_000 || /[\0\r\n]/.test(value)) return "";
+  return value;
+}
 function cleanTimestamp(value: unknown): string { const date = new Date(typeof value === "string" ? value : 0); return Number.isNaN(date.getTime()) ? new Date(0).toISOString() : date.toISOString(); }
 function isDate(value: unknown): value is string { return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value); }
 function localDate(date = new Date()): string { const offset = date.getTimezoneOffset() * 60_000; return new Date(date.getTime() - offset).toISOString().slice(0, 10); }

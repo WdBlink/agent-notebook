@@ -1,14 +1,162 @@
 import assert from "node:assert/strict";
+import { appendFile, mkdtemp, readFile, realpath, rm, stat, utimes, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
   compileDailyWorklineReview,
   inspectDailyReviewPackageQuality,
   normalizeDailyReviewPackage,
-  type DailyReviewPackage
+  type DailyReviewPackage,
+  type WorklineTranscriptFreezer
 } from "../src/workline-review";
 import { createEmptyData } from "../src/state";
 import type { AgentWorkSession } from "../src/types";
 import type { CliRunRequest } from "../src/agent-summary";
+
+const passThroughTranscriptFreezer: WorklineTranscriptFreezer = async (sessions, use) =>
+  use(sessions, "/tmp/work-continuity-test-freeze");
+
+test("compile reads only the scanner-admitted prefix from a temporary frozen transcript and removes it afterward", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "work-continuity-review-freeze-"));
+  const sourcePath = path.join(temp, "session.jsonl");
+  const admittedContent = "captured transcript\n";
+  let frozenPath = "";
+
+  try {
+    await writeFile(sourcePath, admittedContent);
+    const canonicalPath = await realpath(sourcePath);
+    await appendFile(sourcePath, "APPENDED_SECRET\n");
+    const review = await compileDailyWorklineReview(
+      createEmptyData().settings,
+      "2026-08-09",
+      [session({
+        id: "codex-one",
+        path: canonicalPath,
+        transcriptCapture: {
+          canonicalPath,
+          sha256: "7eb259ab4a8d18e582fe130bbe7c5eab409a7aad12f157fd63130c3c7d3b648d",
+          byteLength: 20,
+          coverage: { startByte: 0, endByte: 20 }
+        }
+      })],
+      {
+        runner: async (request) => {
+          const match = request.stdin.match(/"transcriptPath":\s*("(?:[^"\\]|\\.)*")/);
+          assert.ok(match?.[1]);
+          frozenPath = JSON.parse(match[1]) as string;
+          assert.notEqual(frozenPath, canonicalPath);
+          assert.equal(request.cwd, path.dirname(frozenPath));
+          assert.equal(await readFile(frozenPath, "utf8"), admittedContent);
+          assert.equal((await stat(frozenPath)).mode & 0o777, 0o400);
+          assert.equal(request.stdin.includes(canonicalPath), false);
+          assert.equal(request.stdin.includes(sourcePath), false);
+          assert.equal(request.stdin.includes("APPENDED_SECRET"), false);
+          return codexResult({ worklines: [semanticWorkline()] });
+        }
+      }
+    );
+
+    assert.deepEqual(review.evidence[0], {
+      id: "session:codex:codex-one",
+      kind: "session",
+      label: "默认会话",
+      path: canonicalPath,
+      platform: "codex",
+      sessionId: "codex-one",
+      startedAt: "2026-08-09T01:00:00.000Z",
+      updatedAt: "2026-08-09T10:00:00.000Z",
+      transcriptCapture: {
+        canonicalPath,
+        sha256: "7eb259ab4a8d18e582fe130bbe7c5eab409a7aad12f157fd63130c3c7d3b648d",
+        byteLength: 20,
+        coverage: { startByte: 0, endByte: 20 }
+      }
+    });
+    assert.deepEqual(review.provenance?.evidence.sourceRefs, review.evidence);
+    assert.equal(JSON.stringify(review).includes("work-continuity-evidence-"), false);
+    await assert.rejects(() => readFile(frozenPath), { code: "ENOENT" });
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("compile rejects a covered-prefix mutation even when byte length and mtime are unchanged", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "work-continuity-review-mutation-"));
+  const sourcePath = path.join(temp, "session.jsonl");
+  const fixedTime = new Date("2026-08-09T10:00:00.000Z");
+
+  try {
+    await writeFile(sourcePath, "captured transcript\n");
+    await utimes(sourcePath, fixedTime, fixedTime);
+    const canonicalPath = await realpath(sourcePath);
+    await writeFile(sourcePath, "mutated transcript!\n");
+    await utimes(sourcePath, fixedTime, fixedTime);
+    assert.equal((await stat(sourcePath)).size, 20);
+    assert.equal((await stat(sourcePath)).mtime.toISOString(), fixedTime.toISOString());
+
+    await assert.rejects(
+      () => compileDailyWorklineReview(
+        createEmptyData().settings,
+        "2026-08-09",
+        [session({
+          id: "codex-one",
+          path: canonicalPath,
+          transcriptCapture: {
+            canonicalPath,
+            sha256: "7eb259ab4a8d18e582fe130bbe7c5eab409a7aad12f157fd63130c3c7d3b648d",
+            byteLength: 20,
+            coverage: { startByte: 0, endByte: 20 }
+          }
+        })],
+        { runner: async () => codexResult({ worklines: [semanticWorkline()] }) }
+      ),
+      /证据.*(变化|不匹配)|hash|SHA-256/i
+    );
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("compile removes its frozen transcript when the model runner fails", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "work-continuity-review-cleanup-"));
+  const sourcePath = path.join(temp, "session.jsonl");
+  let frozenPath = "";
+
+  try {
+    await writeFile(sourcePath, "captured transcript\n");
+    const canonicalPath = await realpath(sourcePath);
+    await assert.rejects(
+      compileDailyWorklineReview(
+        createEmptyData().settings,
+        "2026-08-09",
+        [session({
+          id: "codex-one",
+          path: canonicalPath,
+          transcriptCapture: {
+            canonicalPath,
+            sha256: "7eb259ab4a8d18e582fe130bbe7c5eab409a7aad12f157fd63130c3c7d3b648d",
+            byteLength: 20,
+            coverage: { startByte: 0, endByte: 20 }
+          }
+        })],
+        {
+          runner: async (request) => {
+            const match = request.stdin.match(/"transcriptPath":\s*("(?:[^"\\]|\\.)*")/);
+            assert.ok(match?.[1]);
+            frozenPath = JSON.parse(match[1]) as string;
+            throw new Error("runner failed after reading frozen evidence");
+          }
+        }
+      ),
+      /runner failed/
+    );
+    assert.ok(frozenPath);
+    await assert.rejects(() => readFile(frozenPath), { code: "ENOENT" });
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
 
 test("one Prompt reconstructs a cross-provider workline and keeps only verified evidence", async () => {
   const requests: CliRunRequest[] = [];
@@ -41,6 +189,7 @@ test("one Prompt reconstructs a cross-provider workline and keeps only verified 
       model: "review-model",
       evidenceCutoff: "2026-08-09T19:55:00+08:00",
       now: () => new Date("2026-08-09T20:15:00+08:00"),
+      transcriptFreezer: passThroughTranscriptFreezer,
       runner: async (request) => {
         requests.push(request);
         return codexResult({
@@ -91,7 +240,7 @@ test("one Prompt reconstructs a cross-provider workline and keeps only verified 
                     label: "仍需验证",
                     title: "如果问题确实在 Research IR",
                     body: "更换两类真实任务后，结构失败应显著下降。",
-                    evidenceIds: ["artifact:claude:claude-research-ir:0", "session:codex:missing"],
+                    evidenceIds: ["session:claude:claude-research-ir", "session:codex:missing"],
                     relation: "refines",
                     modelNote: { confidence: "medium" }
                   }
@@ -136,7 +285,7 @@ test("one Prompt reconstructs a cross-provider workline and keeps only verified 
     "claude:claude-research-ir"
   ]);
   assert.deepEqual(review.worklines[0]?.dossier.blocks[1]?.evidenceIds, [
-    "artifact:claude:claude-research-ir:0"
+    "session:claude:claude-research-ir"
   ]);
   assert.deepEqual(review.worklines[0]?.dossier.blocks[1]?.payload, {
     relation: "refines",
@@ -151,23 +300,25 @@ test("one Prompt reconstructs a cross-provider workline and keeps only verified 
   assert.equal(review.provenance?.promptProfile, "traceink-review-v1");
   assert.equal(review.provenance?.model.provider, "codex");
   assert.equal(review.provenance?.model.name, "review-model");
-  assert.equal(review.provenance?.evidence.manifestVersion, "workline-evidence-manifest-v1");
+  assert.equal(review.provenance?.evidence.manifestVersion, "workline-evidence-manifest-v2");
   assert.deepEqual(review.provenance?.evidence.sourceRefs.map((source) => source.id), [
     "session:codex:codex-scheduler",
-    "artifact:codex:codex-scheduler:0",
-    "session:claude:claude-research-ir",
-    "artifact:claude:claude-research-ir:0"
+    "session:claude:claude-research-ir"
   ]);
   assert.deepEqual(review.provenance?.evidence.completenessWarnings, review.warnings);
 });
 
-test("relative artifact evidence is resolved against the provider-owned working directory", async () => {
+test("path-only artifacts are excluded until their bytes have an integrity capture", async () => {
+  let prompt = "";
   const review = await compileDailyWorklineReview(
     createEmptyData().settings,
     "2026-08-09",
     [session({ id: "codex-relative", path: "/tmp/codex-relative.jsonl", projectPath: "/workspace/research", artifacts: ["results/run.json"] })],
     {
-      runner: async () => codexResult({
+      transcriptFreezer: passThroughTranscriptFreezer,
+      runner: async (request) => {
+        prompt = request.stdin;
+        return codexResult({
         worklines: [{
           id: "relative",
           title: "相对材料仍可重开",
@@ -178,16 +329,19 @@ test("relative artifact evidence is resolved against the provider-owned working 
             title: "材料路径",
             dek: "",
             blocks: [
-              { id: "one", kind: "evidence", title: "结果", body: "读取结果。", evidenceIds: ["artifact:codex:codex-relative:0"] },
-              { id: "future", kind: "validation-window", title: "未来验证", body: "若重开相对路径，路径解析应该通过并继续指向会话工作目录。", evidenceIds: ["artifact:codex:codex-relative:0"] }
+              { id: "one", kind: "evidence", title: "结果", body: "当前只采纳会话内容。", evidenceIds: ["session:codex:codex-relative"] },
+              { id: "future", kind: "validation-window", title: "未来验证", body: "若下次材料拥有完整捕获，它应该出现并可复核。", evidenceIds: ["session:codex:codex-relative"] }
             ],
             question: { prompt: "是否需要保留这条材料路径作为后续复核入口？" }
           }
         }]
-      })
+      });
+      }
     }
   );
-  assert.equal(review.evidence.find((item) => item.kind === "artifact")?.path, "/workspace/research/results/run.json");
+  assert.equal(review.evidence.some((item) => item.kind === "artifact"), false);
+  assert.equal(prompt.includes("/workspace/research/results/run.json"), false);
+  assert.match(review.warnings.join(" "), /artifact.*(?:hash|哈希)|材料.*哈希/i);
 });
 
 test("a later Prompt may add a semantic role without requiring a schema migration", async () => {
@@ -307,6 +461,55 @@ test("reload preserves a semantically incomplete legacy package while quality in
   assert.deepEqual(reloaded, stored);
 });
 
+test("reload preserves an atomic transcript capture without weakening legacy packages", () => {
+  const stored = legacyStoredPackage();
+  stored.evidence[0]!.path = "/tmp/legacy  session.jsonl ";
+  stored.evidence[0]!.transcriptCapture = {
+    canonicalPath: "/tmp/legacy  session.jsonl ",
+    sha256: "7eb259ab4a8d18e582fe130bbe7c5eab409a7aad12f157fd63130c3c7d3b648d",
+    byteLength: 20,
+    coverage: { startByte: 0, endByte: 20 }
+  };
+
+  const reloaded = normalizeDailyReviewPackage(stored, "2026-08-09");
+
+  assert.equal(reloaded?.evidence[0]?.path, stored.evidence[0]!.path);
+  assert.deepEqual(reloaded?.evidence[0]?.transcriptCapture, stored.evidence[0]!.transcriptCapture);
+  assert.deepEqual(normalizeDailyReviewPackage(legacyStoredPackage(), "2026-08-09"), legacyStoredPackage());
+});
+
+test("reload rejects a present partial capture instead of silently downgrading it to a legacy reference", () => {
+  const stored = legacyStoredPackage();
+  stored.evidence[0]!.transcriptCapture = {
+    canonicalPath: "/tmp/legacy-session.jsonl",
+    sha256: "7eb259ab4a8d18e582fe130bbe7c5eab409a7aad12f157fd63130c3c7d3b648d",
+    byteLength: 20,
+    coverage: { startByte: 0, endByte: 19 }
+  };
+
+  assert.equal(normalizeDailyReviewPackage(stored, "2026-08-09"), undefined);
+});
+
+test("reload rejects the whole package when any captured evidence row is malformed", () => {
+  const stored = legacyStoredPackage();
+  stored.evidence.push({
+    ...structuredClone(stored.evidence[0]!),
+    id: "session:claude:second",
+    label: "Second Session",
+    path: "/tmp/second-session.jsonl",
+    platform: "claude",
+    sessionId: "second",
+    transcriptCapture: {
+      canonicalPath: "/tmp/second-session.jsonl",
+      sha256: "a".repeat(64),
+      byteLength: 25,
+      coverage: { startByte: 0, endByte: 24 }
+    }
+  });
+
+  assert.equal(normalizeDailyReviewPackage(stored, "2026-08-09"), undefined);
+});
+
 test("reload preserves a historically versioned provenance record when canonical facts still match", async () => {
   const review = await runReview({ worklines: [semanticWorkline()] });
   const stored = JSON.parse(JSON.stringify(review)) as DailyReviewPackage;
@@ -372,6 +575,7 @@ async function runReview(output: unknown): Promise<DailyReviewPackage> {
     {
       homeDir: "/Users/test",
       now: () => new Date("2026-08-09T20:15:00+08:00"),
+      transcriptFreezer: passThroughTranscriptFreezer,
       runner: async () => codexResult(output)
     }
   );

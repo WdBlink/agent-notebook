@@ -36,7 +36,12 @@ export function createSessionActivityCache(input: {
 }
 
 export function sessionActivityCacheKey(logicalDate: string, session: AgentWorkSession): string {
-  return [logicalDate, session.platform, session.id, session.path, session.updatedAt].map(encodeURIComponent).join("|");
+  const capture = session.transcriptCapture;
+  const sourcePath = capture?.canonicalPath ?? session.path;
+  const revision = capture
+    ? `sha256:${capture.sha256}:${capture.byteLength}`
+    : `mtime:${session.updatedAt}`;
+  return [logicalDate, session.platform, session.id, sourcePath, revision].map(encodeURIComponent).join("|");
 }
 
 function unreadableTranscript(session: AgentWorkSession, error: unknown): SessionTranscriptState {

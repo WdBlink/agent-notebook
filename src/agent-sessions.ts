@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { DEFAULT_SESSION_PROVIDERS, DEFAULT_SESSION_SCAN_ROOTS } from "./constants";
 import { createEmptyWorkSessionSnapshot } from "./state";
 import type {
@@ -20,6 +21,8 @@ export interface RuntimeFileSystem {
   stat(path: string): Promise<RuntimeFileStat>;
   readdir(path: string): Promise<string[]>;
   readFile(path: string, encoding: "utf8"): Promise<string>;
+  readBytes(path: string): Promise<Uint8Array>;
+  realpath(path: string): Promise<string>;
 }
 
 export interface SessionScanOptions {
@@ -114,12 +117,20 @@ export async function loadAgentWorkSnapshot(
 
   const sessions: AgentWorkSession[] = [];
   const seen = new Set<string>();
+  let warnings: string[] = [];
   const maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
   const sorted = candidates.sort((a, b) => b.sortTime - a.sortTime).slice(0, maxFiles);
 
   for (const candidate of sorted) {
     if (sessions.length >= maxSessions) break;
-    const session = await readSession(candidate, fs, day);
+    let session: AgentWorkSession | null;
+    try {
+      session = await readSession(candidate, fs, day);
+    } catch (error) {
+      warnings.push(`会话证据读取失败（${candidate.path}）：${errorMessage(error)}`);
+      warnings = warnings.slice(0, 8);
+      continue;
+    }
     if (!session) continue;
     const key = session.resumable ? `${session.platform}:${session.id}` : `${session.platform}:${session.id}:${session.path}`;
     if (seen.has(key)) continue;
@@ -128,20 +139,19 @@ export async function loadAgentWorkSnapshot(
   }
 
   let mergedSessions = sessions;
-  let warnings: string[] = [];
   if (options.summarizer && sessions.length > 0) {
     try {
       const batch = await options.summarizer({ date, sessions, settings });
       mergedSessions = mergeSessionSummaries(sessions, batch.summaries);
-      warnings = batch.warnings.slice(0, 8);
+      warnings = [...warnings, ...batch.warnings].slice(0, 8);
     } catch (error) {
-      warnings = [`Agent 总结失败：${errorMessage(error)}`];
+      warnings = [...warnings, `Agent 总结失败：${errorMessage(error)}`].slice(0, 8);
     }
   }
 
   return {
     date,
-    generatedAt: now.toISOString(),
+    generatedAt: (options.now ?? new Date()).toISOString(),
     sources,
     sessions: mergedSessions,
     warnings
@@ -297,16 +307,22 @@ async function readSession(
   fs: RuntimeFileSystem,
   day: ActivityWindow
 ): Promise<AgentWorkSession | null> {
-  try {
-    const content = await fs.readFile(candidate.path, "utf8");
-    if (hasTargetDayActivity(content, day) === false) return null;
-    const session = extractWorkSessionFromText(content, candidate.path, candidate.platform, candidate.updatedAt);
-    if (session && isArchivedSessionPath(candidate.path)) session.status = "completed";
-    if (session) await enrichWorkspaceMetadata(session, fs);
-    return session;
-  } catch {
-    return null;
+  const canonicalPath = await fs.realpath(candidate.path);
+  const bytes = await fs.readBytes(canonicalPath);
+  const content = new TextDecoder().decode(bytes);
+  if (hasTargetDayActivity(content, day) === false) return null;
+  const session = extractWorkSessionFromText(content, canonicalPath, candidate.platform, candidate.updatedAt);
+  if (session) {
+    session.transcriptCapture = {
+      canonicalPath,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      byteLength: bytes.byteLength,
+      coverage: { startByte: 0, endByte: bytes.byteLength }
+    };
   }
+  if (session && (isArchivedSessionPath(candidate.path) || isArchivedSessionPath(canonicalPath))) session.status = "completed";
+  if (session) await enrichWorkspaceMetadata(session, fs);
+  return session;
 }
 
 export function isArchivedSessionPath(value: string): boolean {
@@ -623,8 +639,23 @@ function createRuntimeFileSystem(): RuntimeFileSystem | undefined {
   const runtimeRequire = getRuntimeRequire();
   if (!runtimeRequire) return undefined;
   try {
-    const fsModule = runtimeRequire("fs") as { promises?: RuntimeFileSystem };
-    return fsModule.promises;
+    const fsModule = runtimeRequire("fs") as {
+      promises?: {
+        stat(path: string): Promise<RuntimeFileStat>;
+        readdir(path: string): Promise<string[]>;
+        readFile(path: string, encoding?: "utf8"): Promise<string | Uint8Array>;
+        realpath(path: string): Promise<string>;
+      };
+    };
+    const promises = fsModule.promises;
+    if (!promises) return undefined;
+    return {
+      stat: (path) => promises.stat(path),
+      readdir: (path) => promises.readdir(path),
+      readFile: async (path, encoding) => promises.readFile(path, encoding) as Promise<string>,
+      readBytes: async (path) => promises.readFile(path) as Promise<Uint8Array>,
+      realpath: (path) => promises.realpath(path)
+    };
   } catch {
     return undefined;
   }

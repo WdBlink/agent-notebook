@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -11,7 +11,11 @@ const fsAdapter: RuntimeFileSystem = {
   readdir,
   async readFile(filePath: string, encoding: "utf8") {
     return readFile(filePath, encoding);
-  }
+  },
+  async readBytes(filePath: string) {
+    return readFile(filePath);
+  },
+  realpath
 };
 
 test("extracts Codex JSONL sessions with resume hints", () => {
@@ -72,6 +76,7 @@ test("Codex archived sessions are completed and model summaries cannot reopen th
     });
     assert.equal(snapshot.sessions[0]?.status, "completed");
     assert.equal(snapshot.sessions[0]?.title, "模型标题");
+    assert.match(snapshot.sessions[0]?.transcriptCapture?.sha256 ?? "", /^[a-f0-9]{64}$/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -201,6 +206,88 @@ test("scans yesterday Codex and Claude files from configured local roots", async
     assert.equal(snapshot.sessions.length, 2);
     assert.ok(snapshot.sessions.some((session) => session.platform === "codex" && session.resumeHint === "codex resume codex-yesterday"));
     assert.ok(snapshot.sessions.some((session) => session.platform === "claude" && session.title.includes("等 batch v2 完成")));
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("scanner captures the canonical transcript hash, byte length, and complete byte coverage", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "work-continuity-evidence-capture-"));
+  const realRoot = path.join(temp, "real-sessions");
+  const root = path.join(temp, ".codex", "sessions");
+  const sessionPath = path.join(realRoot, "rollout-2026-07-02.jsonl");
+  const content = [
+    JSON.stringify({ timestamp: "2026-07-02T09:00:00.000Z", type: "session_meta", payload: { id: "capture-id" } }),
+    JSON.stringify({
+      timestamp: "2026-07-02T09:01:00.000Z",
+      type: "response_item",
+      payload: { type: "message", role: "user", content: [{ type: "input_text", text: "冻结这段证据" }] }
+    })
+  ].join("\n");
+
+  try {
+    await mkdir(realRoot, { recursive: true });
+    await mkdir(path.dirname(root), { recursive: true });
+    await symlink(realRoot, root, "dir");
+    await writeFile(sessionPath, content);
+    const targetTime = new Date("2026-07-02T10:00:00.000Z");
+    await utimes(sessionPath, targetTime, targetTime);
+
+    const snapshot = await loadAgentWorkSnapshot(createEmptyData().settings, {
+      now: new Date("2026-07-03T12:00:00.000Z"),
+      roots: [root],
+      fs: fsAdapter
+    });
+    const session = snapshot.sessions[0] as (typeof snapshot.sessions)[number] & {
+      transcriptCapture?: {
+        canonicalPath: string;
+        sha256: string;
+        byteLength: number;
+        coverage: { startByte: number; endByte: number };
+      };
+    };
+
+    assert.equal(session.path, await realpath(sessionPath));
+    assert.deepEqual(session.transcriptCapture, {
+      canonicalPath: await realpath(sessionPath),
+      sha256: "da66d7a01759dbfbceace356dc1f2d87976249c58fb22c5afe79245986b587be",
+      byteLength: 261,
+      coverage: { startByte: 0, endByte: 261 }
+    });
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("scanner reports a discovered transcript that cannot be captured instead of silently omitting it", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "work-continuity-evidence-warning-"));
+  const root = path.join(temp, ".codex", "sessions");
+  const goodPath = path.join(root, "good-2026-07-02.jsonl");
+  const badPath = path.join(root, "bad-2026-07-02.jsonl");
+  const targetTime = new Date("2026-07-02T10:00:00.000Z");
+  try {
+    await mkdir(root, { recursive: true });
+    await writeFile(goodPath, JSON.stringify({ timestamp: "2026-07-02T09:00:00.000Z", type: "session_meta", payload: { id: "good" } }));
+    await writeFile(badPath, JSON.stringify({ timestamp: "2026-07-02T09:00:00.000Z", type: "session_meta", payload: { id: "bad" } }));
+    await utimes(goodPath, targetTime, targetTime);
+    await utimes(badPath, targetTime, targetTime);
+    const canonicalBadPath = await realpath(badPath);
+
+    const snapshot = await loadAgentWorkSnapshot(createEmptyData().settings, {
+      now: new Date("2026-07-03T12:00:00.000Z"),
+      roots: [root],
+      fs: {
+        ...fsAdapter,
+        async readBytes(target) {
+          if (target === canonicalBadPath) throw new Error("permission denied");
+          return readFile(target);
+        }
+      }
+    });
+
+    assert.deepEqual(snapshot.sessions.map((item) => item.id), ["good"]);
+    assert.match(snapshot.warnings.join(" "), /bad-2026-07-02\.jsonl/);
+    assert.match(snapshot.warnings.join(" "), /permission denied/);
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
@@ -340,6 +427,14 @@ test("merges model summaries without allowing canonical paths or ids to change",
         async readFile(target, encoding) {
           if (target === path.join(temp, "codex", "rollout.jsonl")) return readFile(file, encoding);
           return readFile(target, encoding);
+        },
+        async readBytes(target) {
+          if (target === path.join(temp, "codex", "rollout.jsonl") || target === await realpath(file)) return readFile(file);
+          return readFile(target);
+        },
+        async realpath(target) {
+          if (target === path.join(temp, "codex", "rollout.jsonl")) return realpath(file);
+          return realpath(target);
         }
       },
       summarizer: async () => ({

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { authorizeSessionTranscriptRequest } from "../app/desktop/session-transcript-access";
+import { readBoundedTranscriptSource } from "../app/desktop/transcript-source-reader";
 import { composeDailyPage, createEmptyNotebookDocument, sealDailyPage } from "../app/desktop/notebook-store";
 import type { SessionTranscriptRequest } from "../app/desktop/api";
 import type { AgentWorkSession } from "../src/types";
@@ -27,9 +31,145 @@ test("current snapshot tuple is authorized without a package reference", () => {
     id: historical.id,
     platform: historical.platform,
     path: historical.path,
+    readPath: historical.path,
     title: historical.title,
     origin: "current-snapshot"
   });
+});
+
+test("current snapshot authorization carries the scanner capture into the bounded reader", () => {
+  const transcriptCapture = {
+    canonicalPath: historical.path,
+    sha256: "a".repeat(64),
+    byteLength: 42,
+    coverage: { startByte: 0, endByte: 42 }
+  };
+  const captured = { ...historical, transcriptCapture };
+
+  const authorized = authorizeSessionTranscriptRequest(
+    { id: captured.id, platform: captured.platform, path: captured.path },
+    [captured],
+    createEmptyNotebookDocument()
+  );
+
+  assert.deepEqual(authorized.transcriptCapture, transcriptCapture);
+  assert.equal(authorized.readPath, transcriptCapture.canonicalPath);
+});
+
+test("captured evidence authorizes sealed replay through its canonical read path and byte range", () => {
+  const capturedPackage = reviewPackage();
+  capturedPackage.evidence[0]!.transcriptCapture = {
+    canonicalPath: historical.path,
+    sha256: "7eb259ab4a8d18e582fe130bbe7c5eab409a7aad12f157fd63130c3c7d3b648d",
+    byteLength: 20,
+    coverage: { startByte: 0, endByte: 20 }
+  };
+  const document = composeDailyPage(
+    createEmptyNotebookDocument(),
+    logicalDate,
+    [historical],
+    new Date("2026-08-09T18:00:00.000Z"),
+    capturedPackage
+  );
+  const generationId = document.pages[logicalDate]?.activePackageGenerationId ?? "";
+  const sealed = sealDailyPage(
+    document,
+    logicalDate,
+    { reflection: "历史判断", bookmarkIds: [], expectedActiveGenerationId: generationId },
+    [],
+    new Date("2026-08-09T18:05:00.000Z")
+  );
+
+  const authorized = authorizeSessionTranscriptRequest({
+    id: historical.id,
+    platform: historical.platform,
+    path: historical.path,
+    packageRef: { logicalDate, generationId, evidenceId: "session:claude:historical-session" }
+  }, [], sealed) as ReturnType<typeof authorizeSessionTranscriptRequest> & {
+    readPath?: string;
+    transcriptCapture?: NonNullable<DailyReviewPackage["evidence"][number]["transcriptCapture"]>;
+  };
+
+  assert.equal(authorized.path, historical.path);
+  assert.equal(authorized.readPath, historical.path);
+  assert.deepEqual(authorized.transcriptCapture, capturedPackage.evidence[0]!.transcriptCapture);
+  assert.equal(authorized.evidenceUpdatedAt, undefined);
+});
+
+test("a draft captured package reopens its admitted prefix instead of the appended current snapshot", () => {
+  const capturedPackage = reviewPackage();
+  capturedPackage.evidence[0]!.transcriptCapture = {
+    canonicalPath: historical.path,
+    sha256: "7eb259ab4a8d18e582fe130bbe7c5eab409a7aad12f157fd63130c3c7d3b648d",
+    byteLength: 20,
+    coverage: { startByte: 0, endByte: 20 }
+  };
+  const document = composeDailyPage(
+    createEmptyNotebookDocument(),
+    logicalDate,
+    [historical],
+    new Date("2026-08-09T18:00:00.000Z"),
+    capturedPackage
+  );
+  const generationId = document.pages[logicalDate]?.activePackageGenerationId ?? "";
+
+  const authorized = authorizeSessionTranscriptRequest({
+    id: historical.id,
+    platform: historical.platform,
+    path: historical.path,
+    packageRef: { logicalDate, generationId, evidenceId: "session:claude:historical-session" }
+  }, [{ ...historical, updatedAt: "2026-08-09T11:00:00.000Z" }], document);
+
+  assert.equal(authorized.origin, "sealed-package");
+  assert.equal(authorized.readPath, historical.path);
+  assert.deepEqual(authorized.transcriptCapture, capturedPackage.evidence[0]!.transcriptCapture);
+  assert.equal(authorized.evidenceUpdatedAt, undefined);
+});
+
+test("draft package authorization and reader exclude bytes appended after compile", async () => {
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), "draft-package-prefix-"));
+  try {
+    const sourcePath = path.join(temp, "historical-session.jsonl");
+    await fs.writeFile(sourcePath, "captured transcript\nAPPENDED_SECRET\n", "utf8");
+    const canonicalPath = await fs.realpath(sourcePath);
+    const currentSession: AgentWorkSession = { ...historical, path: canonicalPath };
+    const capturedPackage = reviewPackage();
+    capturedPackage.evidence[0] = {
+      ...capturedPackage.evidence[0]!,
+      path: canonicalPath,
+      transcriptCapture: {
+        canonicalPath,
+        sha256: "7eb259ab4a8d18e582fe130bbe7c5eab409a7aad12f157fd63130c3c7d3b648d",
+        byteLength: 20,
+        coverage: { startByte: 0, endByte: 20 }
+      }
+    };
+    const document = composeDailyPage(
+      createEmptyNotebookDocument(),
+      logicalDate,
+      [currentSession],
+      new Date("2026-08-09T18:00:00.000Z"),
+      capturedPackage
+    );
+    const generationId = document.pages[logicalDate]?.activePackageGenerationId ?? "";
+    const authorized = authorizeSessionTranscriptRequest({
+      id: historical.id,
+      platform: historical.platform,
+      path: canonicalPath,
+      packageRef: { logicalDate, generationId, evidenceId: "session:claude:historical-session" }
+    }, [{ ...currentSession, updatedAt: "2026-08-09T11:00:00.000Z" }], document);
+    assert.ok(authorized.transcriptCapture);
+
+    const source = await readBoundedTranscriptSource(authorized.readPath, {
+      origin: authorized.origin,
+      transcriptCapture: authorized.transcriptCapture
+    });
+
+    assert.equal(source.content, "captured transcript\n");
+    assert.equal(source.content.includes("APPENDED_SECRET"), false);
+  } finally {
+    await fs.rm(temp, { recursive: true, force: true });
+  }
 });
 
 test("exact evidence in the active historical package authorizes transcript reopening", () => {
@@ -66,6 +206,7 @@ test("exact evidence in the active historical package authorizes transcript reop
     id: historical.id,
     platform: historical.platform,
     path: historical.path,
+    readPath: historical.path,
     title: historical.title,
     origin: "sealed-package",
     evidenceUpdatedAt: historical.updatedAt

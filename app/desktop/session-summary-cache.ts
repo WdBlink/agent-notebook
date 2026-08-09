@@ -37,14 +37,19 @@ export function sessionSummaryCacheKey(
   session: AgentWorkSession,
   models: SummaryModelMap
 ): string {
+  const capture = session.transcriptCapture;
+  const sourcePath = capture?.canonicalPath ?? session.path;
+  const revision = capture
+    ? `sha256:${capture.sha256}:${capture.byteLength}`
+    : `mtime:${session.updatedAt}`;
   return [
     `v${SESSION_SUMMARY_PROMPT_VERSION}`,
     date,
     session.platform,
     session.platform === "codex" || session.platform === "claude" ? models[session.platform] : "unsupported",
     session.id,
-    session.path,
-    session.updatedAt
+    sourcePath,
+    revision
   ].map(encodeURIComponent).join("|");
 }
 

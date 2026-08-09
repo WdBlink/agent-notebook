@@ -544,9 +544,15 @@ test("work session snapshots are capped and retired task paths cannot remain res
     platform: index === 0 ? "claude" : "unknown-platform",
     title: `昨日会话 ${index}`,
     summary: `summary ${index}`,
-    path: index === 0 ? "~/.claude/tasks/session.jsonl" : `~/.codex/archived_sessions/session-${index}.jsonl`,
+    path: index === 0 ? "/Users/example/.claude/tasks/session.jsonl " : `~/.codex/archived_sessions/session-${index}.jsonl`,
     updatedAt: "2026-07-02T08:00:00.000Z",
     resumable: true,
+    transcriptCapture: index === 0 ? {
+      canonicalPath: "/Users/example/.claude/tasks/session.jsonl ",
+      sha256: "da66d7a01759dbfbceace356dc1f2d87976249c58fb22c5afe79245986b587be",
+      byteLength: 261,
+      coverage: { startByte: 0, endByte: 261 }
+    } : undefined,
     artifacts: index === 0 ? ["src/main.ts", ".agents", "session-0"] : ["src/main.ts"],
     status: index === 0 ? "completed" : "bad"
   }));
@@ -564,6 +570,90 @@ test("work session snapshots are capped and retired task paths cannot remain res
   assert.equal(data.workSessionSnapshot.sessions.length, 30);
   assert.equal(data.workSessionSnapshot.sessions[0]?.resumable, false);
   assert.deepEqual(data.workSessionSnapshot.sessions[0]?.artifacts, ["src/main.ts"]);
+  assert.deepEqual(data.workSessionSnapshot.sessions[0]?.transcriptCapture, {
+    canonicalPath: "/Users/example/.claude/tasks/session.jsonl ",
+    sha256: "da66d7a01759dbfbceace356dc1f2d87976249c58fb22c5afe79245986b587be",
+    byteLength: 261,
+    coverage: { startByte: 0, endByte: 261 }
+  });
   assert.equal(data.workSessionSnapshot.sessions[1]?.platform, "other");
   assert.equal(data.workSessionSnapshot.sessions[1]?.status, "unknown");
+});
+
+test("work session snapshot normalization preserves exact filesystem path whitespace", () => {
+  const exactPath = "/tmp/session  evidence.jsonl ";
+  const data = normalizeData({
+    ...createEmptyData(),
+    workSessionSnapshot: {
+      date: "2026-08-09",
+      generatedAt: "2026-08-09T10:00:00.000Z",
+      sources: [],
+      warnings: [],
+      sessions: [{
+        id: "path-whitespace",
+        platform: "codex",
+        title: "路径保真",
+        summary: "路径不是 prose。",
+        path: exactPath,
+        updatedAt: "2026-08-09T10:00:00.000Z",
+        artifacts: [],
+        status: "completed",
+        transcriptCapture: {
+          canonicalPath: exactPath,
+          sha256: "7eb259ab4a8d18e582fe130bbe7c5eab409a7aad12f157fd63130c3c7d3b648d",
+          byteLength: 20,
+          coverage: { startByte: 0, endByte: 20 }
+        }
+      }]
+    }
+  });
+
+  assert.equal(data.workSessionSnapshot.sessions[0]?.path, exactPath);
+  assert.equal(data.workSessionSnapshot.sessions[0]?.transcriptCapture?.canonicalPath, exactPath);
+});
+
+test("malformed transcript captures are dropped atomically without dropping legacy sessions", () => {
+  const invalidCaptures = [
+    {
+      canonicalPath: "/tmp/session-a.jsonl",
+      sha256: "not-a-sha",
+      byteLength: 20,
+      coverage: { startByte: 0, endByte: 20 }
+    },
+    {
+      canonicalPath: "/tmp/session-b.jsonl",
+      sha256: "7eb259ab4a8d18e582fe130bbe7c5eab409a7aad12f157fd63130c3c7d3b648d",
+      byteLength: -1,
+      coverage: { startByte: 0, endByte: -1 }
+    },
+    {
+      canonicalPath: "/tmp/session-c.jsonl",
+      sha256: "7eb259ab4a8d18e582fe130bbe7c5eab409a7aad12f157fd63130c3c7d3b648d",
+      byteLength: 20,
+      coverage: { startByte: 1, endByte: 20 }
+    }
+  ];
+  const data = normalizeData({
+    ...createEmptyData(),
+    workSessionSnapshot: {
+      date: "2026-08-09",
+      generatedAt: "2026-08-09T10:00:00.000Z",
+      sources: [],
+      warnings: [],
+      sessions: invalidCaptures.map((transcriptCapture, index) => ({
+        id: `invalid-${index}`,
+        platform: "codex",
+        title: "Legacy session remains",
+        summary: "Invalid capture does not become trusted.",
+        path: `/tmp/session-${index}.jsonl`,
+        updatedAt: "2026-08-09T10:00:00.000Z",
+        artifacts: [],
+        status: "completed",
+        transcriptCapture
+      }))
+    }
+  });
+
+  assert.equal(data.workSessionSnapshot.sessions.length, 3);
+  assert.deepEqual(data.workSessionSnapshot.sessions.map((item) => item.transcriptCapture), [undefined, undefined, undefined]);
 });

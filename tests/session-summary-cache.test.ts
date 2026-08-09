@@ -41,6 +41,40 @@ test("summary cache keys include date, provider model and canonical path", () =>
   assert.notEqual(key, sessionSummaryCacheKey("2026-07-21", { ...base, path: "/tmp/other.jsonl" }, models));
 });
 
+test("captured summary cache keys follow transcript content instead of file metadata", () => {
+  const captured = {
+    ...session(),
+    transcriptCapture: {
+      canonicalPath: "/tmp/session.jsonl",
+      sha256: "a".repeat(64),
+      byteLength: 256,
+      coverage: { startByte: 0, endByte: 256 }
+    }
+  } satisfies AgentWorkSession;
+  const metadataOnly = {
+    ...captured,
+    title: "Changed metadata title",
+    summary: "Changed metadata summary",
+    updatedAt: "2026-07-21T12:00:00.000Z"
+  };
+  const contentChanged = {
+    ...metadataOnly,
+    transcriptCapture: {
+      ...metadataOnly.transcriptCapture,
+      sha256: "b".repeat(64)
+    }
+  };
+
+  assert.equal(
+    sessionSummaryCacheKey("2026-07-21", captured, models),
+    sessionSummaryCacheKey("2026-07-21", metadataOnly, models)
+  );
+  assert.notEqual(
+    sessionSummaryCacheKey("2026-07-21", captured, models),
+    sessionSummaryCacheKey("2026-07-21", contentChanged, models)
+  );
+});
+
 test("invalid cache files safely normalize to an empty document", () => {
   assert.deepEqual(normalizeSessionSummaryCache({ schemaVersion: 2, entries: [] }), createEmptySessionSummaryCache());
   assert.deepEqual(normalizeSessionSummaryCache(null), createEmptySessionSummaryCache());

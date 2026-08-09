@@ -50,6 +50,16 @@ export interface IntentPlan {
 
 export type AgentSessionStatus = "active" | "blocked" | "completed" | "unknown";
 
+export interface AgentTranscriptCapture {
+  canonicalPath: string;
+  sha256: string;
+  byteLength: number;
+  coverage: {
+    startByte: number;
+    endByte: number;
+  };
+}
+
 export interface AgentWorkSession {
   id: string;
   platform: AgentPlatform;
@@ -67,6 +77,7 @@ export interface AgentWorkSession {
   summarySource?: "codex" | "claude" | "metadata";
   artifacts: string[];
   status: AgentSessionStatus;
+  transcriptCapture?: AgentTranscriptCapture;
 }
 
 export interface AgentWorkSnapshot {
