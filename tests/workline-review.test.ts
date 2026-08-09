@@ -100,7 +100,8 @@ test("one Prompt reconstructs a cross-provider workline and keeps only verified 
                 }
               }
             }
-          ]
+          ],
+          warnings: ["Claude transcript ended before the final user reply; prior context is unknown."]
         });
       }
     }
@@ -109,15 +110,22 @@ test("one Prompt reconstructs a cross-provider workline and keeps only verified 
   assert.equal(requests.length, 1);
   assert.equal(requests[0]?.command, "codex");
   assert.deepEqual(requests[0]?.args.slice(0, 4), ["exec", "--model", "review-model", "--ephemeral"]);
-  assert.match(requests[0]?.stdin ?? "", /load-bearing assumption/i);
-  assert.match(requests[0]?.stdin ?? "", /falsifiable future observation/i);
+  assert.match(requests[0]?.stdin ?? "", /complete admitted manifest/i);
+  assert.match(requests[0]?.stdin ?? "", /weak hints, never authority/i);
+  for (const marker of ["failed paths", "route changes", "conflicts", "scope", "current stop", "user participation", "Agent-independent work"]) {
+    assert.match(requests[0]?.stdin ?? "", new RegExp(marker, "i"));
+  }
+  assert.match(requests[0]?.stdin ?? "", /prior assumption or context.*unknown/i);
+  assert.match(requests[0]?.stdin ?? "", /possible change/i);
+  assert.match(requests[0]?.stdin ?? "", /future observation.*strengthen, narrow, or overturn/i);
+  assert.match(requests[0]?.stdin ?? "", /one real human question/i);
   assert.match(requests[0]?.stdin ?? "", /must not claim that the user decided/i);
   assert.ok(requests[0]?.stdin.includes("codex-scheduler.jsonl"));
   assert.ok(requests[0]?.stdin.includes("claude-research-ir.jsonl"));
   assert.equal(requests[0]?.stdin.includes("SECRET_THIN_SUMMARY"), false);
   assert.equal(requests[0]?.stdin.includes("ANOTHER_SECRET_THIN_SUMMARY"), false);
 
-  assert.equal(review.promptProfile, "ksi-workline-review-v1");
+  assert.equal(review.promptProfile, "traceink-review-v1");
   assert.equal(review.generatedAt, "2026-08-09T12:15:00.000Z");
   assert.equal(review.evidenceCutoff, "2026-08-09T11:55:00.000Z");
   assert.equal(review.worklines.length, 1);
@@ -135,7 +143,20 @@ test("one Prompt reconstructs a cross-provider workline and keeps only verified 
   assert.equal(review.worklines[0]?.dossier.question?.prompt, "是否暂停 scheduler 优化，转向 Research IR？");
   assert.equal(review.evidence.some((item) => item.id === "session:codex:missing"), false);
   assert.equal(review.rawOutput.worklines ? true : false, true);
-  assert.match(requests[0]?.stdin ?? "", /read relevant canonical artifact paths/i);
+  assert.equal(review.warnings.includes("Claude transcript ended before the final user reply; prior context is unknown."), true);
+  assert.equal(review.provenance?.compiler.id, "workline-review");
+  assert.equal(review.provenance?.compiler.version, "2");
+  assert.equal(review.provenance?.promptProfile, "traceink-review-v1");
+  assert.equal(review.provenance?.model.provider, "codex");
+  assert.equal(review.provenance?.model.name, "review-model");
+  assert.equal(review.provenance?.evidence.manifestVersion, "workline-evidence-manifest-v1");
+  assert.deepEqual(review.provenance?.evidence.sourceRefs.map((source) => source.id), [
+    "session:codex:codex-scheduler",
+    "artifact:codex:codex-scheduler:0",
+    "session:claude:claude-research-ir",
+    "artifact:claude:claude-research-ir:0"
+  ]);
+  assert.deepEqual(review.provenance?.evidence.completenessWarnings, review.warnings);
 });
 
 test("relative artifact evidence is resolved against the provider-owned working directory", async () => {
