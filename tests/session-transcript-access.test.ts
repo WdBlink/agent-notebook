@@ -72,6 +72,66 @@ test("exact evidence in the active historical package authorizes transcript reop
   });
 });
 
+test("package references force sealed-package authorization even when the Session is still in the current snapshot", () => {
+  const document = composeDailyPage(
+    createEmptyNotebookDocument(),
+    logicalDate,
+    [historical],
+    new Date("2026-08-09T18:00:00.000Z"),
+    reviewPackage()
+  );
+  const generationId = document.pages[logicalDate]?.activePackageGenerationId ?? "";
+  const sealed = sealDailyPage(
+    document,
+    logicalDate,
+    { reflection: "历史判断", bookmarkIds: [], expectedActiveGenerationId: generationId },
+    [],
+    new Date("2026-08-09T18:05:00.000Z")
+  );
+
+  const authorized = authorizeSessionTranscriptRequest({
+    id: historical.id,
+    platform: historical.platform,
+    path: historical.path,
+    packageRef: {
+      logicalDate,
+      generationId,
+      evidenceId: "session:claude:historical-session"
+    }
+  }, [historical], sealed);
+
+  assert.equal(authorized.origin, "sealed-package");
+  assert.equal(authorized.evidenceUpdatedAt, historical.updatedAt);
+});
+
+test("an exact active draft package reference may reopen only the same current snapshot Session", () => {
+  const document = composeDailyPage(
+    createEmptyNotebookDocument(),
+    logicalDate,
+    [historical],
+    new Date("2026-08-09T18:00:00.000Z"),
+    reviewPackage()
+  );
+  const generationId = document.pages[logicalDate]?.activePackageGenerationId ?? "";
+  const request: SessionTranscriptRequest = {
+    id: historical.id,
+    platform: historical.platform,
+    path: historical.path,
+    packageRef: { logicalDate, generationId, evidenceId: "session:claude:historical-session" }
+  };
+
+  const authorized = authorizeSessionTranscriptRequest(request, [historical], document);
+
+  assert.equal(authorized.origin, "current-snapshot");
+  assert.throws(
+    () => authorizeSessionTranscriptRequest({
+      ...request,
+      packageRef: { ...request.packageRef!, evidenceId: "session:tampered" }
+    }, [historical], document),
+    /没有找到这条会话证据/
+  );
+});
+
 test("a draft package cannot authorize historical transcript fallback", () => {
   const document = composeDailyPage(
     createEmptyNotebookDocument(),

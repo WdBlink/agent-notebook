@@ -16,17 +16,15 @@ export function authorizeSessionTranscriptRequest(
   currentSessions: AgentWorkSession[],
   document: NotebookDocument
 ): AuthorizedSessionTranscriptReference {
-  const current = currentSessions.find((session) =>
-    session.id === request?.id && session.platform === request?.platform && session.path === request?.path
-  );
-  if (current) return pickReference(current);
-
   const packageRef = request?.packageRef;
-  if (!packageRef) throw new Error("这条会话不在当前只读快照中，也没有封存证据授权。");
-  const page = document.pages[packageRef.logicalDate];
-  if (!page || page.status !== "sealed") {
-    throw new Error("指定日期尚未封页，不能用工作包回开历史会话。");
+  if (!packageRef) {
+    const current = currentSessions.find((session) =>
+      session.id === request?.id && session.platform === request?.platform && session.path === request?.path
+    );
+    if (current) return pickReference(current);
+    throw new Error("这条会话不在当前只读快照中，也没有封存证据授权。");
   }
+  const page = document.pages[packageRef.logicalDate];
   if (!page || page.activePackageGenerationId !== packageRef.generationId) {
     throw new Error("指定的证据包不是当前封存证据包，拒绝读取。");
   }
@@ -38,6 +36,13 @@ export function authorizeSessionTranscriptRequest(
   if (!evidence) throw new Error("封存证据包中没有找到这条会话证据。");
   if (evidence.sessionId !== request.id || evidence.platform !== request.platform || evidence.path !== request.path) {
     throw new Error("请求的会话元组与封存证据不匹配，拒绝读取。");
+  }
+  if (page.status !== "sealed") {
+    const current = currentSessions.find((session) =>
+      session.id === evidence.sessionId && session.platform === evidence.platform && session.path === evidence.path
+    );
+    if (!current) throw new Error("指定日期尚未封页，不能用工作包回开历史会话。");
+    return pickReference(current);
   }
   return {
     id: evidence.sessionId,

@@ -11,6 +11,7 @@ const baseSessions = [
     title: "迁移第一版视觉骨架",
     summary: "第一版比例、留白和会话入口仍需完整迁入独立应用。",
     path: "/tmp/codex-session.jsonl",
+    startedAt: "2026-07-20T09:18:00+08:00",
     updatedAt: "2026-07-20T14:36:00+08:00",
     projectPath: "/workspace/work-continuity",
     resumable: true,
@@ -24,6 +25,7 @@ const baseSessions = [
     title: "复核 Map 居中钻取",
     summary: "节点需要保持空间身份，并可以阅读项目原文。",
     path: "/tmp/claude-session.jsonl",
+    startedAt: "2026-07-20T10:02:00+08:00",
     updatedAt: "2026-07-20T16:12:00+08:00",
     projectPath: "/workspace/work-continuity",
     resumable: true,
@@ -37,6 +39,7 @@ const baseSessions = [
     title: "确认回测凭证边界",
     summary: "生产与回测连接仍需明确隔离。",
     path: "/tmp/trading.jsonl",
+    startedAt: "2026-07-20T10:48:00+08:00",
     updatedAt: "2026-07-20T11:08:00+08:00",
     projectPath: "/workspace/vibe-trading",
     resumable: true,
@@ -50,6 +53,7 @@ const baseSessions = [
     title: "完成来源开关审阅",
     summary: "Codex 与 Claude Code 可以独立读取。",
     path: "/tmp/claude-finished.jsonl",
+    startedAt: "2026-07-20T17:46:00+08:00",
     updatedAt: "2026-07-20T18:22:00+08:00",
     projectPath: "/workspace/work-continuity",
     resumable: false,
@@ -61,7 +65,8 @@ const baseSessions = [
 
 async function installDesktopApi(page: Page): Promise<void> {
   await page.addInitScript(({ sessions }) => {
-    const createReviewPackage = (activeDate: string): any => ({
+    const storedPackageSessions = sessions.map((session: any) => ({ ...session }));
+    const createReviewPackage = (activeDate: string, includeDuplicate = false): any => ({
       schemaVersion: 1,
       id: `review-${activeDate}`,
       logicalDate: activeDate,
@@ -70,14 +75,25 @@ async function installDesktopApi(page: Page): Promise<void> {
       promptProfile: "traceink-review-v1",
       compilerProvider: "codex",
       model: "review-model",
-      evidence: sessions.map((session: any) => ({
+      evidence: [...storedPackageSessions.map((session: any) => ({
         id: `session:${session.platform}:${session.id}`,
         kind: "session",
         label: session.title,
         path: session.path,
         platform: session.platform,
-        sessionId: session.id
-      })),
+        sessionId: session.id,
+        startedAt: session.startedAt,
+        updatedAt: session.updatedAt
+      })), ...(includeDuplicate ? [{
+        id: "session:codex:019f-work-continuity:alternate",
+        kind: "session",
+        label: "同 ID 的另一条路径",
+        path: "/tmp/codex-session-alternate.jsonl",
+        platform: "codex",
+        sessionId: "019f-work-continuity",
+        startedAt: `${activeDate}T08:00:00+08:00`,
+        updatedAt: `${activeDate}T08:30:00+08:00`
+      }] : [])],
       worklines: [
         {
           id: "daily-review-direction",
@@ -121,7 +137,46 @@ async function installDesktopApi(page: Page): Promise<void> {
       warnings: [],
       rawOutput: { worklines: [{ id: "daily-review-direction" }, { id: "trading-credentials" }] }
     });
-    const createNotebook = (activeDate: string, scopedSessions: typeof sessions): any => {
+    type TodayScenario = "raw" | "compiled" | "stale" | "sealed" | "duplicate";
+    const sessionIdentity = (session: any): string => `${session.platform}:${session.id}:${session.path}`;
+    const createActivity = (activeDate: string, scopedSessions: typeof sessions): any => ({
+      logicalDate: activeDate,
+      lanes: scopedSessions.map((session: any, index: number) => ({
+        identity: sessionIdentity(session),
+        sessionId: session.id,
+        platform: session.platform,
+        path: session.path,
+        operationalState: session.status === "active" ? "running" : "not-running",
+        confidence: index === 2 ? "uncertain" : "observed",
+        timeRange: { start: session.startedAt, end: session.updatedAt },
+        userInterventions: index === 0
+          ? [{ id: "user-1", timestamp: `${activeDate}T09:18:00+08:00` }, { id: "user-2", timestamp: `${activeDate}T14:30:00+08:00` }]
+          : index === 1
+            ? [{ id: "user-3", timestamp: `${activeDate}T10:02:00+08:00` }]
+            : [],
+        agentActivityWindows: index === 0
+          ? [{ start: `${activeDate}T14:30:00+08:00`, end: `${activeDate}T14:36:00+08:00`, durationMs: 360000, basis: "timestamped-user-to-assistant", coverage: "observed" }]
+          : index === 1
+            ? [{ start: `${activeDate}T10:02:00+08:00`, end: `${activeDate}T10:18:00+08:00`, durationMs: 960000, basis: "timestamped-user-to-assistant", coverage: "observed" }]
+            : [],
+        warnings: index === 2 ? ["部分消息缺少时间戳，无法推断持续时间。"] : []
+      })),
+      facts: {
+        userInterventionCount: 3,
+        observedAgentActivityMs: 1320000,
+        observedConcurrentAgentActivityMs: 0,
+        peakObservedAgentConcurrency: 1,
+        contextSwitchCount: 2,
+        confidence: "uncertain",
+        basis: {
+          userInterventions: "timestamped-user-messages",
+          agentActivity: "union-of-timestamped-user-to-assistant-response-windows",
+          concurrency: "overlap-of-observed-agent-response-windows",
+          contextSwitches: "chronological-timestamped-user-session-transitions"
+        }
+      }
+    });
+    const createNotebook = (activeDate: string, scopedSessions: typeof sessions, scenario: TodayScenario): any => {
       const groups = new Map<string, typeof scopedSessions>();
       for (const session of scopedSessions) {
         const key = session.projectPath ?? `unresolved:${session.platform}`;
@@ -148,9 +203,48 @@ async function installDesktopApi(page: Page): Promise<void> {
         cwd: session.projectPath,
         resumeCommand: `${session.platform} resume ${session.id}`
       }));
+      const reviewPackage = createReviewPackage(activeDate, scenario === "duplicate");
+      const generation = {
+        schemaVersion: 1,
+        id: `generation-${activeDate}-1`,
+        generatedAt: reviewPackage.generatedAt,
+        evidenceCutoff: reviewPackage.evidenceCutoff,
+        admittedEvidence: scopedSessions.map((session: any) => ({ identity: sessionIdentity(session), revision: `revision:${session.updatedAt}` })),
+        package: reviewPackage
+      };
+      const hasPackage = scenario !== "raw";
+      const boardMode = scenario === "duplicate" ? "compiled" : scenario;
+      const pageStatus = scenario === "sealed" ? "sealed" : hasPackage ? "draft" : "unformed";
+      const uncompiledEvidence = scenario === "raw"
+        ? scopedSessions.map((session: any) => ({ identity: sessionIdentity(session), revision: `revision:${session.updatedAt}` }))
+        : scenario === "stale"
+          ? scopedSessions.filter((session: any) => session.id === "claude-finished").map((session: any) => ({ identity: sessionIdentity(session), revision: "revision:new-evidence" }))
+          : [];
       return {
         notes: [{ id: "note-1", logicalDate: activeDate, createdAt: "2026-07-20T09:18:00+08:00", updatedAt: "2026-07-20T09:18:00+08:00", title: "手帐不是 Agent 平台", body: "真正需要承载的是每天收工时的思维停点，而不是另一套运行监控。", kind: "thought", sourceLabel: "个人记录", favorite: true, deliveries: [] }],
-        page: { schemaVersion: 1, logicalDate: activeDate, status: "unformed", workRecords: [], reflection: "", worklineReflections: [], bookmarks: [] },
+        page: {
+          schemaVersion: 3,
+          logicalDate: activeDate,
+          status: pageStatus,
+          workRecords: hasPackage ? previewRecords : [],
+          reflection: scenario === "sealed" ? "封页以后仍保留人的原始判断。" : "",
+          worklineReflections: scenario === "sealed" ? [{ worklineId: "daily-review-direction", text: "封页以后仍保留人的原始判断。", updatedAt: `${activeDate}T22:16:00+08:00` }] : [],
+          bookmarks: [],
+          ...(hasPackage ? {
+            createdAt: `${activeDate}T20:00:00+08:00`,
+            updatedAt: `${activeDate}T20:00:00+08:00`,
+            evidenceCutoff: generation.evidenceCutoff,
+            reviewPackage,
+            packageGenerations: [generation],
+            activePackageGenerationId: generation.id
+          } : {}),
+          ...(scenario === "sealed" ? { sealedAt: `${activeDate}T22:16:00+08:00` } : {})
+        },
+        todayBoard: {
+          mode: boardMode,
+          ...(hasPackage ? { activeGeneration: generation } : {}),
+          uncompiledEvidence
+        },
         previewRecords,
         continuationCandidates,
         knowledgeRoot: "/workspace/LLM-Wiki",
@@ -158,7 +252,7 @@ async function installDesktopApi(page: Page): Promise<void> {
         pendingPreviousDates: []
       };
     };
-    const createState = (enabledProviders: string[] = ["codex", "claude"], activeDate = "2026-07-20") => {
+    const createState = (enabledProviders: string[] = ["codex", "claude"], activeDate = "2026-07-20", scenario: TodayScenario = "raw") => {
       const scopedSessions = sessions.filter((session: { platform: string }) => enabledProviders.includes(session.platform));
       return ({
       activeDate,
@@ -189,14 +283,26 @@ async function installDesktopApi(page: Page): Promise<void> {
         whiteboard: { schemaVersion: 3, projects: [], nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } },
         whiteboardRevision: 0
       },
-      notebook: createNotebook(activeDate, scopedSessions)
+      notebook: createNotebook(activeDate, scopedSessions, scenario),
+      activity: createActivity(activeDate, scopedSessions)
     });
     };
-    let state = createState();
+    let scenario: TodayScenario = "raw";
+    let prepareShouldFail = false;
+    let prepareCalls = 0;
+    let state = createState(undefined, undefined, scenario);
     const stateListeners: Array<(next: ReturnType<typeof createState>) => void> = [];
     (window as unknown as { openedPaths: string[] }).openedPaths = [];
+    (window as unknown as { transcriptRequests: unknown[] }).transcriptRequests = [];
+    (window as unknown as { setTodayScenario: (next: TodayScenario) => void }).setTodayScenario = (next: TodayScenario) => {
+      scenario = next;
+      state = createState(state.data.settings.enabledSessionProviders, state.activeDate, scenario);
+      for (const listener of stateListeners) listener(state);
+    };
+    (window as unknown as { setPrepareFailure: (fail: boolean) => void }).setPrepareFailure = (fail: boolean) => { prepareShouldFail = fail; };
+    (window as unknown as { prepareCallCount: () => number }).prepareCallCount = () => prepareCalls;
     (window as unknown as { emitSmartTitle: (title: string) => void }).emitSmartTitle = (title: string) => {
-      state = createState(state.data.settings.enabledSessionProviders, state.activeDate);
+      state = createState(state.data.settings.enabledSessionProviders, state.activeDate, scenario);
       const first = state.data.workSessionSnapshot.sessions[0];
       if (first) {
         first.title = title;
@@ -206,10 +312,10 @@ async function installDesktopApi(page: Page): Promise<void> {
       for (const listener of stateListeners) listener(state);
     };
     (window as unknown as { agentWhiteboard: unknown }).agentWhiteboard = {
-      getState: async (date?: string) => { state = createState(state.data.settings.enabledSessionProviders, date ?? state.activeDate); return state; },
-      refreshSessions: async (date?: string) => { state = createState(state.data.settings.enabledSessionProviders, date ?? state.activeDate); return state; },
+      getState: async (date?: string) => { state = createState(state.data.settings.enabledSessionProviders, date ?? state.activeDate, scenario); return state; },
+      refreshSessions: async (date?: string) => { state = createState(state.data.settings.enabledSessionProviders, date ?? state.activeDate, scenario); return state; },
       updateSettings: async (patch: { enabledSessionProviders?: string[]; sessionScanRoots?: string[]; knowledgeRoot?: string }) => {
-        state = createState(patch.enabledSessionProviders ?? state.data.settings.enabledSessionProviders, state.activeDate);
+        state = createState(patch.enabledSessionProviders ?? state.data.settings.enabledSessionProviders, state.activeDate, scenario);
         if (patch.sessionScanRoots) state.data.settings.sessionScanRoots = patch.sessionScanRoots;
         if (patch.knowledgeRoot) {
           state.notebook.knowledgeRoot = patch.knowledgeRoot;
@@ -238,11 +344,20 @@ async function installDesktopApi(page: Page): Promise<void> {
       },
       routeNotebookNoteToProject: async (noteId: string) => ({ notebook: state.notebook, path: `/workspace/work-continuity/ctx/scratch/inbox/${noteId}.md` }),
       prepareDailyReview: async (_date: string, _mode: "compile" | "refresh") => {
-        state.notebook.page = { ...state.notebook.page, schemaVersion: 3, status: "draft", createdAt: "2026-07-20T20:00:00+08:00", updatedAt: "2026-07-20T20:00:00+08:00", evidenceCutoff: "2026-07-20T20:00:00+08:00", workRecords: state.notebook.previewRecords, reviewPackage: createReviewPackage(state.activeDate), worklineReflections: [] };
+        prepareCalls += 1;
+        if (prepareShouldFail) {
+          state.notebook.todayBoard.compilationError = "整理模型暂时不可用；上一版仍然可读。";
+          for (const listener of stateListeners) listener(state);
+          throw new Error("整理模型暂时不可用；上一版仍然可读。");
+        }
+        scenario = "compiled";
+        state = createState(state.data.settings.enabledSessionProviders, state.activeDate, scenario);
+        for (const listener of stateListeners) listener(state);
         return state.notebook;
       },
       composeDailyPage: async () => {
-        state.notebook.page = { ...state.notebook.page, schemaVersion: 2, status: "draft", createdAt: "2026-07-20T20:00:00+08:00", updatedAt: "2026-07-20T20:00:00+08:00", evidenceCutoff: "2026-07-20T20:00:00+08:00", workRecords: state.notebook.previewRecords, reviewPackage: createReviewPackage(state.activeDate), worklineReflections: [] };
+        scenario = "compiled";
+        state = createState(state.data.settings.enabledSessionProviders, state.activeDate, scenario);
         return state.notebook;
       },
       saveDailyDraft: async (_date: string, input: { reflection: string; worklineReflections?: Array<{ worklineId: string; text: string }>; bookmarkIds: string[] }) => {
@@ -257,6 +372,8 @@ async function installDesktopApi(page: Page): Promise<void> {
         state.notebook.page.bookmarks = state.notebook.continuationCandidates.filter((item: any) => input.bookmarkIds.includes(item.id));
         state.notebook.page.status = "sealed";
         state.notebook.page.sealedAt = "2026-07-20T22:16:00+08:00";
+        state.notebook.todayBoard.mode = "sealed";
+        state.notebook.todayBoard.uncompiledEvidence = [];
         return state.notebook;
       },
       getProjectContext: async (projectPath: string) => ({
@@ -268,7 +385,9 @@ async function installDesktopApi(page: Page): Promise<void> {
           { id: "spec/brief.md", kind: "spec", label: "每日工作简报", path: "/workspace/work-continuity-ctx/spec/brief.md", relativePath: "spec/brief.md", content: "# 每日工作简报\n\n最多显示三条智能接续建议。", updatedAt: "2026-07-20T18:00:00+08:00" }
         ]
       }),
-      getSessionTranscript: async (request: { id: string; platform: string; path: string }) => ({
+      getSessionTranscript: async (request: { id: string; platform: string; path: string; packageRef?: { logicalDate: string; generationId: string; evidenceId: string } }) => {
+        (window as unknown as { transcriptRequests: unknown[] }).transcriptRequests.push(structuredClone(request));
+        return ({
         sessionId: request.id,
         platform: request.platform,
         title: "迁移第一版视觉骨架",
@@ -279,7 +398,8 @@ async function installDesktopApi(page: Page): Promise<void> {
           { id: "user-1", role: "user", timestamp: "2026-07-20T14:30:00+08:00", content: "把原始 Demo 的阅读体验迁入独立应用。" },
           { id: "assistant-1", role: "assistant", timestamp: "2026-07-20T14:36:00+08:00", content: "已保留第一版比例，并加入只读会话记录。" }
         ]
-      }),
+      });
+      },
       chooseDirectory: async () => null,
       copyText: async () => true,
       openPath: async (targetPath: string) => {
@@ -300,58 +420,208 @@ async function installDesktopApi(page: Page): Promise<void> {
 test.beforeEach(async ({ page }) => {
   await installDesktopApi(page);
   await page.goto(desktopUrl);
-  await expect(page.locator(".today-ledger")).toBeVisible();
+  await expect(page.locator(".today-board")).toBeVisible();
 });
 
-test("today notebook keeps the native shell and two independently scrolling panes", async ({ page }) => {
+test("today board keeps raw Sessions as independent evidence lanes", async ({ page }) => {
+  const board = page.locator(".today-board");
+  await expect(board.getByRole("list", { name: "今日会话" }).locator(".today-session-lane")).toHaveCount(4);
+  for (const sessionId of ["019f-work-continuity", "claude-map-review", "019f-trading", "claude-finished"]) {
+    await expect(board.getByText(sessionId, { exact: true })).toBeVisible();
+  }
+  await expect(board.locator(".session-activity-track")).toHaveCount(4);
+  await expect(board.getByText("你参与", { exact: true }).first()).toBeVisible();
+  await expect(board.getByText("Agent 独立推进", { exact: true }).first()).toBeVisible();
+  await expect(board.getByText("无法确定", { exact: true }).first()).toBeVisible();
+  await expect(board.getByText("仍在运行", { exact: true }).first()).toBeVisible();
+  await expect(board.getByText("22 分钟", { exact: true })).toBeVisible();
+  await expect(board.getByText("3 次", { exact: true })).toBeVisible();
+  await expect(board.getByText("注意力负荷线索", { exact: true })).toBeVisible();
+  await expect(board.getByText(/依据：带时间戳的用户消息与 Agent 响应窗口/)).toBeVisible();
+  await expect(board.getByText(/置信度：证据不足/)).toBeVisible();
+  await expect(page.getByLabel("今日便签")).toHaveCount(0);
+
+  const rawTranscriptAction = board.getByRole("button", { name: "打开 迁移第一版视觉骨架 的会话记录" });
+  await rawTranscriptAction.click();
+  const transcript = page.getByRole("dialog", { name: /迁移第一版视觉骨架 会话记录/ });
+  await expect(transcript).toBeVisible();
+  await expect(transcript.locator(".transcript-reader > header button")).toBeFocused();
+  await transcript.getByRole("button", { name: "回到证据" }).focus();
+  await page.keyboard.press("Tab");
+  expect(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))).toBe(true);
+  await page.keyboard.press("Shift+Tab");
+  expect(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))).toBe(true);
+  expect(await page.evaluate(() => (window as unknown as { transcriptRequests: Array<{ packageRef?: unknown }> }).transcriptRequests.at(-1)?.packageRef)).toBeUndefined();
+  await page.getByRole("button", { name: "回到证据" }).click();
+  await expect(rawTranscriptAction).toBeFocused();
+
+  await board.getByRole("button", { name: "整理工作脉络" }).click();
+  await expect(board.locator(".today-workline")).toHaveCount(2);
+  expect(await page.evaluate(() => (window as unknown as { prepareCallCount(): number }).prepareCallCount())).toBe(1);
+});
+
+test("compiled board discloses exact source topology and opens the selected dossier", async ({ page }) => {
+  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "compiled"): void }).setTodayScenario("compiled"));
+  const board = page.locator(".today-board");
+  await expect(board.locator(".today-workline")).toHaveCount(2);
+  const direction = board.locator(".today-workline").filter({ hasText: "Daily Review · 产品方向" });
+  const trading = board.locator(".today-workline").filter({ hasText: "Vibe Trading · 凭证隔离" });
+  await expect(direction.getByText("AI 整理 / 可能变化", { exact: true })).toBeVisible();
+  await expect(trading.locator(".workline-change-signal")).toHaveCount(0);
+  const disclosure = direction.locator(".workline-disclosure");
+  await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+  await disclosure.click();
+  await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+  const sourcePanelId = await disclosure.getAttribute("aria-controls");
+  expect(sourcePanelId).toBeTruthy();
+  await expect(direction.locator(`#${sourcePanelId}`)).toBeVisible();
+  for (const sessionId of ["019f-work-continuity", "claude-map-review", "claude-finished"]) {
+    await expect(direction.getByText(sessionId, { exact: true })).toBeVisible();
+  }
+  await expect(direction.getByText("Codex", { exact: true }).first()).toBeVisible();
+  await expect(direction.getByText("Claude Code", { exact: true }).first()).toBeVisible();
+  await expect(direction.locator(".workline-sessions .session-activity-track")).toHaveCount(3);
+  await direction.getByRole("button", { name: "打开 迁移第一版视觉骨架 的会话记录" }).click();
+  await expect(page.getByRole("dialog", { name: /迁移第一版视觉骨架 会话记录/ })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { transcriptRequests: Array<{ packageRef?: unknown }> }).transcriptRequests.at(-1)?.packageRef)).toEqual({
+    logicalDate: "2026-07-20",
+    generationId: "generation-2026-07-20-1",
+    evidenceId: "session:codex:019f-work-continuity"
+  });
+  await page.getByRole("button", { name: "回到证据" }).click();
+
+  const filters = board.locator(".today-board-filters");
+  await filters.getByRole("button", { name: "Claude Code", exact: true }).click();
+  await expect(board.locator(".today-workline")).toHaveCount(1);
+  await filters.getByRole("button", { name: "全部来源", exact: true }).click();
+  await board.locator(".project-strip").getByRole("button", { name: /vibe-trading/ }).click();
+  await expect(board.locator(".today-workline")).toHaveCount(1);
+  await expect(board.getByText("Vibe Trading · 凭证隔离", { exact: true })).toBeVisible();
+  await board.locator(".project-strip").getByRole("button", { name: /全部项目/ }).click();
+
+  const openMaterial = direction.getByRole("button", { name: "打开材料" });
+  await openMaterial.click();
+  const dossier = page.getByRole("dialog", { name: "日终回看" });
+  await expect(dossier.getByText("从 Agent 看板转向人的日终回看工作簿", { exact: true })).toBeVisible();
+  await expect(dossier.locator(".review-workline")).toHaveCount(0);
+  await expect(dossier.getByRole("button", { name: /返回工作线/ })).toBeFocused();
+  await dossier.getByRole("button", { name: "看完了，开始思考" }).focus();
+  await page.keyboard.press("Tab");
+  expect(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))).toBe(true);
+  await page.keyboard.press("Shift+Tab");
+  expect(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))).toBe(true);
+  await dossier.getByRole("button", { name: /返回工作线/ }).click();
+  await expect(openMaterial).toBeFocused();
+
+  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "duplicate"): void }).setTodayScenario("duplicate"));
+  const duplicateDirection = board.locator(".today-workline").filter({ hasText: "Daily Review · 产品方向" });
+  if (await duplicateDirection.locator(".workline-disclosure").getAttribute("aria-expanded") === "false") {
+    await duplicateDirection.locator(".workline-disclosure").click();
+  }
+  await expect(duplicateDirection.getByRole("button", { name: "打开 迁移第一版视觉骨架 的会话记录" })).toHaveCount(1);
+  await expect(duplicateDirection.getByText("同 ID 的另一条路径", { exact: true })).toHaveCount(0);
+});
+
+test("stale board preserves the last good package across a failed refresh", async ({ page }) => {
+  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "stale"): void }).setTodayScenario("stale"));
+  const board = page.locator(".today-board");
+  await expect(board.getByText("尚未整理", { exact: true }).first()).toBeVisible();
+  await expect(board.locator(".today-uncompiled-lane")).toHaveCount(1);
+  await expect(board.locator(".today-uncompiled-lane").getByText("claude-finished", { exact: true })).toBeVisible();
+  await expect(board.locator(".today-workline")).toHaveCount(2);
+
+  await page.evaluate(() => (window as unknown as { setPrepareFailure(fail: boolean): void }).setPrepareFailure(true));
+  await board.getByRole("button", { name: "更新工作脉络" }).click();
+  await expect(board.getByRole("alert")).toContainText("上一版仍然可读");
+  await expect(board.locator(".today-workline")).toHaveCount(2);
+
+  await page.evaluate(() => (window as unknown as { setPrepareFailure(fail: boolean): void }).setPrepareFailure(false));
+  await board.getByRole("button", { name: "更新工作脉络" }).click();
+  await expect(board.getByText("尚未整理", { exact: true })).toHaveCount(0);
+  await expect(board.locator(".today-workline")).toHaveCount(2);
+});
+
+test("sealed board is read-only and transcript actions send the exact stored package reference", async ({ page }) => {
+  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "compiled"): void }).setTodayScenario("compiled"));
+  const board = page.locator(".today-board");
+  await board.locator(".project-strip").getByRole("button", { name: /vibe-trading/ }).click();
+  await expect(board.locator(".today-workline")).toHaveCount(1);
+  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "sealed"): void }).setTodayScenario("sealed"));
+  await page.evaluate(() => (window as unknown as { emitSmartTitle(title: string): void }).emitSmartTitle("后来快照的新标题"));
+  await expect(board.getByText("已封存", { exact: true }).first()).toBeVisible();
+  await expect(board.locator(".today-seal-mark")).toBeVisible();
+  await expect(board.locator(".today-workline")).toHaveCount(2);
+  await expect(board.locator(".today-board-toolbar .project-strip")).toHaveCount(0);
+  await expect(board.locator(".today-activity-summary")).toHaveCount(0);
+  await expect(board.getByRole("button", { name: /整理工作脉络|更新工作脉络/ })).toHaveCount(0);
+  expect(await page.evaluate(() => (window as unknown as { prepareCallCount(): number }).prepareCallCount())).toBe(0);
+
+  const direction = board.locator(".today-workline").filter({ hasText: "Daily Review · 产品方向" });
+  await direction.getByRole("button", { name: /展开来源会话/ }).click();
+  await expect(direction.getByText("迁移第一版视觉骨架", { exact: true })).toBeVisible();
+  await expect(direction.getByText("后来快照的新标题", { exact: true })).toHaveCount(0);
+  await direction.getByRole("button", { name: "打开 迁移第一版视觉骨架 的会话记录" }).click();
+  await expect(page.getByRole("dialog", { name: /迁移第一版视觉骨架 会话记录/ })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { transcriptRequests: Array<{ packageRef?: unknown }> }).transcriptRequests.at(-1)?.packageRef)).toEqual({
+    logicalDate: "2026-07-20",
+    generationId: "generation-2026-07-20-1",
+    evidenceId: "session:codex:019f-work-continuity"
+  });
+});
+
+test("today board keeps the native shell and independently scrolling evidence regions", async ({ page }) => {
   await page.setViewportSize({ width: 1380, height: 683 });
+  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "compiled"): void }).setTodayScenario("compiled"));
   await expect(page.locator(".brand-mark")).toHaveAttribute("src", "./app-icon.png");
   const logo = await page.locator(".brand-mark").boundingBox();
   const lastNavigationItem = await page.locator(".rail-nav button").last().boundingBox();
   expect(logo?.y).toBeGreaterThanOrEqual(48);
   expect((lastNavigationItem?.y ?? 0) + (lastNavigationItem?.height ?? 0)).toBeLessThan(590);
-  await expect(page.locator(".capture-card")).toHaveCount(1);
-  await expect(page.locator(".daily-record")).toHaveCount(2);
+  await expect(page.locator(".today-workline")).toHaveCount(2);
   await expect(page.locator(".project-strip button").first()).toContainText("02");
-  await expect(page.locator(".capture-tray")).toHaveCSS("overflow-y", "auto");
-  await expect(page.locator(".daily-canvas")).toHaveCSS("overflow-y", "auto");
+  await expect(page.locator(".today-board-scroll")).toHaveCSS("overflow-y", "auto");
+  await page.locator(".today-workline").first().locator(".workline-disclosure").click();
+  await expect(page.locator(".workline-sessions")).toHaveCSS("overflow-y", "auto");
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
 });
 
-test("a note stays local until the paper-plane route is explicitly chosen", async ({ page }) => {
-  await page.getByRole("button", { name: "新建便签" }).click();
-  await page.getByRole("textbox", { name: "便签正文" }).fill("记录一个新的产品判断");
-  await page.getByRole("button", { name: "收下" }).click();
-  await expect(page.locator(".capture-card").last()).toContainText("记录一个新的产品判断");
-  await page.getByRole("button", { name: "分享便签" }).click();
-  await page.getByRole("button", { name: /归入 LLM-Wiki/ }).click();
-  await expect(page.getByText("WIKI", { exact: true })).toBeVisible();
+test("legacy note persistence remains available without a capture entry on Today", async ({ page }) => {
+  await expect(page.getByRole("button", { name: "新建便签" })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "便签正文" })).toHaveCount(0);
+  expect(await page.evaluate(() => typeof window.agentWhiteboard.createNotebookNote)).toBe("function");
 });
 
 test("end-of-day flow stores personal ink and seals an immutable page", async ({ page }) => {
-  await page.getByRole("button", { name: "开始整理今天" }).click();
+  await page.getByRole("button", { name: "整理工作脉络" }).click();
+  await page.locator(".today-workline").first().getByRole("button", { name: "打开材料" }).click();
   const ritual = page.getByRole("dialog", { name: "日终回看" });
-  await ritual.locator(".review-workline").first().click();
   await ritual.getByRole("button", { name: "看完了，开始思考" }).click();
   await ritual.getByRole("textbox", { name: "你的原始墨迹" }).fill("今天到这里，明天继续验证闭环。");
   await ritual.getByRole("button", { name: "收下这段思考" }).click();
-  await ritual.getByRole("button", { name: "今日收口" }).click();
+  await page.getByRole("button", { name: "今日收口" }).click();
+  await expect(ritual.locator(".seal-spine > button")).toBeFocused();
+  await ritual.getByRole("button", { name: "收笔并封存" }).focus();
+  await page.keyboard.press("Tab");
+  expect(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))).toBe(true);
+  await page.keyboard.press("Shift+Tab");
+  expect(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))).toBe(true);
   await ritual.locator(".bookmark-choices button").first().click();
   await ritual.getByRole("button", { name: "收笔并封存" }).click();
-  await expect(page.getByText("今天到这里", { exact: true })).toBeVisible();
+  await expect(page.getByText("已封存", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("今天到这里，明天继续验证闭环。")).toBeVisible();
-  await expect(page.getByRole("button", { name: "开始整理今天" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /整理工作脉络|更新工作脉络|今日收口/ })).toHaveCount(0);
+  await expect(page.locator(".today-board")).toBeFocused();
 });
 
 test("daily review reconstructs worklines before the user writes their own reflection", async ({ page }) => {
-  await page.getByRole("button", { name: "开始整理今天" }).click();
+  await page.getByRole("button", { name: "整理工作脉络" }).click();
+  const board = page.locator(".today-board");
+  await expect(board.locator(".today-workline")).toHaveCount(2);
+  await expect(board.getByText("你参与", { exact: true }).first()).toBeVisible();
+  await expect(board.getByText("Agent 独立推进", { exact: true }).first()).toBeVisible();
+  await board.locator(".today-workline").first().getByRole("button", { name: "打开材料" }).click();
   const review = page.getByRole("dialog", { name: "日终回看" });
   await expect(review).toBeVisible();
-  await expect(review.locator(".review-workline")).toHaveCount(2);
-  await expect(review.getByText("你参与", { exact: true })).toBeVisible();
-  await expect(review.getByText("Agent 独立推进", { exact: true })).toBeVisible();
-
-  await review.locator(".review-workline").first().click();
   await expect(review.getByText("从 Agent 看板转向人的日终回看工作簿", { exact: true })).toBeVisible();
   await expect(review.getByText("AI 整理", { exact: true })).toBeVisible();
   await expect(review.getByText("这套材料是否已经足以让你亲自想明白？", { exact: true })).toBeVisible();
@@ -361,19 +631,19 @@ test("daily review reconstructs worklines before the user writes their own refle
   await expect(ink).toHaveValue("");
   await ink.fill("我认为先让材料真正减少 Session 翻找，才值得继续增加能力。");
   await review.getByRole("button", { name: "收下这段思考" }).click();
-  await expect(review.locator(".review-workline").first()).toContainText("已写下思考");
-  await review.locator(".review-workline").first().click();
+  await expect(board.locator(".today-workline").first()).toContainText("我认为先让材料真正减少 Session 翻找");
+  await board.locator(".today-workline").first().getByRole("button", { name: "打开材料" }).click();
   await review.getByRole("button", { name: "查看我的思考" }).click();
   await expect(ink).toHaveValue("我认为先让材料真正减少 Session 翻找，才值得继续增加能力。");
 });
 
 test("daily review remains usable without horizontal overflow in a narrow window", async ({ page }) => {
   await page.setViewportSize({ width: 720, height: 620 });
-  await page.getByRole("button", { name: "开始整理今天" }).click();
-  const review = page.getByRole("dialog", { name: "日终回看" });
-  await expect(review.locator(".review-workline")).toHaveCount(2);
+  await page.getByRole("button", { name: "整理工作脉络" }).click();
+  await expect(page.locator(".today-workline")).toHaveCount(2);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
-  await review.locator(".review-workline").first().click();
+  await page.locator(".today-workline").first().getByRole("button", { name: "打开材料" }).click();
+  const review = page.getByRole("dialog", { name: "日终回看" });
   await expect(review.getByRole("button", { name: "看完了，开始思考" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
 });
@@ -420,7 +690,7 @@ test("map keeps node identity while focusing and exposes current project source"
 test("narrow window collapses to bottom navigation without overflow", async ({ page }) => {
   await page.setViewportSize({ width: 736, height: 809 });
   const rail = await page.locator(".rail").boundingBox();
-  const ledger = await page.locator(".today-ledger").boundingBox();
+  const ledger = await page.locator(".today-board").boundingBox();
   expect(rail?.width).toBe(736);
   expect((ledger?.y ?? 0) + (ledger?.height ?? 0)).toBeLessThanOrEqual(rail?.y ?? 809);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
