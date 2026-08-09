@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   compileDailyWorklineReview,
+  inspectDailyReviewPackageQuality,
   normalizeDailyReviewPackage,
   type DailyReviewPackage
 } from "../src/workline-review";
@@ -295,16 +296,15 @@ test("rejects a newly compiled workline when any substantive block lacks admitte
   );
 });
 
-test("reload keeps a semantically incomplete legacy workline and surfaces an incompleteness warning", () => {
+test("reload preserves a semantically incomplete legacy package while quality inspection remains derived", () => {
   const stored = legacyStoredPackage();
 
   const reloaded = normalizeDailyReviewPackage(stored, "2026-08-09");
 
-  assert.equal(reloaded?.worklines.length, 1);
-  assert.equal(reloaded?.worklines[0]?.id, "legacy-workline");
-  assert.deepEqual(reloaded?.worklines[0]?.participation, []);
-  assert.equal(reloaded?.worklines[0]?.dossier.question, undefined);
-  assert.match(reloaded?.warnings.join(" ") ?? "", /incomplete/i);
+  assert.deepEqual(reloaded, stored);
+  assert.ok(reloaded);
+  assert.match(inspectDailyReviewPackageQuality(reloaded).join(" "), /incomplete/i);
+  assert.deepEqual(reloaded, stored);
 });
 
 test("reload preserves a historically versioned provenance record when canonical facts still match", async () => {

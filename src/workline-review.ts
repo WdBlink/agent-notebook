@@ -145,9 +145,24 @@ export function normalizeDailyReviewPackage(value: unknown, expectedDate?: strin
   };
 }
 
+export function inspectDailyReviewPackageQuality(reviewPackage: Pick<DailyReviewPackage, "worklines">): string[] {
+  const findings = reviewPackage.worklines.flatMap((workline) => {
+    const issues = semanticGateIssues(
+      workline.dossier.blocks,
+      workline.participation,
+      cleanText(workline.dossier.question?.prompt, 600)
+    );
+    return issues.length > 0
+      ? [`${DERIVED_INCOMPLETENESS_PREFIX} ${workline.title} — ${issues.join("; ")}.`]
+      : [];
+  });
+  return Array.from(new Set(findings));
+}
+
 const DEFAULT_TIMEOUT_MS = 300_000;
 const MAX_REVIEW_WARNINGS = 12;
 const STORED_INCOMPLETENESS_PREFIX = "Stored review is semantically incomplete:";
+const DERIVED_INCOMPLETENESS_PREFIX = "Review package is semantically incomplete:";
 const PROVENANCE_WARNING_PREFIX = "Provenance could not be preserved:";
 
 const CLAUDE_REVIEW_SCHEMA = {
@@ -362,12 +377,9 @@ function normalizeWorklines(
     const questionPrompt = cleanText(questionRecord?.prompt, 600);
     const participation = normalizeParticipation(record?.participation);
     const qualityIssues = semanticGateIssues(blocks, participation, questionPrompt);
-    if (qualityIssues.length > 0) {
-      if (semanticMode === "strict") {
-        warnings.push(`${title} 未满足 Prompt 语义质量门：${qualityIssues.join("、")}，已忽略。`);
-        continue;
-      }
-      warnings.push(`${STORED_INCOMPLETENESS_PREFIX} ${title} — ${qualityIssues.join("; ")}. Historical workline retained.`);
+    if (qualityIssues.length > 0 && semanticMode === "strict") {
+      warnings.push(`${title} 未满足 Prompt 语义质量门：${qualityIssues.join("、")}，已忽略。`);
+      continue;
     }
     const startedAt = cleanTimestamp(record.startedAt);
     const endedAt = cleanTimestamp(record.endedAt);
