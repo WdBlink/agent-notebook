@@ -6,7 +6,8 @@ The product is a standalone Mac app. It does not require Obsidian and it never e
 
 ## What The App Does
 
-- **Today** — keep local notes beside a cross-session project synthesis, then organize and seal the day.
+- **Today** — keep local notes during the day, then enter a dedicated Daily Review when you are ready to stop.
+- **Daily Review** — reconstruct a few cross-session worklines, read one evidence-linked dossier at a time, write your own interpretation in a blank field, and seal the exact material and ink.
 - **Sessions** — inspect every matching Codex and Claude Code session, its status, path, and resume command.
 - **Timeline** — review activity across all projects or within one project.
 - **Map** — navigate a project tree derived from session evidence and bounded CTX documents; focusing a node preserves spatial context and expands its children.
@@ -20,8 +21,8 @@ The app uses the supplied stuffed Traveler's Notebook artwork as its product ico
 The first release supports both current Mac architectures:
 
 ```text
-dist/macos/Work Continuity-0.5.0-macos-arm64.dmg
-dist/macos/Work Continuity-0.5.0-macos-x64.dmg
+dist/macos/Work Continuity-0.6.0-macos-arm64.dmg
+dist/macos/Work Continuity-0.6.0-macos-x64.dmg
 ```
 
 Use the `arm64` image on Apple Silicon Macs and the `x64` image on Intel Macs. These initial builds are unsigned and not notarized, so local testing may require Control-clicking the app and choosing **Open**.
@@ -31,9 +32,11 @@ Use the `arm64` image on Apple Silicon Macs and the `x64` image on Intel Macs. T
 1. Launch Work Continuity.
 2. Open **Sources** and enable Codex, Claude Code, or both.
 3. Choose a date from the calendar. Activity dots identify dates with known sessions.
-4. Use **Today** to capture thoughts and expand the project records assembled from multiple sessions.
-5. When you finish thinking for the day, choose **开始整理今天**, write what you want to keep, select up to three bookmarks, and seal the page.
-6. Copy a resume command when you want to continue work. Work Continuity never executes it automatically.
+4. Use **Today** to capture thoughts while you work. The existing Sessions, Timeline, Map, and Sources views remain available as supporting material.
+5. When you finish thinking for the day, choose **开始整理今天**. Work Continuity reads the verified Codex and Claude Code evidence and reconstructs a few cross-session worklines.
+6. Open one workline at a time. The dossier separates prior context, concrete evidence, possible change, future observation, and the unresolved question; every admitted source remains reopenable.
+7. Choose **看完了，开始思考**, write in the initially blank field, return to review another workline, and finally choose **今日收口**. You may select up to three continuation bookmarks before sealing.
+8. Copy a resume command when you want to continue work. Work Continuity never executes it automatically.
 
 Notes remain local until you explicitly use the paper-plane action. From there you can export a card, write a source into the configured `LLM-Wiki/raw`, or hand it to an existing project's CTX intake.
 
@@ -76,7 +79,15 @@ npx playwright test tests/e2e/desktop-app.spec.ts
 npm run test:e2e
 ```
 
-The Node unit/integration suite covers session parsing, project grouping, note persistence, sealing, source selection, recovery metadata, and shared models. The Playwright browser suite covers the two-pane Today surface, note delivery, EOD sealing, responsive window checks, all five product surfaces, command-palette navigation, stable Map node identity during animated focus changes, and CTX source inspection.
+The Node unit/integration suite covers session parsing, KSI-informed cross-session workline compilation, evidence membership, extensible semantic blocks, note persistence, per-workline user ink, sealing, source selection, recovery metadata, and shared models. The Playwright browser suite covers the two-pane Today surface, note delivery, the workline index, dossier reading, blank reflection, immutable EOD sealing, responsive window checks, all five product surfaces, command-palette navigation, stable Map node identity during animated focus changes, and CTX source inspection.
+
+## KSI-informed Review Compiler
+
+Daily Review does not ask a model to write the user's diary. It uses a versioned Prompt profile (`ksi-workline-review-v1`) to prepare material the user can think with. The Prompt reconstructs shared work across Sessions, recovers a load-bearing assumption when the evidence supports one, cites concrete sources, describes a possible change, states a falsifiable future observation, preserves disagreement and scope, and ends with the question still left to the human.
+
+Generated blocks remain advisory and extensible. The application mechanically validates only source membership, replay-safe presentation data, user-authored ink, explicit actions, and sealed immutability. It rejects invented Session references and forbids the compiler from claiming that the user decided, authorized, delegated, migrated, or sealed anything.
+
+The review compiler uses one installed provider CLI in read-only, ephemeral mode and may read the verified Codex and Claude manifest together. Its inexpensive default models are inherited from the smart-title configuration; dedicated overrides are available through `WORK_CONTINUITY_CODEX_REVIEW_MODEL` and `WORK_CONTINUITY_CLAUDE_REVIEW_MODEL`. A compiler failure remains visible and never silently falls back to the former thin project summary.
 
 ## Local Model / Smart Session Titles
 
@@ -96,7 +107,7 @@ Session recovery is intentionally copy-only. The evidence panel shows the provid
 - The app refuses project delivery when the project has no existing CTX store.
 - Provider toggles are applied before filesystem discovery.
 - App preferences, notes, drafts, sealed pages, and delivery receipts stay in the macOS application-support directory.
-- No transcript is uploaded by the app.
+- The app has no hosted transcript service. Review and smart-title model calls use only the provider CLI and account already configured on the Mac; the app itself keeps no remote copy.
 - Resume actions copy commands instead of executing external tools.
 
 ## Legacy Prototype

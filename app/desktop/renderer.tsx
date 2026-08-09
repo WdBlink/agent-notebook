@@ -35,6 +35,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactElement } from "react";
 import { buildResumeCommand } from "../../src/resume";
 import type { AgentSessionStatus, AgentWorkSession, SessionProvider } from "../../src/types";
+import type { DailyReviewBlock, DailyReviewEvidence, DailyWorklineReview } from "../../src/workline-review";
 import type { DailyDraftInput, DailyWorkRecord, DesktopNotebookState, DesktopState, NotebookNote, ProjectContextDocument, ProjectContextState, SessionTranscriptState } from "./api";
 
 type ViewKey = "brief" | "sessions" | "timeline" | "map" | "sources";
@@ -498,7 +499,7 @@ function Brief({
 
   async function beginClosing(): Promise<void> {
     if (notebook.page.status === "sealed") return;
-    const next = notebook.page.status === "draft"
+    const next = notebook.page.status === "draft" && notebook.page.reviewPackage
       ? notebook
       : await runNotebookAction(() => window.agentWhiteboard.composeDailyPage(state.activeDate));
     if (next) setClosing(true);
@@ -526,10 +527,14 @@ function Brief({
                 <div><span className="folio-label">{weekdayEnglish(state.activeDate)} · {formatMonthDay(state.activeDate)}</span><h2>{notebook.page.status === "sealed" ? "今天到这里" : "今日页草稿"}</h2></div>
                 {notebook.page.status === "sealed" ? <div className="seal-mark"><LockKeyhole size={15} />封</div> : <span className="page-state">OPEN PAGE<br />{records.length} RECORDS</span>}
               </header>
-              <div className="daily-records">
-                {records.map((record) => <DailyRecordRow key={record.id} record={record} sessions={sessions} onSession={onSession} />)}
-                {records.length === 0 ? <div className="blank-page">{notebook.notes.length === 0 ? <p>唯有那些沉思默想的时刻，才是真正的你我。</p> : null}</div> : null}
-              </div>
+              {notebook.page.status === "sealed" && notebook.page.reviewPackage ? (
+                <SealedReviewSummary notebook={notebook} />
+              ) : (
+                <div className="daily-records">
+                  {records.map((record) => <DailyRecordRow key={record.id} record={record} sessions={sessions} onSession={onSession} />)}
+                  {records.length === 0 ? <div className="blank-page">{notebook.notes.length === 0 ? <p>唯有那些沉思默想的时刻，才是真正的你我。</p> : null}</div> : null}
+                </div>
+              )}
               {notebook.page.status === "sealed" && notebook.page.reflection ? <blockquote className="personal-ink">{notebook.page.reflection}</blockquote> : null}
               {notebook.page.status === "sealed" && notebook.page.bookmarks.length ? (
                 <section className="sealed-bookmarks"><span className="folio-label">NEXT OPEN</span>{notebook.page.bookmarks.map((bookmark) => {
@@ -542,7 +547,7 @@ function Brief({
               ) : null}
               <footer className="daily-paper-foot">
                 <div><strong>{notebook.page.status === "sealed" ? `已封存 · ${formatDateTime(notebook.page.sealedAt)}` : notebook.page.status === "draft" ? "整理稿已暂存" : "这一页还没有封存"}</strong><small>{notebook.page.status === "sealed" ? "页面内容保持只读" : "便签和会话原文仍保留各自来源"}</small></div>
-                {notebook.page.status !== "sealed" && state.activeDate <= localDate() ? <button type="button" className="seal-entry" disabled={busy} onClick={() => void beginClosing()}>{notebook.page.status === "draft" ? "继续整理今天" : "开始整理今天"}</button> : null}
+                {notebook.page.status !== "sealed" && state.activeDate <= localDate() ? <button type="button" className="seal-entry" disabled={busy} onClick={() => void beginClosing()}>{busy ? "正在整理工作线…" : notebook.page.status === "draft" ? "继续整理今天" : "开始整理今天"}</button> : null}
               </footer>
             </section>
           </article>
@@ -565,11 +570,13 @@ function Brief({
         onWiki={async (id) => { const result = await runNotebookResult(() => window.agentWhiteboard.routeNotebookNoteToWiki(id), onNotebook, setBusy, setActionError); if (result) onNotice("已写入 LLM-Wiki/raw，等待 Wiki 协议吸收"); }}
         onProject={async (id, projectPath) => { const result = await runNotebookResult(() => window.agentWhiteboard.routeNotebookNoteToProject(id, projectPath), onNotebook, setBusy, setActionError); if (result) onNotice("已交给项目 CTX 协议"); }}
       /> : null}
-      {closing ? <ClosingRitual
+      {closing ? <DailyReviewWorkspace
         notebook={notebook}
         date={state.activeDate}
+        sessions={sessions}
         busy={busy}
         error={actionError}
+        onEvidence={onEvidence}
         onClose={() => { setClosing(false); setActionError(null); }}
         onSave={async (input) => { await runNotebookAction(() => window.agentWhiteboard.saveDailyDraft(state.activeDate, input), "整理稿已保存"); }}
         onSeal={async (input) => { const next = await runNotebookAction(() => window.agentWhiteboard.sealDailyPage(state.activeDate, input), "今天已经封好"); if (next) setClosing(false); }}
@@ -587,6 +594,15 @@ function DailyRecordRow({ record, sessions, onSession }: { record: DailyWorkReco
     const session = sessions.find((item) => item.id === reference.id && item.path === reference.path && item.platform === reference.platform);
     return <button type="button" key={`${reference.platform}:${reference.id}:${reference.path}`} onClick={() => session && onSession(session)} disabled={!session}><span>{platformAbbreviation(reference.platform)}</span>{reference.title}</button>;
   })}</div></div></details>;
+}
+
+function SealedReviewSummary({ notebook }: { notebook: DesktopNotebookState }): ReactElement {
+  const review = notebook.page.reviewPackage;
+  if (!review) return <div className="daily-records" />;
+  return <section className="sealed-review-summary"><span className="folio-label">SEALED REVIEW · {review.worklines.length} WORKLINES</span>{review.worklines.map((workline) => {
+    const reflection = notebook.page.worklineReflections.find((item) => item.worklineId === workline.id);
+    return <article key={workline.id}><small>{worklineStatusLabel(workline.status)}</small><h3>{workline.title}</h3><p>{workline.summary}</p>{reflection ? <blockquote>{reflection.text}</blockquote> : null}</article>;
+  })}</section>;
 }
 
 function NotebookNoteEditor({
@@ -625,15 +641,134 @@ function NotebookNoteEditor({
   return <div className="note-layer" role="dialog" aria-modal="true" aria-label={note ? note.title : "新建便签"}><button type="button" className="note-backdrop" aria-label="关闭便签" onClick={onClose} /><section className="note-editor"><header><button type="button" aria-label="关闭" onClick={onClose}><ChevronLeft size={20} /></button><span>{note ? `${formatDateTime(note.createdAt)} · ${body.length}` : "QUICK CAPTURE"}</span><div>{note ? <><button type="button" aria-label={note.favorite ? "取消收藏" : "收藏"} onClick={() => void onSave(note.id, { favorite: !note.favorite })}><Star size={19} fill={note.favorite ? "currentColor" : "none"} /></button><button type="button" aria-label="删除" onClick={() => setDeleteOpen(true)}><Trash2 size={19} /></button><button type="button" aria-label="分享便签" onClick={() => { setShareOpen(!shareOpen); setProjectOpen(false); }}><Send size={19} /></button></> : null}</div></header><div className="note-paper"><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="标题（可以留空）" aria-label="便签标题" /><textarea autoFocus={!note} value={body} onChange={(event) => setBody(event.target.value)} placeholder="写下刚刚想到的事，或者粘贴一个链接…" aria-label="便签正文" /></div>{error ? <div className="note-error"><AlertTriangle size={14} />{error}</div> : null}<footer><div>{note?.deliveries.map((delivery) => <span key={`${delivery.kind}:${delivery.deliveredAt}`}>{delivery.kind.toUpperCase()}</span>)}</div><button type="button" className="primary-action" disabled={busy || !body.trim()} onClick={() => void (note ? onSave(note.id, { title, body }) : onCreate({ title, body }))}>{note ? "保存" : "收下"}</button></footer>{note && shareOpen ? <div className="note-share-menu"><button type="button" onClick={() => void onCard(note.id)}><Image size={20} /><span><strong>生成精美卡片</strong><small>导出独立 SVG 卡片并打开</small></span></button><button type="button" onClick={() => void onWiki(note.id)}><Archive size={20} /><span><strong>归入 LLM-Wiki</strong><small>{knowledgeRawPath}</small></span></button><button type="button" onClick={() => setProjectOpen(true)}><Network size={20} /><span><strong>归入项目</strong><small>交给项目 CTX 协议自动吸收</small></span></button></div> : null}{note && projectOpen ? <div className="project-route-menu"><header><strong>交给项目 CTX</strong><button type="button" onClick={() => setProjectOpen(false)}><X size={16} /></button></header>{projects.filter((project) => project.path).map((project) => <button type="button" key={project.key} onClick={() => void onProject(note.id, project.path!)}><span>{project.name}</span><small>{project.path}</small></button>)}</div> : null}{note && deleteOpen ? <div className="delete-confirm"><p>删除这条便签？已经送往其他位置的副本不会被删除。</p><button type="button" onClick={() => setDeleteOpen(false)}>取消</button><button type="button" className="danger" onClick={() => void onDelete(note.id)}>删除</button></div> : null}</section></div>;
 }
 
-function ClosingRitual({ notebook, date, busy, error, onClose, onSave, onSeal }: { notebook: DesktopNotebookState; date: string; busy: boolean; error: string | null; onClose(): void; onSave(input: DailyDraftInput): Promise<void>; onSeal(input: DailyDraftInput): Promise<void> }): ReactElement {
-  const [reflection, setReflection] = useState(notebook.page.reflection);
+type DailyReviewStage = "index" | "dossier" | "reflection" | "seal";
+
+function DailyReviewWorkspace({
+  notebook,
+  date,
+  sessions,
+  busy,
+  error,
+  onEvidence,
+  onClose,
+  onSave,
+  onSeal
+}: {
+  notebook: DesktopNotebookState;
+  date: string;
+  sessions: AgentWorkSession[];
+  busy: boolean;
+  error: string | null;
+  onEvidence(session: AgentWorkSession): void;
+  onClose(): void;
+  onSave(input: DailyDraftInput): Promise<void>;
+  onSeal(input: DailyDraftInput): Promise<void>;
+}): ReactElement {
+  const review = notebook.page.reviewPackage;
+  const [stage, setStage] = useState<DailyReviewStage>("index");
+  const [activeWorklineId, setActiveWorklineId] = useState(review?.worklines[0]?.id ?? "");
+  const [reflections, setReflections] = useState<Record<string, string>>(() => Object.fromEntries(notebook.page.worklineReflections.map((item) => [item.worklineId, item.text])));
   const [bookmarkIds, setBookmarkIds] = useState(notebook.page.bookmarks.map((item) => item.id));
-  const input = { reflection, bookmarkIds };
+  const activeWorkline = review?.worklines.find((item) => item.id === activeWorklineId) ?? review?.worklines[0];
+
+  if (!review) {
+    return <div className="review-layer" role="dialog" aria-modal="true" aria-label="日终回看"><section className="review-shell review-unavailable"><button type="button" className="review-close" aria-label="退出日终回看" onClick={onClose}><X size={19} /></button><AlertTriangle size={24} /><h2>这份旧整理稿还没有工作线材料。</h2><p>退出后重新开始整理，应用会从当前只读证据生成回看材料。</p></section></div>;
+  }
+
+  const reflectionInput = (): DailyDraftInput => ({
+    reflection: notebook.page.reflection,
+    worklineReflections: review.worklines.flatMap((workline) => {
+      const text = reflections[workline.id]?.trim();
+      return text ? [{ worklineId: workline.id, text }] : [];
+    }),
+    bookmarkIds
+  });
+
+  function openWorkline(workline: DailyWorklineReview): void {
+    setActiveWorklineId(workline.id);
+    setStage("dossier");
+  }
+
   function toggleBookmark(id: string): void {
     setBookmarkIds((current) => current.includes(id) ? current.filter((item) => item !== id) : current.length < 3 ? [...current, id] : current);
   }
-  return <div className="closing-layer" role="dialog" aria-modal="true" aria-label="整理今天"><section className="closing-sheet"><header><div><span className="folio-label">END OF DAY · {formatShortDate(date)}</span><h2>收笔之前</h2></div><button type="button" aria-label="退出整理" onClick={onClose}><X size={20} /></button></header><div className="closing-grid"><section className="closing-records"><span className="folio-label">TODAY · {notebook.page.workRecords.length}</span>{notebook.page.workRecords.map((record) => <article key={record.id}><time>{formatTime(record.occurredAt)}</time><div><small>{record.projectName}</small><strong>{record.title}</strong><p>{record.summary}</p></div></article>)}</section><aside className="closing-ink"><label><span className="folio-label">PERSONAL INK</span><textarea value={reflection} onChange={(event) => setReflection(event.target.value)} placeholder="我今天真正想留下的是……" /></label><section><span className="folio-label">明天从哪里继续 · 最多 3 项</span><div className="bookmark-choices">{notebook.continuationCandidates.map((bookmark) => <button type="button" key={bookmark.id} aria-pressed={bookmarkIds.includes(bookmark.id)} onClick={() => toggleBookmark(bookmark.id)}><span>{bookmarkIds.includes(bookmark.id) ? <Check size={13} /> : null}</span><div><strong>{bookmark.title}</strong><small>{bookmark.projectName} · {platformLabel(bookmark.provider)}</small></div></button>)}</div></section></aside></div>{error ? <div className="closing-error"><AlertTriangle size={15} />{error}</div> : null}<footer><button type="button" disabled={busy} onClick={() => void onSave(input)}>暂存整理稿</button><button type="button" className="seal-button" disabled={busy} onClick={() => void onSeal(input)}>收笔并封存</button></footer></section></div>;
+
+  async function saveReflection(): Promise<void> {
+    if (!activeWorkline || !reflections[activeWorkline.id]?.trim()) return;
+    await onSave(reflectionInput());
+    setStage("index");
+  }
+
+  return <div className="review-layer" role="dialog" aria-modal="true" aria-label="日终回看">
+    <section className="review-shell" data-stage={stage}>
+      <header className="review-topbar"><div><span className="review-brand">DAILY REVIEW</span><strong>{formatDateTitle(date)}</strong><small>{stageLabel(stage)} · {review.model}</small></div><button type="button" className="review-close" aria-label="退出日终回看" onClick={onClose}><X size={19} /></button></header>
+      {stage === "index" ? <ReviewIndex review={review} reflections={reflections} onOpen={openWorkline} onSeal={() => setStage("seal")} /> : null}
+      {stage === "dossier" && activeWorkline ? <ReviewDossier
+        workline={activeWorkline}
+        evidence={review.evidence}
+        sessions={sessions}
+        hasReflection={Boolean(reflections[activeWorkline.id]?.trim())}
+        onBack={() => setStage("index")}
+        onEvidence={onEvidence}
+        onReflect={() => setStage("reflection")}
+      /> : null}
+      {stage === "reflection" && activeWorkline ? <ReviewReflection
+        workline={activeWorkline}
+        value={reflections[activeWorkline.id] ?? ""}
+        busy={busy}
+        onBack={() => setStage("dossier")}
+        onChange={(value) => setReflections((current) => ({ ...current, [activeWorkline.id]: value }))}
+        onSave={() => void saveReflection()}
+      /> : null}
+      {stage === "seal" ? <ReviewSeal
+        review={review.worklines}
+        reflections={reflections}
+        candidates={notebook.continuationCandidates}
+        bookmarkIds={bookmarkIds}
+        busy={busy}
+        onBack={() => setStage("index")}
+        onToggleBookmark={toggleBookmark}
+        onSeal={() => void onSeal(reflectionInput())}
+      /> : null}
+      {error ? <div className="review-error"><AlertTriangle size={15} />{error}</div> : null}
+    </section>
+  </div>;
 }
+
+function ReviewIndex({ review, reflections, onOpen, onSeal }: { review: NonNullable<DesktopNotebookState["page"]["reviewPackage"]>; reflections: Record<string, string>; onOpen(workline: DailyWorklineReview): void; onSeal(): void }): ReactElement {
+  const userSpans = review.worklines.flatMap((item) => item.participation).filter((span) => span.kind === "user" || span.kind === "collaborative").length;
+  const questions = review.worklines.filter((item) => item.dossier.question?.prompt).length;
+  return <main className="review-index"><aside className="review-cover"><div className="brass-date-clip"><span>{formatMonthDay(review.logicalDate)}</span><small>{String(review.worklines.length).padStart(2, "0")}</small></div><span className="review-eyebrow">END OF DAY · REVIEW PACKAGE READY</span><h1>今天的<br />工作线</h1><p>AI 已整理重复会话与执行噪声。这里没有替你写好的今日结论。</p><dl><div><dt>{review.worklines.length}</dt><dd>条工作线</dd></div><div><dt>{userSpans}</dt><dd>个你参与的节点</dd></div><div><dt>{questions}</dt><dd>处等待人的判断</dd></div></dl><small className="review-estimate">先读材料，再用自己的话写。</small></aside><section className="review-workline-list" aria-label="今天的工作线">{review.worklines.map((workline) => <button type="button" className="review-workline" key={workline.id} onClick={() => onOpen(workline)}><div className="review-workline-copy"><span>{reflections[workline.id]?.trim() ? "已写下思考" : worklineStatusLabel(workline.status)}</span><h2>{workline.title}</h2><p>{workline.summary}</p></div><ParticipationTrack workline={workline} /><div className="review-workline-facts"><b>{workline.sourceSessionIds.length}</b><span>会话</span><b>{workline.dossier.blocks.length}</b><span>关键段落</span></div></button>)}<footer className="review-index-footer"><div><strong>{Object.values(reflections).filter((value) => value.trim()).length}</strong><span>段你的原始墨迹</span></div><button type="button" onClick={onSeal}>今日收口</button></footer></section></main>;
+}
+
+function ParticipationTrack({ workline }: { workline: DailyWorklineReview }): ReactElement {
+  return <div className="participation-track"><div className="participation-cells">{workline.participation.length ? workline.participation.map((span) => <i key={span.id} data-kind={span.kind} title={span.label} />) : <i data-kind="uncertain" />}</div><div className="participation-legend">{Array.from(new Map(workline.participation.map((span) => [span.kind, span.label])).entries()).map(([kind, label]) => <span key={kind} data-kind={kind}>{label}</span>)}</div></div>;
+}
+
+function ReviewDossier({ workline, evidence, sessions, hasReflection, onBack, onEvidence, onReflect }: { workline: DailyWorklineReview; evidence: DailyReviewEvidence[]; sessions: AgentWorkSession[]; hasReflection: boolean; onBack(): void; onEvidence(session: AgentWorkSession): void; onReflect(): void }): ReactElement {
+  return <main className="review-dossier"><aside className="review-spine"><button type="button" onClick={onBack}>← 返回工作线</button><span className="review-eyebrow">WORKLINE</span><h2>{workline.title}</h2><p>{workline.summary}</p></aside><section className="review-reader paper-scroll"><header><span className="generated-label">AI 整理</span><span className="review-eyebrow">EVIDENCE DOSSIER</span><h1>{workline.dossier.title}</h1><p>{workline.dossier.dek}</p></header><div className="review-blocks">{workline.dossier.blocks.map((block) => <ReviewBlock key={block.id} block={block} evidence={evidence} sessions={sessions} onEvidence={onEvidence} />)}</div>{workline.dossier.question ? <section className="human-question"><span>留给你的问题</span><h2>{workline.dossier.question.prompt}</h2>{workline.dossier.question.context ? <p>{workline.dossier.question.context}</p> : null}</section> : null}<footer><span>生成内容保持可追溯；它不是你的决定。</span><button type="button" onClick={onReflect}>{hasReflection ? "查看我的思考" : "看完了，开始思考"}</button></footer></section></main>;
+}
+
+function ReviewBlock({ block, evidence, sessions, onEvidence }: { block: DailyReviewBlock; evidence: DailyReviewEvidence[]; sessions: AgentWorkSession[]; onEvidence(session: AgentWorkSession): void }): ReactElement {
+  const sources = block.evidenceIds.map((id) => evidence.find((item) => item.id === id)).filter((item): item is DailyReviewEvidence => Boolean(item));
+  return <article className="review-block" data-kind={block.kind}><span>{block.label ?? humanizeBlockKind(block.kind)}</span><h2>{block.title}</h2><p>{block.body}</p>{sources.length ? <div className="review-block-evidence">{sources.map((source) => {
+    const session = source.kind === "session" ? sessions.find((item) => item.id === source.sessionId && item.platform === source.platform && item.path === source.path) : undefined;
+    return <button type="button" key={source.id} onClick={() => session ? onEvidence(session) : void window.agentWhiteboard.openPath(source.path)}><FileText size={13} />{source.kind === "session" ? "打开原始会话" : "打开材料"} · {source.label}</button>;
+  })}</div> : <small className="review-missing-evidence">这段生成内容没有可打开的直接证据。</small>}</article>;
+}
+
+function ReviewReflection({ workline, value, busy, onBack, onChange, onSave }: { workline: DailyWorklineReview; value: string; busy: boolean; onBack(): void; onChange(value: string): void; onSave(): void }): ReactElement {
+  return <main className="review-reflection"><aside className="reflection-context"><button type="button" onClick={onBack}>← 返回阅读</button><span className="review-eyebrow">STILL ON THE DESK</span><h2>{workline.dossier.question?.prompt ?? workline.dossier.title}</h2><p>这张纸只保留你刚刚读到的问题，不替你回答。</p></aside><section className="reflection-paper paper-scroll"><header><span className="review-eyebrow">YOUR INK · ORIGINAL PRESERVED</span><h1>看完这些，你现在怎么理解这件事？</h1><p>先用自己的话写。AI 不会在这里提供候选答案，也不会覆盖你的原文。</p></header><label><span>你的原始墨迹</span><textarea autoFocus aria-label="你的原始墨迹" value={value} onChange={(event) => onChange(event.target.value)} placeholder="从哪个判断发生了变化开始写……" /></label><footer><span>{Array.from(value.trim()).length} 字 · 本机草稿</span><button type="button" disabled={busy || !value.trim()} onClick={onSave}>收下这段思考</button></footer></section></main>;
+}
+
+function ReviewSeal({ review, reflections, candidates, bookmarkIds, busy, onBack, onToggleBookmark, onSeal }: { review: DailyWorklineReview[]; reflections: Record<string, string>; candidates: DesktopNotebookState["continuationCandidates"]; bookmarkIds: string[]; busy: boolean; onBack(): void; onToggleBookmark(id: string): void; onSeal(): void }): ReactElement {
+  const written = review.filter((workline) => reflections[workline.id]?.trim());
+  return <main className="review-seal"><aside className="seal-spine"><button type="button" onClick={onBack}>← 返回工作线</button><span className="review-eyebrow">END OF DAY</span><h1>今天到这里。</h1><p>封页只冻结今天。之后到达的新证据不会改写这一页。</p><div className="seal-preview-mark">封</div></aside><section className="seal-paper paper-scroll"><header><span className="review-eyebrow">YOUR REVIEW · READY TO SEAL</span><h2>收笔之前，再看一眼自己的话</h2></header><div className="seal-reflections">{written.map((workline) => <article key={workline.id}><small>{workline.title}</small><blockquote>{reflections[workline.id]}</blockquote></article>)}{written.length === 0 ? <p className="seal-empty">今天没有写下个人思考；仍可封页，但系统不会替你补写。</p> : null}</div><section className="seal-bookmarks"><span className="review-eyebrow">明天从哪里继续 · 最多 3 项</span><div className="bookmark-choices">{candidates.map((bookmark) => <button type="button" key={bookmark.id} aria-pressed={bookmarkIds.includes(bookmark.id)} onClick={() => onToggleBookmark(bookmark.id)}><span>{bookmarkIds.includes(bookmark.id) ? <Check size={13} /> : null}</span><div><strong>{bookmark.title}</strong><small>{bookmark.projectName} · {platformLabel(bookmark.provider)}</small></div></button>)}</div></section><footer><span>封存后，工作线材料与人的原文保持只读。</span><button type="button" disabled={busy} onClick={onSeal}>收笔并封存</button></footer></section></main>;
+}
+
+function stageLabel(stage: DailyReviewStage): string { return stage === "index" ? "准备回看" : stage === "dossier" ? "阅读工作线" : stage === "reflection" ? "安静思考" : "今日收口"; }
+function worklineStatusLabel(status: string): string { return status === "needs-judgment" ? "需要判断" : status === "running" ? "仍在运行" : status === "ready" ? "已有阶段结果" : "等待回看"; }
+function humanizeBlockKind(value: string): string { return value.replace(/[-_]+/g, " ").toUpperCase(); }
 
 async function runNotebookResult<T extends { notebook: DesktopNotebookState }>(action: () => Promise<T>, onNotebook: (notebook: DesktopNotebookState) => void, setBusy: (busy: boolean) => void, setError: (message: string | null) => void): Promise<T | undefined> {
   setBusy(true);

@@ -61,6 +61,66 @@ const baseSessions = [
 
 async function installDesktopApi(page: Page): Promise<void> {
   await page.addInitScript(({ sessions }) => {
+    const createReviewPackage = (activeDate: string): any => ({
+      schemaVersion: 1,
+      id: `review-${activeDate}`,
+      logicalDate: activeDate,
+      generatedAt: `${activeDate}T20:00:00+08:00`,
+      evidenceCutoff: `${activeDate}T20:00:00+08:00`,
+      promptProfile: "ksi-workline-review-v1",
+      compilerProvider: "codex",
+      model: "review-model",
+      evidence: sessions.map((session: any) => ({
+        id: `session:${session.platform}:${session.id}`,
+        kind: "session",
+        label: session.title,
+        path: session.path,
+        platform: session.platform,
+        sessionId: session.id
+      })),
+      worklines: [
+        {
+          id: "daily-review-direction",
+          title: "Daily Review · 产品方向",
+          summary: "真实使用否定了 Session 看板，产品重新聚焦人的日终理解。",
+          status: "needs-judgment",
+          sourceSessionIds: ["codex:019f-work-continuity", "claude:claude-map-review", "claude:claude-finished"],
+          startedAt: `${activeDate}T09:18:00+08:00`,
+          endedAt: `${activeDate}T18:22:00+08:00`,
+          participation: [
+            { id: "user-1", kind: "user", startAt: `${activeDate}T09:18:00+08:00`, endAt: `${activeDate}T09:42:00+08:00`, label: "你参与" },
+            { id: "agent-1", kind: "agent", startAt: `${activeDate}T09:42:00+08:00`, endAt: `${activeDate}T16:12:00+08:00`, label: "Agent 独立推进" }
+          ],
+          dossier: {
+            title: "从 Agent 看板转向人的日终回看工作簿",
+            dek: "由 3 条跨平台会话按发生顺序重建；这里只呈现材料，不替用户下结论。",
+            blocks: [
+              { id: "prior", kind: "prior-assumption", label: "原来的判断", title: "首页需要展示 Agent 的运行状态", body: "最初把 Session、运行状态和项目摘要放在同一主界面。", evidenceIds: ["session:codex:019f-work-continuity"], payload: {} },
+              { id: "change", kind: "evidence-change", label: "发生了什么", title: "真实使用仍需要重新翻 Session", body: "薄摘要没有减少理解成本，用户无法形成自己的判断。", evidenceIds: ["session:codex:019f-work-continuity", "session:claude:claude-map-review"], payload: {} },
+              { id: "scope", kind: "scope-tension", label: "未来观察", title: "十五分钟内能否完成一条工作线的回看", body: "如果材料包有效，用户应能少翻原始 Session，同时仍亲自完成思考。", evidenceIds: ["session:claude:claude-finished"], payload: { futureField: "preserved" } }
+            ],
+            question: { prompt: "这套材料是否已经足以让你亲自想明白？", context: "AI 不能替用户决定产品方向。" }
+          },
+          payload: {}
+        },
+        {
+          id: "trading-credentials",
+          title: "Vibe Trading · 凭证隔离",
+          summary: "生产与回测连接仍需明确隔离。",
+          status: "running",
+          sourceSessionIds: ["codex:019f-trading"],
+          participation: [{ id: "agent-2", kind: "running", label: "Agent 仍在运行" }],
+          dossier: {
+            title: "凭证隔离仍在只读核查",
+            dek: "当前不需要人的新判断。",
+            blocks: [{ id: "status", kind: "current-state", label: "当前状态", title: "检查尚未完成", body: "新的运行结果会在下次回看时另行呈现。", evidenceIds: ["session:codex:019f-trading"], payload: {} }]
+          },
+          payload: {}
+        }
+      ],
+      warnings: [],
+      rawOutput: { worklines: [{ id: "daily-review-direction" }, { id: "trading-credentials" }] }
+    });
     const createNotebook = (activeDate: string, scopedSessions: typeof sessions): any => {
       const groups = new Map<string, typeof scopedSessions>();
       for (const session of scopedSessions) {
@@ -90,7 +150,7 @@ async function installDesktopApi(page: Page): Promise<void> {
       }));
       return {
         notes: [{ id: "note-1", logicalDate: activeDate, createdAt: "2026-07-20T09:18:00+08:00", updatedAt: "2026-07-20T09:18:00+08:00", title: "手帐不是 Agent 平台", body: "真正需要承载的是每天收工时的思维停点，而不是另一套运行监控。", kind: "thought", sourceLabel: "个人记录", favorite: true, deliveries: [] }],
-        page: { schemaVersion: 1, logicalDate: activeDate, status: "unformed", workRecords: [], reflection: "", bookmarks: [] },
+        page: { schemaVersion: 1, logicalDate: activeDate, status: "unformed", workRecords: [], reflection: "", worklineReflections: [], bookmarks: [] },
         previewRecords,
         continuationCandidates,
         knowledgeRoot: "/workspace/LLM-Wiki",
@@ -178,16 +238,18 @@ async function installDesktopApi(page: Page): Promise<void> {
       },
       routeNotebookNoteToProject: async (noteId: string) => ({ notebook: state.notebook, path: `/workspace/work-continuity/ctx/scratch/inbox/${noteId}.md` }),
       composeDailyPage: async () => {
-        state.notebook.page = { ...state.notebook.page, status: "draft", createdAt: "2026-07-20T20:00:00+08:00", updatedAt: "2026-07-20T20:00:00+08:00", evidenceCutoff: "2026-07-20T20:00:00+08:00", workRecords: state.notebook.previewRecords };
+        state.notebook.page = { ...state.notebook.page, schemaVersion: 2, status: "draft", createdAt: "2026-07-20T20:00:00+08:00", updatedAt: "2026-07-20T20:00:00+08:00", evidenceCutoff: "2026-07-20T20:00:00+08:00", workRecords: state.notebook.previewRecords, reviewPackage: createReviewPackage(state.activeDate), worklineReflections: [] };
         return state.notebook;
       },
-      saveDailyDraft: async (_date: string, input: { reflection: string; bookmarkIds: string[] }) => {
+      saveDailyDraft: async (_date: string, input: { reflection: string; worklineReflections?: Array<{ worklineId: string; text: string }>; bookmarkIds: string[] }) => {
         state.notebook.page.reflection = input.reflection;
+        if (input.worklineReflections) state.notebook.page.worklineReflections = input.worklineReflections.map((item) => ({ ...item, updatedAt: "2026-07-20T21:00:00+08:00" }));
         state.notebook.page.bookmarks = state.notebook.continuationCandidates.filter((item: any) => input.bookmarkIds.includes(item.id));
         return state.notebook;
       },
-      sealDailyPage: async (_date: string, input: { reflection: string; bookmarkIds: string[] }) => {
+      sealDailyPage: async (_date: string, input: { reflection: string; worklineReflections?: Array<{ worklineId: string; text: string }>; bookmarkIds: string[] }) => {
         state.notebook.page.reflection = input.reflection;
+        if (input.worklineReflections) state.notebook.page.worklineReflections = input.worklineReflections.map((item) => ({ ...item, updatedAt: "2026-07-20T22:16:00+08:00" }));
         state.notebook.page.bookmarks = state.notebook.continuationCandidates.filter((item: any) => input.bookmarkIds.includes(item.id));
         state.notebook.page.status = "sealed";
         state.notebook.page.sealedAt = "2026-07-20T22:16:00+08:00";
@@ -264,13 +326,52 @@ test("a note stays local until the paper-plane route is explicitly chosen", asyn
 
 test("end-of-day flow stores personal ink and seals an immutable page", async ({ page }) => {
   await page.getByRole("button", { name: "开始整理今天" }).click();
-  const ritual = page.getByRole("dialog", { name: "整理今天" });
-  await ritual.getByPlaceholder("我今天真正想留下的是……").fill("今天到这里，明天继续验证闭环。");
+  const ritual = page.getByRole("dialog", { name: "日终回看" });
+  await ritual.locator(".review-workline").first().click();
+  await ritual.getByRole("button", { name: "看完了，开始思考" }).click();
+  await ritual.getByRole("textbox", { name: "你的原始墨迹" }).fill("今天到这里，明天继续验证闭环。");
+  await ritual.getByRole("button", { name: "收下这段思考" }).click();
+  await ritual.getByRole("button", { name: "今日收口" }).click();
   await ritual.locator(".bookmark-choices button").first().click();
   await ritual.getByRole("button", { name: "收笔并封存" }).click();
   await expect(page.getByText("今天到这里", { exact: true })).toBeVisible();
   await expect(page.getByText("今天到这里，明天继续验证闭环。")).toBeVisible();
   await expect(page.getByRole("button", { name: "开始整理今天" })).toHaveCount(0);
+});
+
+test("daily review reconstructs worklines before the user writes their own reflection", async ({ page }) => {
+  await page.getByRole("button", { name: "开始整理今天" }).click();
+  const review = page.getByRole("dialog", { name: "日终回看" });
+  await expect(review).toBeVisible();
+  await expect(review.locator(".review-workline")).toHaveCount(2);
+  await expect(review.getByText("你参与", { exact: true })).toBeVisible();
+  await expect(review.getByText("Agent 独立推进", { exact: true })).toBeVisible();
+
+  await review.locator(".review-workline").first().click();
+  await expect(review.getByText("从 Agent 看板转向人的日终回看工作簿", { exact: true })).toBeVisible();
+  await expect(review.getByText("AI 整理", { exact: true })).toBeVisible();
+  await expect(review.getByText("这套材料是否已经足以让你亲自想明白？", { exact: true })).toBeVisible();
+
+  await review.getByRole("button", { name: "看完了，开始思考" }).click();
+  const ink = review.getByRole("textbox", { name: "你的原始墨迹" });
+  await expect(ink).toHaveValue("");
+  await ink.fill("我认为先让材料真正减少 Session 翻找，才值得继续增加能力。");
+  await review.getByRole("button", { name: "收下这段思考" }).click();
+  await expect(review.locator(".review-workline").first()).toContainText("已写下思考");
+  await review.locator(".review-workline").first().click();
+  await review.getByRole("button", { name: "查看我的思考" }).click();
+  await expect(ink).toHaveValue("我认为先让材料真正减少 Session 翻找，才值得继续增加能力。");
+});
+
+test("daily review remains usable without horizontal overflow in a narrow window", async ({ page }) => {
+  await page.setViewportSize({ width: 720, height: 620 });
+  await page.getByRole("button", { name: "开始整理今天" }).click();
+  const review = page.getByRole("dialog", { name: "日终回看" });
+  await expect(review.locator(".review-workline")).toHaveCount(2);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+  await review.locator(".review-workline").first().click();
+  await expect(review.getByRole("button", { name: "看完了，开始思考" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
 });
 
 test("complete session ledger, timeline, command search, and source scope stay connected", async ({ page }) => {

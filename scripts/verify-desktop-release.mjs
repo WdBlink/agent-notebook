@@ -48,10 +48,10 @@ try {
   }
   const main = asar.extractFile(appAsar, "main.js").toString("utf8");
   const renderer = asar.extractFile(appAsar, "renderer.js").toString("utf8");
-  for (const snippet of ["notebook-v1.json", "desktop:create-notebook-note", "desktop:route-notebook-note-to-wiki", "desktop:seal-daily-page"]) {
+  for (const snippet of ["notebook-v1.json", "desktop:create-notebook-note", "desktop:route-notebook-note-to-wiki", "desktop:seal-daily-page", "ksi-workline-review-v1"]) {
     if (!main.includes(snippet)) throw new Error(`Packaged main process is missing ${snippet}.`);
   }
-  for (const snippet of ["today-ledger", "note-share-menu", "daily-canvas", "closing-layer"]) {
+  for (const snippet of ["today-ledger", "note-share-menu", "daily-canvas", "review-layer", "review-workline", "review-reflection"]) {
     if (!renderer.includes(snippet)) throw new Error(`Packaged renderer is missing ${snippet}.`);
   }
 

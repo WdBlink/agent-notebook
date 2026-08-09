@@ -1,10 +1,12 @@
 import path from "node:path";
 import { buildResumeCommand } from "../../src/resume";
 import type { AgentSessionStatus, AgentWorkSession } from "../../src/types";
+import { normalizeDailyReviewPackage, type DailyReviewPackage } from "../../src/workline-review";
 import type {
   DailyContinuationBookmark,
   DailyDraftInput,
   DailyNotebookPage,
+  DailyWorklineReflection,
   DailyWorkRecord,
   DesktopNotebookState,
   NotebookNote,
@@ -154,14 +156,16 @@ export function composeDailyPage(
   document: NotebookDocument,
   logicalDate: string,
   sessions: AgentWorkSession[],
-  now = new Date()
+  now = new Date(),
+  reviewPackage?: DailyReviewPackage
 ): NotebookDocument {
   if (!isDate(logicalDate)) throw new Error("手帐日期无效。");
   const existing = document.pages[logicalDate];
   if (existing?.status === "sealed") throw new Error("这一天已经封页，不能重新整理。");
   const timestamp = now.toISOString();
+  const exactReviewPackage = existing?.reviewPackage ?? (reviewPackage ? structuredClone(reviewPackage) : undefined);
   const page: DailyNotebookPage = {
-    schemaVersion: 1,
+    schemaVersion: exactReviewPackage ? 2 : 1,
     logicalDate,
     status: "draft",
     createdAt: existing?.createdAt ?? timestamp,
@@ -169,6 +173,8 @@ export function composeDailyPage(
     evidenceCutoff: timestamp,
     workRecords: existing?.workRecords.length ? existing.workRecords : compileWorkRecords(sessions),
     reflection: existing?.reflection ?? "",
+    ...(exactReviewPackage ? { reviewPackage: exactReviewPackage } : {}),
+    worklineReflections: existing?.worklineReflections ?? [],
     bookmarks: existing?.bookmarks ?? []
   };
   return { ...document, pages: { ...document.pages, [logicalDate]: page } };
@@ -184,9 +190,13 @@ export function saveDailyDraft(
   const existing = document.pages[logicalDate];
   if (!existing || existing.status !== "draft") throw new Error("请先开始整理今天。");
   const bookmarks = selectBookmarks(input.bookmarkIds, uniqueBookmarks([...existing.bookmarks, ...candidates]));
+  const worklineReflections = input.worklineReflections === undefined
+    ? existing.worklineReflections
+    : selectWorklineReflections(input.worklineReflections, existing.reviewPackage, now);
   const page: DailyNotebookPage = {
     ...existing,
     reflection: cleanText(input.reflection, 12_000),
+    worklineReflections,
     bookmarks,
     updatedAt: now.toISOString()
   };
@@ -305,8 +315,9 @@ function normalizePage(value: unknown, logicalDate: string): DailyNotebookPage {
   if (!value || typeof value !== "object") return emptyPage(logicalDate);
   const raw = value as Partial<DailyNotebookPage>;
   const status = raw.status === "sealed" ? "sealed" : raw.status === "draft" ? "draft" : "unformed";
+  const reviewPackage = normalizeDailyReviewPackage(raw.reviewPackage, logicalDate);
   return {
-    schemaVersion: 1,
+    schemaVersion: reviewPackage ? 2 : 1,
     logicalDate,
     status,
     ...(raw.createdAt ? { createdAt: cleanTimestamp(raw.createdAt) } : {}),
@@ -315,8 +326,44 @@ function normalizePage(value: unknown, logicalDate: string): DailyNotebookPage {
     ...(status === "sealed" && raw.sealedAt ? { sealedAt: cleanTimestamp(raw.sealedAt) } : {}),
     workRecords: Array.isArray(raw.workRecords) ? raw.workRecords.map(normalizeWorkRecord).filter((item): item is DailyWorkRecord => Boolean(item)) : [],
     reflection: cleanText(raw.reflection, 12_000),
+    ...(reviewPackage ? { reviewPackage } : {}),
+    worklineReflections: reviewPackage && Array.isArray(raw.worklineReflections)
+      ? normalizeWorklineReflections(raw.worklineReflections, reviewPackage)
+      : [],
     bookmarks: Array.isArray(raw.bookmarks) ? raw.bookmarks.map(normalizeBookmark).filter((item): item is DailyContinuationBookmark => Boolean(item)).slice(0, 3) : []
   };
+}
+
+function selectWorklineReflections(
+  values: Array<Pick<DailyWorklineReflection, "worklineId" | "text">>,
+  reviewPackage: DailyReviewPackage | undefined,
+  now: Date
+): DailyWorklineReflection[] {
+  if (!reviewPackage) return [];
+  const allowed = new Set(reviewPackage.worklines.map((workline) => workline.id));
+  const seen = new Set<string>();
+  const updatedAt = now.toISOString();
+  return values.flatMap((value) => {
+    const worklineId = cleanText(value?.worklineId, 240);
+    const text = cleanText(value?.text, 12_000);
+    if (!worklineId || !text || !allowed.has(worklineId) || seen.has(worklineId)) return [];
+    seen.add(worklineId);
+    return [{ worklineId, text, updatedAt }];
+  });
+}
+
+function normalizeWorklineReflections(value: unknown[], reviewPackage: DailyReviewPackage): DailyWorklineReflection[] {
+  const allowed = new Set(reviewPackage.worklines.map((workline) => workline.id));
+  const seen = new Set<string>();
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const raw = item as Partial<DailyWorklineReflection>;
+    const worklineId = cleanText(raw.worklineId, 240);
+    const text = cleanText(raw.text, 12_000);
+    if (!worklineId || !text || !allowed.has(worklineId) || seen.has(worklineId)) return [];
+    seen.add(worklineId);
+    return [{ worklineId, text, updatedAt: cleanTimestamp(raw.updatedAt) }];
+  });
 }
 
 function selectBookmarks(ids: string[], candidates: DailyContinuationBookmark[]): DailyContinuationBookmark[] {
@@ -406,7 +453,7 @@ function sessionKey(session: AgentWorkSession): string {
 function clonePage(page: DailyNotebookPage): DailyNotebookPage { return structuredClone(page); }
 function cloneNote(note: NotebookNote): NotebookNote { return structuredClone(note); }
 function uniqueNotes(notes: NotebookNote[]): NotebookNote[] { const seen = new Set<string>(); return notes.filter((note) => { if (seen.has(note.id)) return false; seen.add(note.id); return true; }); }
-function emptyPage(logicalDate: string): DailyNotebookPage { return { schemaVersion: 1, logicalDate, status: "unformed", workRecords: [], reflection: "", bookmarks: [] }; }
+function emptyPage(logicalDate: string): DailyNotebookPage { return { schemaVersion: 1, logicalDate, status: "unformed", workRecords: [], reflection: "", worklineReflections: [], bookmarks: [] }; }
 function cleanText(value: unknown, limit: number): string { return typeof value === "string" ? value.replace(/\0/g, "").trim().slice(0, limit) : ""; }
 function cleanTimestamp(value: unknown): string { const date = new Date(typeof value === "string" ? value : 0); return Number.isNaN(date.getTime()) ? new Date(0).toISOString() : date.toISOString(); }
 function isDate(value: unknown): value is string { return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value); }

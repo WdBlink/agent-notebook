@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCliSessionSummarizer } from "../../src/agent-summary";
+import { compileDailyWorklineReview } from "../../src/workline-review";
 import { loadAgentWorkSnapshot, mergeSessionSummaries, type RuntimeFileStat, type RuntimeFileSystem } from "../../src/agent-sessions";
 import { DEFAULT_SESSION_SCAN_ROOTS } from "../../src/constants";
 import { createEmptyData, localDateString, normalizeData, setWorkSessionSnapshot } from "../../src/state";
@@ -187,7 +188,19 @@ ipcMain.handle("desktop:route-notebook-note-to-project", async (_event, noteId: 
 ipcMain.handle("desktop:compose-daily-page", async (_event, date: string) => {
   const logicalDate = cleanDate(date, activeDate);
   const current = await ensureLoaded();
-  return mutateNotebook(logicalDate, (document) => composeDailyPage(document, logicalDate, current.workSessionSnapshot.sessions));
+  const reviewPackage = await compileDailyWorklineReview(
+    current.settings,
+    logicalDate,
+    current.workSessionSnapshot.sessions,
+    { runner: desktopCliRunner, evidenceCutoff: current.workSessionSnapshot.generatedAt }
+  );
+  return mutateNotebook(logicalDate, (document) => composeDailyPage(
+    document,
+    logicalDate,
+    current.workSessionSnapshot.sessions,
+    new Date(reviewPackage.generatedAt),
+    reviewPackage
+  ));
 });
 
 ipcMain.handle("desktop:save-daily-draft", async (_event, date: string, input: DailyDraftInput) => {

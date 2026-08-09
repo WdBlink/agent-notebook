@@ -1,0 +1,4 @@
+{"timestamp":"2026-08-09T15:20:00+08:00","type":"session_meta","payload":{"id":"codex-research-ir","cwd":"/workspace/autoresearch","branch":"review/ksi-skill"}}
+{"timestamp":"2026-08-09T15:22:00+08:00","role":"user","content":"基于前面的发现，草拟一个最小 Research IR 方案供我晚上判断。只写设计稿，不要迁移、不改代码。"}
+{"timestamp":"2026-08-09T17:35:00+08:00","role":"assistant","content":"已草拟 docs/research-ir-draft.md。方案把研究中间表示与 Receipt 分离，并建议用两类真实任务验证：如果判断成立，进入 scheduler 前的 schema repair 应明显下降。"}
+{"timestamp":"2026-08-09T17:36:00+08:00","role":"assistant","content":"文档已完成。这仍是候选方案，未得到采用确认。"}

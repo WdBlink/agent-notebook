@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentWorkSession } from "../src/types";
+import type { DailyReviewPackage } from "../src/workline-review";
 import {
   compileWorkRecords,
   composeDailyPage,
@@ -73,6 +74,64 @@ test("sealing freezes work records, reflection, and selected bookmarks", () => {
   assert.throws(() => composeDailyPage(sealed, "2026-08-01", [], new Date("2026-08-01T19:00:00Z")), /已经封页/);
 });
 
+test("review drafts preserve the exact generated package and one user reflection per workline", () => {
+  const empty = createEmptyNotebookDocument();
+  const review = reviewPackage();
+  const composed = composeDailyPage(
+    empty,
+    "2026-08-01",
+    sessions,
+    new Date("2026-08-01T18:00:00Z"),
+    review
+  );
+  const state = notebookStateForDate(composed, "2026-08-01", sessions);
+  const drafted = saveDailyDraft(
+    composed,
+    "2026-08-01",
+    {
+      reflection: "",
+      worklineReflections: [
+        { worklineId: "workline-review", text: "我认为应该先验证真实任务。" },
+        { worklineId: "invented-workline", text: "不能被保存。" }
+      ],
+      bookmarkIds: []
+    },
+    state.continuationCandidates,
+    new Date("2026-08-01T18:05:00Z")
+  );
+
+  assert.equal(drafted.pages["2026-08-01"]?.schemaVersion, 2);
+  assert.deepEqual(drafted.pages["2026-08-01"]?.reviewPackage, review);
+  assert.deepEqual(drafted.pages["2026-08-01"]?.worklineReflections, [
+    {
+      worklineId: "workline-review",
+      text: "我认为应该先验证真实任务。",
+      updatedAt: "2026-08-01T18:05:00.000Z"
+    }
+  ]);
+
+  const sealed = sealDailyPage(
+    drafted,
+    "2026-08-01",
+    {
+      reflection: "",
+      worklineReflections: [{ worklineId: "workline-review", text: "我认为应该先验证真实任务。" }],
+      bookmarkIds: []
+    },
+    state.continuationCandidates,
+    new Date("2026-08-01T18:10:00Z")
+  );
+  const serialized = JSON.stringify(sealed.pages["2026-08-01"]);
+  const reloaded = normalizeNotebookDocument(JSON.parse(JSON.stringify(sealed)));
+  assert.deepEqual(reloaded.pages["2026-08-01"]?.reviewPackage, review);
+  assert.deepEqual(reloaded.pages["2026-08-01"]?.worklineReflections, sealed.pages["2026-08-01"]?.worklineReflections);
+  assert.throws(
+    () => composeDailyPage(sealed, "2026-08-01", sessions, new Date("2026-08-01T19:00:00Z"), { ...review, id: "newer-review" }),
+    /已经封页/
+  );
+  assert.equal(JSON.stringify(sealed.pages["2026-08-01"]), serialized);
+});
+
 test("normalization keeps malformed legacy notebook data from entering the renderer", () => {
   const normalized = normalizeNotebookDocument({ schemaVersion: 99, knowledgeRoot: "/wiki", notes: [{ id: "", body: "invalid" }], pages: { nope: { status: "sealed" }, "2026-08-01": { status: "sealed", workRecords: [{ id: "record", projectKey: "/tmp/project", title: "unsafe", sessions: [{ id: {}, path: null }] }] } } });
   assert.equal(normalized.schemaVersion, 1);
@@ -80,3 +139,45 @@ test("normalization keeps malformed legacy notebook data from entering the rende
   assert.deepEqual(normalized.notes, []);
   assert.equal(normalized.pages["2026-08-01"]?.workRecords.length, 0);
 });
+
+function reviewPackage(): DailyReviewPackage {
+  return {
+    schemaVersion: 1,
+    id: "review-package",
+    logicalDate: "2026-08-01",
+    generatedAt: "2026-08-01T18:00:00.000Z",
+    evidenceCutoff: "2026-08-01T18:00:00.000Z",
+    promptProfile: "ksi-workline-review-v1",
+    compilerProvider: "codex",
+    model: "review-model",
+    evidence: [
+      {
+        id: "session:codex:codex-1",
+        kind: "session",
+        label: "明确今日手帐闭环",
+        path: "/tmp/codex-1.jsonl",
+        platform: "codex",
+        sessionId: "codex-1"
+      }
+    ],
+    worklines: [
+      {
+        id: "workline-review",
+        title: "验证日终回看闭环",
+        summary: "把 Session 重建为一条可读工作线。",
+        status: "needs-judgment",
+        sourceSessionIds: ["codex:codex-1"],
+        participation: [],
+        dossier: {
+          title: "回看材料必须先于人的判断",
+          dek: "AI 整理证据，但不替用户写结论。",
+          blocks: [],
+          question: { prompt: "这条路线是否真的值得继续？" }
+        },
+        payload: {}
+      }
+    ],
+    warnings: [],
+    rawOutput: { worklines: [{ id: "workline-review" }] }
+  };
+}

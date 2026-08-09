@@ -1,0 +1,5 @@
+{"timestamp":"2026-08-09T09:10:00+08:00","type":"session_meta","payload":{"id":"codex-scheduler","cwd":"/workspace/autoresearch","branch":"review/ksi-skill"}}
+{"timestamp":"2026-08-09T09:12:00+08:00","role":"user","content":"先验证 scheduler 是不是当前吞吐瓶颈。不要改整体架构，只做三组可逆实验，把结果记下来。"}
+{"timestamp":"2026-08-09T10:05:00+08:00","role":"assistant","content":"完成第一组：调高并发后总耗时改善 1.8%，错误率略升。"}
+{"timestamp":"2026-08-09T11:18:00+08:00","role":"assistant","content":"完成第二、三组：队列策略和缓存都没有稳定改善；三组结果见 results/scheduler-runs.md。任务进入执行前仍有大量 schema repair。"}
+{"timestamp":"2026-08-09T11:22:00+08:00","role":"user","content":"先停在这里。这个结果只能说明 scheduler 优化不明显，不能直接宣布要换架构。"}

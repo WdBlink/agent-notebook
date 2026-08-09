@@ -1,0 +1,3 @@
+{"timestamp":"2026-08-09T18:10:00+08:00","sessionId":"claude-release-check","cwd":"/workspace/daily-review","role":"user","content":"只检查 arm64 和 x64 安装包能否挂载、版本号和签名是否一致。不要上传 GitHub，也不要替换 Release。"}
+{"timestamp":"2026-08-09T18:44:00+08:00","sessionId":"claude-release-check","cwd":"/workspace/daily-review","role":"assistant","content":"两个 DMG 均可挂载，应用版本均为 0.6.0；arm64 与 x64 的应用内资源清单一致。当前是 ad-hoc 签名，没有 notarization ticket。"}
+{"timestamp":"2026-08-09T18:45:00+08:00","sessionId":"claude-release-check","cwd":"/workspace/daily-review","role":"assistant","content":"未执行上传、发布或 Release 替换。是否需要 notarization 仍需产品发布策略决定。"}

@@ -1,4 +1,5 @@
 import type { AgentPlatform, CockpitData, SessionProvider } from "../../src/types";
+import type { DailyReviewPackage } from "../../src/workline-review";
 
 export interface DesktopState {
   data: CockpitData;
@@ -64,7 +65,7 @@ export interface DailyContinuationBookmark {
 }
 
 export interface DailyNotebookPage {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   logicalDate: string;
   status: "unformed" | "draft" | "sealed";
   createdAt?: string;
@@ -73,7 +74,15 @@ export interface DailyNotebookPage {
   sealedAt?: string;
   workRecords: DailyWorkRecord[];
   reflection: string;
+  reviewPackage?: DailyReviewPackage;
+  worklineReflections: DailyWorklineReflection[];
   bookmarks: DailyContinuationBookmark[];
+}
+
+export interface DailyWorklineReflection {
+  worklineId: string;
+  text: string;
+  updatedAt: string;
 }
 
 export interface DesktopNotebookState {
@@ -94,6 +103,7 @@ export interface NotebookNoteInput {
 
 export interface DailyDraftInput {
   reflection: string;
+  worklineReflections?: Array<Pick<DailyWorklineReflection, "worklineId" | "text">>;
   bookmarkIds: string[];
 }
 
