@@ -578,7 +578,42 @@ test("today board keeps the native shell and independently scrolling evidence re
   expect(logo?.y).toBeGreaterThanOrEqual(48);
   expect((lastNavigationItem?.y ?? 0) + (lastNavigationItem?.height ?? 0)).toBeLessThan(590);
   await expect(page.locator(".today-workline")).toHaveCount(2);
-  await expect(page.locator(".project-strip button").first()).toContainText("02");
+  const selectedProject = page.locator('.today-board-toolbar .project-strip button[aria-pressed="true"]');
+  await expect(selectedProject).toContainText("02");
+  const selectedProjectStyle = await selectedProject.evaluate((element) => {
+    const parseColor = (value: string): [number, number, number, number] => {
+      const channels = value.match(/[\d.]+/g)?.map(Number) ?? [];
+      return [channels[0] ?? 0, channels[1] ?? 0, channels[2] ?? 0, channels[3] ?? 1];
+    };
+    const luminance = (channels: number[]): number => {
+      const linear = [channels[0] ?? 0, channels[1] ?? 0, channels[2] ?? 0].map((channel) => {
+        const normalized = channel / 255;
+        return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+      });
+      return (0.2126 * linear[0]!) + (0.7152 * linear[1]!) + (0.0722 * linear[2]!);
+    };
+    const style = getComputedStyle(element);
+    const toolbar = element.closest(".today-board-toolbar");
+    const toolbarBackground = parseColor(getComputedStyle(toolbar!).backgroundColor);
+    const background = parseColor(style.backgroundColor);
+    const paintedBackground = background.slice(0, 3).map((channel, index) =>
+      (channel * background[3]) + (toolbarBackground[index]! * (1 - background[3]))
+    );
+    const foregroundLuminance = luminance(parseColor(style.color));
+    const backgroundLuminance = luminance(paintedBackground);
+    return {
+      backgroundColor: style.backgroundColor,
+      borderColor: style.borderColor,
+      color: style.color,
+      contrast: (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) / (Math.min(foregroundLuminance, backgroundLuminance) + 0.05)
+    };
+  });
+  expect(selectedProjectStyle).toMatchObject({
+    backgroundColor: "rgb(32, 33, 30)",
+    borderColor: "rgb(32, 33, 30)",
+    color: "rgb(255, 255, 255)"
+  });
+  expect(selectedProjectStyle.contrast).toBeGreaterThanOrEqual(4.5);
   await expect(page.locator(".today-board-scroll")).toHaveCSS("overflow-y", "auto");
   await page.locator(".today-workline").first().locator(".workline-disclosure").click();
   await expect(page.locator(".workline-sessions")).toHaveCSS("overflow-y", "auto");
