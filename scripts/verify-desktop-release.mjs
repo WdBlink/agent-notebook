@@ -54,6 +54,8 @@ try {
   assertMarkers("main process", main, {
     "explicit daily-review preparation": ["desktop:prepare-daily-review"],
     "Traceink prompt profile": ["traceink-review-v1"],
+    "isolated Traceink compiler invocation": ["--ignore-user-config", "model_reasoning_effort", "structuredStdoutError"],
+    "controlled review-provider fallback": ["compilerProviders", "reviewCompilerArgs"],
     "frozen Traceink evidence": ["workline-evidence-manifest-v2", "transcriptCapture", "freezeCapturedPrefix"],
     "generation-preserving review store": ["packageGenerations", "activePackageGenerationId"],
     "generation-safe reflection and sealing": ["desktop:save-daily-draft", "desktop:seal-daily-page", "expectedActiveGenerationId"],

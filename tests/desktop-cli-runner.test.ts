@@ -25,3 +25,19 @@ test("desktop CLI runner includes provider install locations in PATH", async () 
   assert.match(result.stdout, /\.local\/bin/);
   assert.match(result.stdout, /\/opt\/homebrew\/bin/);
 });
+
+test("desktop CLI runner surfaces a structured stdout error when the provider exits nonzero", async () => {
+  await assert.rejects(
+    () => runDesktopCli({
+      command: process.execPath,
+      args: [
+        "-e",
+        `process.stdout.write(JSON.stringify({type:"turn.failed",error:{message:"Unsupported value: 'max' for reasoning.effort"}}) + "\\n"); process.exitCode = 1;`
+      ],
+      stdin: "",
+      cwd: process.cwd(),
+      timeoutMs: 5_000
+    }),
+    /Unsupported value: 'max'.*reasoning\.effort/
+  );
+});

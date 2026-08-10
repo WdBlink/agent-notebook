@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildSessionSummaryPrompt,
+  codexCompilerArgs,
   parseClaudeOutput,
   parseCodexOutput,
   summarizeSessionsWithProviderClis,
@@ -9,6 +10,11 @@ import {
 } from "../src/agent-summary";
 import { createEmptyData } from "../src/state";
 import type { AgentWorkSession } from "../src/types";
+
+test("Codex reasoning is pinned only for the product-owned Spark model", () => {
+  assert.ok(codexCompilerArgs("gpt-5.3-codex-spark").includes('model_reasoning_effort="xhigh"'));
+  assert.equal(codexCompilerArgs("custom-codex-model").includes("-c"), false);
+});
 
 test("provider CLIs receive only their canonical manifests and return validated summaries", async () => {
   const requests: CliRunRequest[] = [];
@@ -81,7 +87,14 @@ test("provider CLIs receive only their canonical manifests and return validated 
   assert.equal(requests.length, 2);
   assert.ok(requests[0]?.args.includes("--ephemeral"));
   assert.ok(requests[1]?.args.includes("--no-session-persistence"));
-  assert.deepEqual(requests[0]?.args.slice(0, 4), ["exec", "--model", "cheap-codex", "--ephemeral"]);
+  assert.deepEqual(requests[0]?.args.slice(0, 6), [
+    "exec",
+    "--ignore-user-config",
+    "--model",
+    "cheap-codex",
+    "--ephemeral",
+    "--skip-git-repo-check"
+  ]);
   assert.deepEqual(requests[1]?.args.slice(0, 2), ["--model", "cheap-claude"]);
   assert.ok(requests[0]?.stdin.includes("codex-real-id"));
   assert.equal(requests[0]?.stdin.includes("claude-real-id"), false);

@@ -3,8 +3,8 @@ import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { CliRunner } from "./agent-summary";
-import { parseClaudeOutput, parseCodexOutput } from "./agent-summary";
+import type { CliRunner, CliRunResult } from "./agent-summary";
+import { codexCompilerArgs, parseClaudeOutput, parseCodexOutput } from "./agent-summary";
 import type { AgentPlatform, AgentTranscriptCapture, AgentWorkSession, CockpitSettings, SessionProvider } from "./types";
 
 export const WORKLINE_REVIEW_PROMPT_PROFILE = "traceink-review-v1";
@@ -242,43 +242,42 @@ export async function compileDailyWorklineReview(
   const runner = options.runner;
   if (!runner) throw new Error("当前运行时不能启动工作线整理模型。");
 
-  const provider = chooseCompilerProvider(settings.enabledSessionProviders, options.preferredProvider);
+  const providers = compilerProviders(settings.enabledSessionProviders, options.preferredProvider);
   const homeDir = options.homeDir ?? os.homedir();
-  const model = cleanText(options.model, 120) || defaultModel(provider);
   const evidence = buildEvidenceManifest(sessions);
   const pathOnlyArtifactCount = sessions.reduce((total, session) => total + session.artifacts.length, 0);
   const evidenceWarnings = pathOnlyArtifactCount > 0
     ? [`${pathOnlyArtifactCount} 条 artifact 路径缺少扫描时内容哈希，未进入本次证据包。`]
     : [];
-  const command = expandHome(provider === "codex" ? settings.codexCliPath : settings.claudeCliPath, homeDir);
-  const modelArgs = model === "default" ? [] : ["--model", model];
-  const args = provider === "codex"
-    ? ["exec", ...modelArgs, "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "--json", "-"]
-    : [
-        ...modelArgs,
-        "--print",
-        "--output-format",
-        "json",
-        "--json-schema",
-        JSON.stringify(CLAUDE_REVIEW_SCHEMA),
-        "--tools",
-        "Read,Glob,Grep",
-        "--permission-mode",
-        "dontAsk",
-        "--safe-mode",
-        "--no-session-persistence"
-      ];
   const freezer = options.transcriptFreezer ?? withFrozenSessionTranscripts;
   return freezer(sessions, async (frozenSessions, frozenRoot) => {
     const promptEvidence = buildFrozenPromptEvidence(evidence, frozenSessions);
     const prompt = buildWorklineReviewPrompt(logicalDate, frozenSessions, promptEvidence);
-    const result = await runner({
-      command,
-      args,
-      stdin: prompt,
-      cwd: frozenRoot,
-      timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS
-    });
+    const failures: Array<{ provider: SessionProvider; message: string }> = [];
+    let provider: SessionProvider | undefined;
+    let model = "";
+    let result: CliRunResult | undefined;
+    for (const [index, candidate] of providers.entries()) {
+      const candidateModel = (index === 0 ? cleanText(options.model, 120) : "") || defaultModel(candidate);
+      const command = expandHome(candidate === "codex" ? settings.codexCliPath : settings.claudeCliPath, homeDir);
+      try {
+        result = await runner({
+          command,
+          args: reviewCompilerArgs(candidate, candidateModel),
+          stdin: prompt,
+          cwd: frozenRoot,
+          timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+        });
+        provider = candidate;
+        model = candidateModel;
+        break;
+      } catch (error) {
+        failures.push({ provider: candidate, message: cleanText(errorMessage(error), 500) || "未知错误" });
+      }
+    }
+    if (!provider || !result) {
+      throw new Error(failures.map((failure) => `${compilerProviderLabel(failure.provider)} CLI 调用失败：${failure.message}`).join("；"));
+    }
     const parsed = provider === "codex" ? parseCodexOutput(result.stdout) : parseClaudeOutput(result.stdout);
     const rawOutput = asRecord(parsed);
     if (!rawOutput) throw new Error("工作线整理结果不是有效对象。");
@@ -286,7 +285,10 @@ export async function compileDailyWorklineReview(
 
     const normalized = normalizeWorklines(rawOutput, sessions.map(sessionKey), evidence, "strict");
     if (normalized.worklines.length === 0) throw new Error("整理模型没有返回可用的跨会话工作线。");
-    const warnings = prioritizeWarnings(normalized.warnings, evidenceWarnings);
+    const fallbackWarnings = failures.length > 0
+      ? [`${compilerProviderLabel(failures[0]!.provider)} CLI 失败，已由 ${compilerProviderLabel(provider)} 完成：${failures[0]!.message}`]
+      : [];
+    const warnings = prioritizeWarnings(normalized.warnings, [...evidenceWarnings, ...fallbackWarnings]);
     const generatedAt = (options.now?.() ?? new Date()).toISOString();
     const evidenceCutoff = cleanTimestamp(options.evidenceCutoff) ?? generatedAt;
     const hashInput = JSON.stringify({
@@ -757,11 +759,36 @@ function normalizePlatform(value: unknown): AgentPlatform | undefined {
   return value === "codex" || value === "claude" || value === "minimax" || value === "other" ? value : undefined;
 }
 
-function chooseCompilerProvider(enabled: SessionProvider[], preferred?: SessionProvider): SessionProvider {
-  if (preferred && enabled.includes(preferred)) return preferred;
-  if (enabled.includes("codex")) return "codex";
-  if (enabled.includes("claude")) return "claude";
-  throw new Error("请先在 Sources 中启用 Codex 或 Claude Code。");
+function compilerProviders(enabled: SessionProvider[], preferred?: SessionProvider): SessionProvider[] {
+  const ordered: SessionProvider[] = [];
+  if (preferred && enabled.includes(preferred)) ordered.push(preferred);
+  for (const provider of ["codex", "claude"] as const) {
+    if (enabled.includes(provider) && !ordered.includes(provider)) ordered.push(provider);
+  }
+  if (ordered.length === 0) throw new Error("请先在 Sources 中启用 Codex 或 Claude Code。");
+  return ordered;
+}
+
+function reviewCompilerArgs(provider: SessionProvider, model: string): string[] {
+  if (provider === "codex") return codexCompilerArgs(model === "default" ? undefined : model);
+  return [
+    ...(model === "default" ? [] : ["--model", model]),
+    "--print",
+    "--output-format",
+    "json",
+    "--json-schema",
+    JSON.stringify(CLAUDE_REVIEW_SCHEMA),
+    "--tools",
+    "Read,Glob,Grep",
+    "--permission-mode",
+    "dontAsk",
+    "--safe-mode",
+    "--no-session-persistence"
+  ];
+}
+
+function compilerProviderLabel(provider: SessionProvider): string {
+  return provider === "codex" ? "Codex" : "Claude Code";
 }
 
 function defaultModel(provider: SessionProvider): string {

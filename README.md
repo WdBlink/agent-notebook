@@ -125,7 +125,7 @@ Traceink uses the versioned `traceink-review-v1` prompt profile as an evidence-l
 
 The compiler may prepare basis evidence, but it cannot manufacture commitment. It is forbidden from claiming that the person decided, approved, adopted, delegated, migrated, authorized, or sealed anything. Generated semantic blocks remain extensible; Work Continuity mechanically enforces evidence membership, provenance, replay-safe generations, explicit actions, and sealed immutability rather than freezing the model into a rigid cognition schema.
 
-Compilation runs through one installed provider CLI in read-only, ephemeral mode and can read the verified Codex and Claude manifest together. The default review models inherit the inexpensive smart-title defaults. Override them with `WORK_CONTINUITY_CODEX_REVIEW_MODEL` or `WORK_CONTINUITY_CLAUDE_REVIEW_MODEL`.
+Compilation runs through an installed provider CLI in read-only, ephemeral mode and can read the verified Codex and Claude manifest together. Product-owned Codex model and reasoning settings are isolated from interactive user configuration so they remain a compatible pair. If that CLI cannot be invoked and the other provider is already enabled, Work Continuity tries the other provider once; an invalid semantic result never triggers a second paid call or a thin-summary fallback. The default review models inherit the inexpensive smart-title defaults. Override them with `WORK_CONTINUITY_CODEX_REVIEW_MODEL` or `WORK_CONTINUITY_CLAUDE_REVIEW_MODEL`.
 
 ## Local Model / Smart Session Titles
 

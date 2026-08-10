@@ -5,6 +5,7 @@ Work Continuity v0.6.0 replaces the capture-led Today surface with one evidence-
 ## Highlights
 
 - Reconstructs shared worklines across Codex and Claude Code Sessions with the KSI-informed Traceink prompt profile (`traceink-review-v1`) instead of producing one summary card per Session.
+- Isolates the product-owned Codex model/reasoning pair from incompatible interactive CLI settings, surfaces structured provider errors, and tries the other already-enabled provider once only when CLI invocation fails.
 - Keeps compilation on demand. **Raw** shows source Session lanes, **compiled** shows the current workline package, **stale** preserves that package beside newly arrived evidence, and **sealed** replays the chosen historical generation without calling the model again.
 - Shows only evidence-supported participation: explicit human interventions, observed Agent-independent activity windows, collaborative spans, and uncertainty remain distinct. Agent activity volume is never presented as proof of human attention or importance.
 - Adds an evidence reader for each workline. Generated interpretations stay labeled, admitted sources can be reopened, disagreement and scope survive compression, and the dossier stops at a question that still requires the person.
@@ -19,6 +20,6 @@ Work Continuity v0.6.0 replaces the capture-led Today surface with one evidence-
 - macOS only.
 - The v0.6.0 archives are unsigned and not notarized. macOS may require Control-clicking the app and choosing **Open** for the first launch.
 - Provider Session stores are read-only. Work Continuity never edits Codex or Claude Code transcripts.
-- Traceink compilation uses an installed provider CLI and the provider account/network already configured on the Mac; failures remain visible and do not fall back to a thin summary.
+- Traceink compilation uses installed provider CLIs and the provider account/network already configured on the Mac. Invocation failures remain visible; an already-enabled second provider may be tried once, but semantic validation failures never trigger another call or fall back to a thin summary.
 - Resume remains copy-only. Work Continuity does not start a terminal, PTY, tmux Session, or provider process.
 - Legacy Wiki/CTX note-delivery APIs remain compatibility code and still require an explicit action; they are not part of the primary Today Board.

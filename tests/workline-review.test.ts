@@ -11,7 +11,7 @@ import {
   type WorklineTranscriptFreezer
 } from "../src/workline-review";
 import { createEmptyData } from "../src/state";
-import type { AgentWorkSession } from "../src/types";
+import type { AgentWorkSession, CockpitSettings } from "../src/types";
 import type { CliRunRequest } from "../src/agent-summary";
 
 const passThroughTranscriptFreezer: WorklineTranscriptFreezer = async (sessions, use) =>
@@ -260,7 +260,14 @@ test("one Prompt reconstructs a cross-provider workline and keeps only verified 
 
   assert.equal(requests.length, 1);
   assert.equal(requests[0]?.command, "codex");
-  assert.deepEqual(requests[0]?.args.slice(0, 4), ["exec", "--model", "review-model", "--ephemeral"]);
+  assert.deepEqual(requests[0]?.args.slice(0, 6), [
+    "exec",
+    "--ignore-user-config",
+    "--model",
+    "review-model",
+    "--ephemeral",
+    "--skip-git-repo-check"
+  ]);
   assert.match(requests[0]?.stdin ?? "", /complete admitted manifest/i);
   assert.match(requests[0]?.stdin ?? "", /weak hints, never authority/i);
   for (const marker of ["failed paths", "route changes", "conflicts", "scope", "current stop", "user participation", "Agent-independent work"]) {
@@ -306,6 +313,61 @@ test("one Prompt reconstructs a cross-provider workline and keeps only verified 
     "session:claude:claude-research-ir"
   ]);
   assert.deepEqual(review.provenance?.evidence.completenessWarnings, review.warnings);
+});
+
+test("review falls back once to another enabled provider when the preferred CLI invocation fails", async () => {
+  const commands: string[] = [];
+  const settings: CockpitSettings = {
+    ...createEmptyData().settings,
+    enabledSessionProviders: ["codex", "claude"]
+  };
+
+  const review = await compileDailyWorklineReview(
+    settings,
+    "2026-08-09",
+    [session({ id: "codex-one", path: "/tmp/codex-one.jsonl" })],
+    {
+      transcriptFreezer: passThroughTranscriptFreezer,
+      runner: async (request) => {
+        commands.push(request.command);
+        if (request.command === "codex") throw new Error("CLI 退出码 1：provider unavailable");
+        return {
+          stdout: JSON.stringify({ structured_output: { worklines: [semanticWorkline()] } }),
+          stderr: ""
+        };
+      }
+    }
+  );
+
+  assert.deepEqual(commands, ["codex", "claude"]);
+  assert.equal(review.compilerProvider, "claude");
+  assert.match(review.warnings.join(" "), /Codex.*失败.*Claude Code/i);
+});
+
+test("semantic validation failure never triggers a second provider call", async () => {
+  const commands: string[] = [];
+  const settings: CockpitSettings = {
+    ...createEmptyData().settings,
+    enabledSessionProviders: ["codex", "claude"]
+  };
+
+  await assert.rejects(
+    () => compileDailyWorklineReview(
+      settings,
+      "2026-08-09",
+      [session({ id: "codex-one", path: "/tmp/codex-one.jsonl" })],
+      {
+        transcriptFreezer: passThroughTranscriptFreezer,
+        runner: async (request) => {
+          commands.push(request.command);
+          return codexResult({ worklines: [] });
+        }
+      }
+    ),
+    /没有返回可用的跨会话工作线/
+  );
+
+  assert.deepEqual(commands, ["codex"]);
 });
 
 test("path-only artifacts are excluded until their bytes have an integrity capture", async () => {

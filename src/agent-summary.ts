@@ -20,6 +20,25 @@ export interface CliRunResult {
 
 export type CliRunner = (request: CliRunRequest) => Promise<CliRunResult>;
 
+export function codexCompilerArgs(model?: string): string[] {
+  const selectedModel = model?.trim();
+  const reasoningArgs = selectedModel === "gpt-5.3-codex-spark"
+    ? ["-c", 'model_reasoning_effort="xhigh"']
+    : [];
+  return [
+    "exec",
+    "--ignore-user-config",
+    ...reasoningArgs,
+    ...(selectedModel ? ["--model", selectedModel] : []),
+    "--ephemeral",
+    "--skip-git-repo-check",
+    "--sandbox",
+    "read-only",
+    "--json",
+    "-"
+  ];
+}
+
 export interface CliSummarizerOptions {
   runner?: CliRunner;
   homeDir?: string;
@@ -164,12 +183,11 @@ async function runProvider(
 ): Promise<SessionSummaryBatch> {
   const prompt = buildSessionSummaryPrompt(platform, date, sessions);
   const command = expandHome(platform === "codex" ? settings.codexCliPath : settings.claudeCliPath, homeDir);
-  const modelArgs = model?.trim() ? ["--model", model.trim()] : [];
   const args =
     platform === "codex"
-      ? ["exec", ...modelArgs, "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "--json", "-"]
+      ? codexCompilerArgs(model)
       : [
-          ...modelArgs,
+          ...(model?.trim() ? ["--model", model.trim()] : []),
           "--print",
           "--output-format",
           "json",
