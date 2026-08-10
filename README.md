@@ -42,13 +42,13 @@ The primary product is a standalone macOS app. It does not require Obsidian and 
 
 ## macOS Install
 
-Work Continuity v0.6.1 ships a DMG and ZIP for each current Mac architecture:
+Work Continuity v0.6.2 ships a DMG and ZIP for each current Mac architecture:
 
 ```text
-dist/macos/Work Continuity-0.6.1-macos-arm64.dmg
-dist/macos/Work Continuity-0.6.1-macos-arm64.zip
-dist/macos/Work Continuity-0.6.1-macos-x64.dmg
-dist/macos/Work Continuity-0.6.1-macos-x64.zip
+dist/macos/Work Continuity-0.6.2-macos-arm64.dmg
+dist/macos/Work Continuity-0.6.2-macos-arm64.zip
+dist/macos/Work Continuity-0.6.2-macos-x64.dmg
+dist/macos/Work Continuity-0.6.2-macos-x64.zip
 ```
 
 Use `arm64` on Apple Silicon and `x64` on Intel. The DMG is the normal install path; the ZIP is a fallback archive of the same app bundle.
@@ -123,7 +123,7 @@ Release archives have an additional bundle, version, architecture, checksum, and
 
 Traceink uses the versioned `traceink-review-v1` prompt profile as an evidence-led editorial contract. It groups by shared intent and changing state rather than Session title, removes repetitive tool chatter while retaining failed paths and route changes, cites admitted evidence, separates fact from inference, preserves disagreement and scope, and describes only possible changes with falsifiable future observations.
 
-The compiler may prepare basis evidence, but it cannot manufacture commitment. It is forbidden from claiming that the person decided, approved, adopted, delegated, migrated, authorized, or sealed anything. Generated semantic blocks remain extensible; Work Continuity mechanically enforces evidence membership, provenance, replay-safe generations, explicit actions, and sealed immutability rather than freezing the model into a rigid cognition schema.
+The compiler may prepare basis evidence, but it cannot manufacture commitment. It is forbidden from claiming that the person decided, approved, adopted, delegated, migrated, authorized, or sealed anything. Generated semantic blocks remain extensible. Work Continuity requests a strict CLI result envelope and locally validates it; when a provider exhibits the known brace-free YAML transport defect, the app can recover only that narrow syntax without rewriting semantic values. Evidence membership, provenance, replay-safe generations, explicit actions, and sealed immutability remain mechanically enforced.
 
 Compilation runs through an installed provider CLI in read-only, ephemeral mode and can read the verified Codex and Claude manifest together. Product-owned Codex model and reasoning settings are isolated from interactive user configuration so they remain a compatible pair. If that CLI cannot be invoked and the other provider is already enabled, Work Continuity tries the other provider once; an invalid semantic result never triggers a second paid call or a thin-summary fallback. The default review models inherit the inexpensive smart-title defaults. Override them with `WORK_CONTINUITY_CODEX_REVIEW_MODEL` or `WORK_CONTINUITY_CLAUDE_REVIEW_MODEL`.
 

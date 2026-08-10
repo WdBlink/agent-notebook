@@ -26,7 +26,7 @@ export interface CliRunResult {
 
 export type CliRunner = (request: CliRunRequest) => Promise<CliRunResult>;
 
-export function codexCompilerArgs(model?: string): string[] {
+export function codexCompilerArgs(model?: string, outputSchemaPath?: string): string[] {
   const selectedModel = model?.trim();
   const reasoningArgs = selectedModel === "gpt-5.3-codex-spark"
     ? ["-c", 'model_reasoning_effort="xhigh"']
@@ -40,6 +40,7 @@ export function codexCompilerArgs(model?: string): string[] {
     "--skip-git-repo-check",
     "--sandbox",
     "read-only",
+    ...(outputSchemaPath ? ["--output-schema", outputSchemaPath] : []),
     "--json",
     "-"
   ];
@@ -223,7 +224,7 @@ async function runProvider(
   return { summaries: normalized, warnings };
 }
 
-export function parseCodexOutput(output: string): unknown {
+export function parseCodexOutput(output: string, recoverInvalidJson?: (text: string) => unknown): unknown {
   let finalMessage = "";
   for (const line of output.split(/\r?\n/)) {
     if (!line.trim().startsWith("{")) continue;
@@ -238,14 +239,20 @@ export function parseCodexOutput(output: string): unknown {
     }
   }
   if (!finalMessage) throw new Error("Codex 没有返回最终总结消息");
-  return parseJsonValue(finalMessage);
+  return recoverInvalidJson ? recoverInvalidJson(finalMessage) : parseJsonValue(finalMessage);
 }
 
-export function parseClaudeOutput(output: string): unknown {
+export function parseClaudeOutput(output: string, recoverInvalidJson?: (text: string) => unknown): unknown {
   const envelope = parseJsonValue(output);
   const record = asRecord(envelope);
+  if (record?.is_error === true || (typeof record?.subtype === "string" && record.subtype.startsWith("error_"))) {
+    const detail = structuredCliError(output) || "Provider returned an error envelope";
+    throw new Error(`Claude Code 返回错误：${detail}`);
+  }
   if (record?.structured_output && typeof record.structured_output === "object") return record.structured_output;
-  if (typeof record?.result === "string") return parseJsonValue(record.result);
+  if (typeof record?.result === "string") {
+    return recoverInvalidJson ? recoverInvalidJson(record.result) : parseJsonValue(record.result);
+  }
   return envelope;
 }
 
@@ -445,9 +452,15 @@ function parseJsonValue(text: string): unknown {
   } catch {
     const start = trimmed.indexOf("{");
     const end = trimmed.lastIndexOf("}");
-    if (start >= 0 && end > start) return JSON.parse(trimmed.slice(start, end + 1)) as unknown;
-    throw new Error("CLI 返回的总结不是有效 JSON");
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(trimmed.slice(start, end + 1)) as unknown;
+      } catch {
+        // A transport schema is required for model output; do not guess or rewrite its values.
+      }
+    }
   }
+  throw new Error("CLI 返回的总结不是有效 JSON");
 }
 
 function cleanString(value: unknown, maxLength: number): string | undefined {

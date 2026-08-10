@@ -55,6 +55,8 @@ try {
     "explicit daily-review preparation": ["desktop:prepare-daily-review"],
     "Traceink prompt profile": ["traceink-review-v1"],
     "isolated Traceink compiler invocation": ["--ignore-user-config", "model_reasoning_effort"],
+    "schema-enforced Traceink result transport": ["--output-schema", "traceink-review-output", "valueJson"],
+    "bounded local Traceink transport recovery": ["traceink-local-transport-recovery-v1", "transportComplete"],
     "bounded provider output collection": ["codex-jsonl", "single-json", "final-output-too-large", "SIGKILL"],
     "controlled review-provider fallback": ["compilerProviders", "reviewCompilerArgs"],
     "frozen Traceink evidence": ["workline-evidence-manifest-v2", "transcriptCapture", "freezeCapturedPrefix"],

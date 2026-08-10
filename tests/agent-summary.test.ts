@@ -14,6 +14,10 @@ import type { AgentWorkSession } from "../src/types";
 test("Codex reasoning is pinned only for the product-owned Spark model", () => {
   assert.ok(codexCompilerArgs("gpt-5.3-codex-spark").includes('model_reasoning_effort="xhigh"'));
   assert.equal(codexCompilerArgs("custom-codex-model").includes("-c"), false);
+  assert.deepEqual(
+    codexCompilerArgs("gpt-5.3-codex-spark", "/tmp/review schema.json").slice(-4),
+    ["--output-schema", "/tmp/review schema.json", "--json", "-"]
+  );
 });
 
 test("provider CLIs receive only their canonical manifests and return validated summaries", async () => {
@@ -220,6 +224,53 @@ test("parses Codex JSONL and Claude fenced result envelopes", () => {
   const claude = parseClaudeOutput(JSON.stringify({ result: "```json\n{\"sessions\":[]}\n```" }));
   assert.deepEqual(codex, { sessions: [] });
   assert.deepEqual(claude, { sessions: [] });
+});
+
+test("rejects brace-free prose instead of inventing a structured result", () => {
+  assert.throws(() => parseCodexOutput(
+    `${JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "agent_message",
+        text: "worklines:\n  - title: plain prose is not the transport contract"
+      }
+    })}\n`
+  ), /CLI 返回的总结不是有效 JSON/);
+});
+
+test("workline callers may recover only the final provider text after exact JSON parsing fails", () => {
+  const seen: string[] = [];
+  const fallback = (text: string): unknown => {
+    seen.push(text);
+    return { recovered: true };
+  };
+  const codex = parseCodexOutput(
+    `${JSON.stringify({
+      type: "item.completed",
+      item: { type: "agent_message", text: "worklines:\n  - id: one\ntransportComplete: true" }
+    })}\n`,
+    fallback
+  );
+  const claude = parseClaudeOutput(JSON.stringify({ result: "worklines:\n  - id: two\ntransportComplete: true" }), fallback);
+
+  assert.deepEqual(codex, { recovered: true });
+  assert.deepEqual(claude, { recovered: true });
+  assert.deepEqual(seen, [
+    "worklines:\n  - id: one\ntransportComplete: true",
+    "worklines:\n  - id: two\ntransportComplete: true"
+  ]);
+});
+
+test("surfaces a Claude error envelope even when the CLI exits successfully", () => {
+  assert.throws(
+    () => parseClaudeOutput(JSON.stringify({
+      type: "result",
+      subtype: "error_during_execution",
+      is_error: true,
+      result: "The structured response could not be produced"
+    })),
+    /Claude Code.*structured response could not be produced/i
+  );
 });
 
 test("summary prompt treats transcript content as data and carries worktree metadata", () => {

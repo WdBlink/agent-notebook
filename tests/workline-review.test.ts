@@ -15,14 +15,21 @@ import type { AgentWorkSession, CockpitSettings } from "../src/types";
 import type { CliRunRequest } from "../src/agent-summary";
 import { CliProtocolError } from "../src/cli-output-collector";
 
-const passThroughTranscriptFreezer: WorklineTranscriptFreezer = async (sessions, use) =>
-  use(sessions, "/tmp/work-continuity-test-freeze");
+const passThroughTranscriptFreezer: WorklineTranscriptFreezer = async (sessions, use) => {
+  const frozenRoot = await mkdtemp(path.join(os.tmpdir(), "work-continuity-test-freeze-"));
+  try {
+    return await use(sessions, frozenRoot);
+  } finally {
+    await rm(frozenRoot, { recursive: true, force: true });
+  }
+};
 
 test("compile reads only the scanner-admitted prefix from a temporary frozen transcript and removes it afterward", async () => {
   const temp = await mkdtemp(path.join(os.tmpdir(), "work-continuity-review-freeze-"));
   const sourcePath = path.join(temp, "session.jsonl");
   const admittedContent = "captured transcript\n";
   let frozenPath = "";
+  let outputSchemaPath = "";
 
   try {
     await writeFile(sourcePath, admittedContent);
@@ -43,6 +50,20 @@ test("compile reads only the scanner-admitted prefix from a temporary frozen tra
       })],
       {
         runner: async (request) => {
+          const schemaFlag = request.args.indexOf("--output-schema");
+          assert.notEqual(schemaFlag, -1);
+          const schemaPath = request.args[schemaFlag + 1];
+          assert.ok(schemaPath);
+          outputSchemaPath = schemaPath;
+          assert.equal(path.isAbsolute(schemaPath), true);
+          assert.equal(path.dirname(schemaPath), request.cwd);
+          const transportSchema = JSON.parse(await readFile(schemaPath, "utf8")) as Record<string, unknown>;
+          assertStrictTransportSchema(transportSchema);
+          const worklineSchema = (((transportSchema.properties as Record<string, unknown>).worklines as Record<string, unknown>).items as Record<string, unknown>);
+          const dossierSchema = (worklineSchema.properties as Record<string, unknown>).dossier as Record<string, unknown>;
+          const blockSchema = (((dossierSchema.properties as Record<string, unknown>).blocks as Record<string, unknown>).items as Record<string, unknown>);
+          assert.equal(Object.hasOwn((blockSchema.properties as Record<string, unknown>).kind as object, "enum"), false);
+          assert.ok((blockSchema.properties as Record<string, unknown>).extensions);
           const match = request.stdin.match(/"transcriptPath":\s*("(?:[^"\\]|\\.)*")/);
           assert.ok(match?.[1]);
           frozenPath = JSON.parse(match[1]) as string;
@@ -77,10 +98,24 @@ test("compile reads only the scanner-admitted prefix from a temporary frozen tra
     assert.deepEqual(review.provenance?.evidence.sourceRefs, review.evidence);
     assert.equal(JSON.stringify(review).includes("work-continuity-evidence-"), false);
     await assert.rejects(() => readFile(frozenPath), { code: "ENOENT" });
+    await assert.rejects(() => readFile(outputSchemaPath), { code: "ENOENT" });
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+function assertStrictTransportSchema(value: unknown): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const record = value as Record<string, unknown>;
+  if (record.type === "object") {
+    assert.equal(record.additionalProperties, false);
+    const properties = record.properties as Record<string, unknown>;
+    assert.deepEqual(new Set(record.required as string[]), new Set(Object.keys(properties)));
+    Object.values(properties).forEach(assertStrictTransportSchema);
+  }
+  if (record.items) assertStrictTransportSchema(record.items);
+  if (Array.isArray(record.anyOf)) record.anyOf.forEach(assertStrictTransportSchema);
+}
 
 test("compile rejects a covered-prefix mutation even when byte length and mtime are unchanged", async () => {
   const temp = await mkdtemp(path.join(os.tmpdir(), "work-continuity-review-mutation-"));
@@ -123,6 +158,7 @@ test("compile removes its frozen transcript when the model runner fails", async 
   const temp = await mkdtemp(path.join(os.tmpdir(), "work-continuity-review-cleanup-"));
   const sourcePath = path.join(temp, "session.jsonl");
   let frozenPath = "";
+  let outputSchemaPath = "";
 
   try {
     await writeFile(sourcePath, "captured transcript\n");
@@ -143,6 +179,10 @@ test("compile removes its frozen transcript when the model runner fails", async 
         })],
         {
           runner: async (request) => {
+            const schemaFlag = request.args.indexOf("--output-schema");
+            outputSchemaPath = request.args[schemaFlag + 1] ?? "";
+            assert.ok(outputSchemaPath);
+            await readFile(outputSchemaPath, "utf8");
             const match = request.stdin.match(/"transcriptPath":\s*("(?:[^"\\]|\\.)*")/);
             assert.ok(match?.[1]);
             frozenPath = JSON.parse(match[1]) as string;
@@ -154,6 +194,7 @@ test("compile removes its frozen transcript when the model runner fails", async 
     );
     assert.ok(frozenPath);
     await assert.rejects(() => readFile(frozenPath), { code: "ENOENT" });
+    await assert.rejects(() => readFile(outputSchemaPath), { code: "ENOENT" });
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
@@ -309,7 +350,7 @@ test("one Prompt reconstructs a cross-provider workline and keeps only verified 
   assert.equal(review.rawOutput.worklines ? true : false, true);
   assert.equal(review.warnings.includes("Claude transcript ended before the final user reply; prior context is unknown."), true);
   assert.equal(review.provenance?.compiler.id, "workline-review");
-  assert.equal(review.provenance?.compiler.version, "3");
+  assert.equal(review.provenance?.compiler.version, "4");
   assert.equal(review.provenance?.promptProfile, "traceink-review-v1");
   assert.equal(review.provenance?.model.provider, "codex");
   assert.equal(review.provenance?.model.name, "review-model");
@@ -338,7 +379,7 @@ test("review falls back once to another enabled provider when the preferred CLI 
         commands.push(request.command);
         if (request.command === "codex") throw new Error("CLI 退出码 1：provider unavailable");
         return {
-          stdout: JSON.stringify({ structured_output: { worklines: [semanticWorkline()] } }),
+          stdout: JSON.stringify({ structured_output: transportResult({ worklines: [semanticWorkline()] }) }),
           stderr: ""
         };
       }
@@ -367,6 +408,58 @@ test("semantic validation failure never triggers a second provider call", async 
         runner: async (request) => {
           commands.push(request.command);
           return codexResult({ worklines: [] });
+        }
+      }
+    ),
+    /没有返回可用的跨会话工作线/
+  );
+
+  assert.deepEqual(commands, ["codex"]);
+});
+
+test("brace-free YAML transport is recovered locally, audited, and uses one provider call", async () => {
+  const commands: string[] = [];
+  const settings: CockpitSettings = {
+    ...createEmptyData().settings,
+    enabledSessionProviders: ["codex", "claude"]
+  };
+
+  const review = await compileDailyWorklineReview(
+    settings,
+    "2026-08-09",
+    [session({ id: "codex-one", path: "/tmp/codex-one.jsonl" })],
+    {
+      transcriptFreezer: passThroughTranscriptFreezer,
+      runner: async (request) => {
+        commands.push(request.command);
+        return codexTextResult(semanticWorklineYaml());
+      }
+    }
+  );
+
+  assert.deepEqual(commands, ["codex"]);
+  assert.equal(review.worklines[0]?.title, "Recovered workline");
+  assert.match(review.warnings.join(" "), /traceink-local-transport-recovery-v1/);
+  assert.equal(review.provenance?.evidence.completenessWarnings.some((warning) => /恢复/.test(warning)), true);
+});
+
+test("recovered transport cannot bypass the existing evidence-id gate or trigger a second call", async () => {
+  const commands: string[] = [];
+  const settings: CockpitSettings = {
+    ...createEmptyData().settings,
+    enabledSessionProviders: ["codex", "claude"]
+  };
+
+  await assert.rejects(
+    () => compileDailyWorklineReview(
+      settings,
+      "2026-08-09",
+      [session({ id: "codex-one", path: "/tmp/codex-one.jsonl" })],
+      {
+        transcriptFreezer: passThroughTranscriptFreezer,
+        runner: async (request) => {
+          commands.push(request.command);
+          return codexTextResult(semanticWorklineYaml("session:codex:invented"));
         }
       }
     ),
@@ -480,6 +573,44 @@ test("a later Prompt may add a semantic role without requiring a schema migratio
     affectedScopes: ["local", "project"],
     visualHint: "margin-note"
   });
+});
+
+test("strict transport extensions become ordinary extensible payload fields", async () => {
+  const output = semanticWorkline() as Record<string, unknown>;
+  output.extensions = [{ name: "worklineSignal", valueJson: JSON.stringify({ confidence: "medium" }) }];
+  const dossier = output.dossier as Record<string, unknown>;
+  const blocks = dossier.blocks as Array<Record<string, unknown>>;
+  blocks[0]!.extensions = [
+    { name: "affectedScopes", valueJson: JSON.stringify(["local", "project"]) },
+    { name: "visualHint", valueJson: JSON.stringify("margin-note") }
+  ];
+
+  const review = await runReview({ worklines: [output], warnings: [] });
+
+  assert.deepEqual(review.worklines[0]?.payload.worklineSignal, { confidence: "medium" });
+  assert.deepEqual(review.worklines[0]?.dossier.blocks[0]?.payload, {
+    futurePayload: { remains: "extensible" },
+    affectedScopes: ["local", "project"],
+    visualHint: "margin-note"
+  });
+});
+
+test("transport extensions cannot overwrite object prototype control fields", async () => {
+  const output = semanticWorkline() as Record<string, unknown>;
+  output.extensions = [
+    { name: "__proto__", valueJson: JSON.stringify({ polluted: true }) },
+    { name: "constructor", valueJson: JSON.stringify("shadowed") },
+    { name: "safeSignal", valueJson: JSON.stringify("kept") }
+  ];
+
+  const review = await runReview({ worklines: [output], warnings: [] });
+  const payload = review.worklines[0]!.payload;
+
+  assert.equal(Object.getPrototypeOf(payload), Object.prototype);
+  assert.equal(Object.hasOwn(payload, "__proto__"), false);
+  assert.equal(Object.hasOwn(payload, "constructor"), false);
+  assert.equal(payload.safeSignal, "kept");
+  assert.equal(({} as { polluted?: boolean }).polluted, undefined);
 });
 
 test("rejects a workline that omits any required Prompt-profile semantic gate", async () => {
@@ -760,10 +891,152 @@ function codexResult(output: unknown): { stdout: string; stderr: string } {
   return {
     stdout: `${JSON.stringify({
       type: "item.completed",
-      item: { type: "agent_message", text: JSON.stringify(output) }
+      item: { type: "agent_message", text: JSON.stringify(transportResult(output)) }
     })}\n`,
     stderr: ""
   };
+}
+
+function transportResult(output: unknown): unknown {
+  if (!output || typeof output !== "object" || Array.isArray(output)) return output;
+  const root = output as Record<string, unknown>;
+  if (!Array.isArray(root.worklines)) return output;
+  return {
+    worklines: root.worklines.map(transportWorkline),
+    warnings: Array.isArray(root.warnings) ? root.warnings : [],
+    transportComplete: true
+  };
+}
+
+function transportWorkline(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  const dossier = record.dossier && typeof record.dossier === "object" && !Array.isArray(record.dossier)
+    ? record.dossier as Record<string, unknown>
+    : {};
+  const question = dossier.question && typeof dossier.question === "object" && !Array.isArray(dossier.question)
+    ? dossier.question as Record<string, unknown>
+    : undefined;
+  return {
+    id: record.id,
+    title: record.title,
+    summary: record.summary,
+    status: record.status ?? "uncertain",
+    sourceSessionIds: record.sourceSessionIds,
+    startedAt: record.startedAt ?? null,
+    endedAt: record.endedAt ?? null,
+    participation: Array.isArray(record.participation)
+      ? record.participation.map((item) => {
+          const span = item && typeof item === "object" && !Array.isArray(item) ? item as Record<string, unknown> : {};
+          return {
+            id: span.id,
+            kind: span.kind === "unknown" ? "uncertain" : span.kind,
+            startAt: span.startAt ?? null,
+            endAt: span.endAt ?? null,
+            label: span.label
+          };
+        })
+      : record.participation,
+    dossier: {
+      title: dossier.title,
+      dek: dossier.dek ?? "",
+      blocks: Array.isArray(dossier.blocks) ? dossier.blocks.map(transportBlock) : dossier.blocks,
+      question: question
+        ? { prompt: question.prompt, context: question.context ?? null }
+        : null
+    },
+    extensions: mergeTransportExtensions(record.extensions, record, new Set([
+      "id", "title", "summary", "status", "sourceSessionIds", "startedAt", "endedAt", "participation", "dossier", "extensions"
+    ]))
+  };
+}
+
+function transportBlock(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  return {
+    id: record.id,
+    kind: record.kind,
+    label: record.label ?? null,
+    title: record.title,
+    body: record.body,
+    evidenceIds: record.evidenceIds,
+    extensions: mergeTransportExtensions(record.extensions, record, new Set([
+      "id", "kind", "label", "title", "body", "evidenceIds", "extensions"
+    ]))
+  };
+}
+
+function mergeTransportExtensions(
+  existing: unknown,
+  source: Record<string, unknown>,
+  standardKeys: Set<string>
+): Array<{ name: string; valueJson: string }> {
+  const extensions = Array.isArray(existing)
+    ? existing.filter((item): item is { name: string; valueJson: string } => Boolean(
+        item && typeof item === "object" && !Array.isArray(item)
+        && typeof (item as Record<string, unknown>).name === "string"
+        && typeof (item as Record<string, unknown>).valueJson === "string"
+      ))
+    : [];
+  const names = new Set(extensions.map((item) => item.name));
+  for (const [name, item] of Object.entries(source)) {
+    if (standardKeys.has(name) || names.has(name) || item === undefined) continue;
+    extensions.push({ name, valueJson: JSON.stringify(item) });
+    names.add(name);
+  }
+  return extensions;
+}
+
+function codexTextResult(text: string): { stdout: string; stderr: string } {
+  return {
+    stdout: `${JSON.stringify({ type: "item.completed", item: { type: "agent_message", text } })}\n`,
+    stderr: ""
+  };
+}
+
+function semanticWorklineYaml(evidenceId = "session:codex:codex-one"): string {
+  return `worklines:
+  - id: recovered
+    title: Recovered workline
+    summary: A locally recovered transport.
+    status: needs-judgment
+    sourceSessionIds:
+      - codex:codex-one
+    startedAt: null
+    endedAt: null
+    participation:
+      - id: agent-span
+        kind: agent
+        startAt: null
+        endAt: null
+        label: Agent independent
+    dossier:
+      title: Recovered dossier
+      dek: Evidence-led reconstruction.
+      blocks:
+        - id: material
+          kind: possible-change
+          label: null
+          title: Evidence changed
+          body: A possible direction change is supported.
+          evidenceIds:
+            - ${evidenceId}
+          extensions: []
+        - id: future
+          kind: future-check
+          label: null
+          title: Future check
+          body: If the next experiment fails, narrow the possible change.
+          evidenceIds:
+            - ${evidenceId}
+          extensions: []
+      question:
+        prompt: Should this possible change be tested first?
+        context: null
+    extensions: []
+warnings: []
+transportComplete: true`;
 }
 
 function session(overrides: Partial<AgentWorkSession> = {}): AgentWorkSession {

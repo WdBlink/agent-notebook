@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -7,10 +7,14 @@ import type { CliRunner, CliRunResult } from "./agent-summary";
 import { codexCompilerArgs, parseClaudeOutput, parseCodexOutput } from "./agent-summary";
 import { CliProtocolError } from "./cli-output-collector";
 import type { AgentPlatform, AgentTranscriptCapture, AgentWorkSession, CockpitSettings, SessionProvider } from "./types";
+import {
+  recoverWorklineTransport,
+  WORKLINE_TRANSPORT_RECOVERY_MARKER
+} from "./workline-transport-recovery";
 
 export const WORKLINE_REVIEW_PROMPT_PROFILE = "traceink-review-v1";
 export const WORKLINE_REVIEW_COMPILER_ID = "workline-review";
-export const WORKLINE_REVIEW_COMPILER_VERSION = "3";
+export const WORKLINE_REVIEW_COMPILER_VERSION = "4";
 export const WORKLINE_REVIEW_EVIDENCE_MANIFEST_VERSION = "workline-evidence-manifest-v2";
 
 export interface DailyReviewEvidence {
@@ -176,32 +180,100 @@ const MAX_REVIEW_WARNINGS = 12;
 const STORED_INCOMPLETENESS_PREFIX = "Stored review is semantically incomplete:";
 const DERIVED_INCOMPLETENESS_PREFIX = "Review package is semantically incomplete:";
 const PROVENANCE_WARNING_PREFIX = "Provenance could not be preserved:";
+const UNSAFE_EXTENSION_NAMES = new Set(["__proto__", "prototype", "constructor"]);
 
-const CLAUDE_REVIEW_SCHEMA = {
+const NULLABLE_STRING_SCHEMA = { type: ["string", "null"] } as const;
+const EXTENSION_SCHEMA = {
   type: "object",
-  additionalProperties: true,
+  additionalProperties: false,
+  properties: {
+    name: { type: "string" },
+    valueJson: { type: "string" }
+  },
+  required: ["name", "valueJson"]
+} as const;
+
+export const WORKLINE_REVIEW_TRANSPORT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
   properties: {
     worklines: {
       type: "array",
       items: {
         type: "object",
-        additionalProperties: true,
+        additionalProperties: false,
         properties: {
           id: { type: "string" },
           title: { type: "string" },
           summary: { type: "string" },
           status: { type: "string" },
           sourceSessionIds: { type: "array", items: { type: "string" } },
-          startedAt: { type: "string" },
-          endedAt: { type: "string" },
-          participation: { type: "array", items: { type: "object", additionalProperties: true } },
-          dossier: { type: "object", additionalProperties: true }
+          startedAt: NULLABLE_STRING_SCHEMA,
+          endedAt: NULLABLE_STRING_SCHEMA,
+          participation: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                id: { type: "string" },
+                kind: { type: "string", enum: ["user", "agent", "collaborative", "uncertain", "running"] },
+                startAt: NULLABLE_STRING_SCHEMA,
+                endAt: NULLABLE_STRING_SCHEMA,
+                label: { type: "string" }
+              },
+              required: ["id", "kind", "startAt", "endAt", "label"]
+            }
+          },
+          dossier: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              title: { type: "string" },
+              dek: { type: "string" },
+              blocks: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    id: { type: "string" },
+                    kind: { type: "string" },
+                    label: NULLABLE_STRING_SCHEMA,
+                    title: { type: "string" },
+                    body: { type: "string" },
+                    evidenceIds: { type: "array", items: { type: "string" } },
+                    extensions: { type: "array", items: EXTENSION_SCHEMA }
+                  },
+                  required: ["id", "kind", "label", "title", "body", "evidenceIds", "extensions"]
+                }
+              },
+              question: {
+                anyOf: [
+                  {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      prompt: { type: "string" },
+                      context: NULLABLE_STRING_SCHEMA
+                    },
+                    required: ["prompt", "context"]
+                  },
+                  { type: "null" }
+                ]
+              }
+            },
+            required: ["title", "dek", "blocks", "question"]
+          },
+          extensions: { type: "array", items: EXTENSION_SCHEMA }
         },
-        required: ["id", "title", "summary", "sourceSessionIds", "participation", "dossier"]
+        required: ["id", "title", "summary", "status", "sourceSessionIds", "startedAt", "endedAt", "participation", "dossier", "extensions"]
       }
-    }
+    },
+    warnings: { type: "array", items: { type: "string" } },
+    transportComplete: { type: "boolean", enum: [true] }
   },
-  required: ["worklines"]
+  required: ["worklines", "warnings", "transportComplete"]
 } as const;
 
 export const withFrozenSessionTranscripts: WorklineTranscriptFreezer = async <T>(
@@ -252,36 +324,59 @@ export async function compileDailyWorklineReview(
     : [];
   const freezer = options.transcriptFreezer ?? withFrozenSessionTranscripts;
   return freezer(sessions, async (frozenSessions, frozenRoot) => {
+    const outputSchemaPath = path.join(frozenRoot, `.traceink-review-output-${randomUUID()}.schema.json`);
+    await fs.writeFile(outputSchemaPath, JSON.stringify(WORKLINE_REVIEW_TRANSPORT_SCHEMA), { encoding: "utf8", mode: 0o400, flag: "wx" });
     const promptEvidence = buildFrozenPromptEvidence(evidence, frozenSessions);
     const prompt = buildWorklineReviewPrompt(logicalDate, frozenSessions, promptEvidence);
     const failures: Array<{ provider: SessionProvider; message: string }> = [];
     let provider: SessionProvider | undefined;
     let model = "";
     let result: CliRunResult | undefined;
-    for (const [index, candidate] of providers.entries()) {
-      const candidateModel = (index === 0 ? cleanText(options.model, 120) : "") || defaultModel(candidate);
-      const command = expandHome(candidate === "codex" ? settings.codexCliPath : settings.claudeCliPath, homeDir);
-      try {
-        result = await runner({
-          command,
-          args: reviewCompilerArgs(candidate, candidateModel),
-          stdin: prompt,
-          cwd: frozenRoot,
-          timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-          stdoutMode: candidate === "codex" ? "codex-jsonl" : "single-json"
-        });
-        provider = candidate;
-        model = candidateModel;
-        break;
-      } catch (error) {
-        if (error instanceof CliProtocolError) throw error;
-        failures.push({ provider: candidate, message: cleanText(errorMessage(error), 500) || "未知错误" });
+    try {
+      for (const [index, candidate] of providers.entries()) {
+        const candidateModel = (index === 0 ? cleanText(options.model, 120) : "") || defaultModel(candidate);
+        const command = expandHome(candidate === "codex" ? settings.codexCliPath : settings.claudeCliPath, homeDir);
+        try {
+          result = await runner({
+            command,
+            args: reviewCompilerArgs(candidate, candidateModel, outputSchemaPath),
+            stdin: prompt,
+            cwd: frozenRoot,
+            timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+            stdoutMode: candidate === "codex" ? "codex-jsonl" : "single-json"
+          });
+          provider = candidate;
+          model = candidateModel;
+          break;
+        } catch (error) {
+          if (error instanceof CliProtocolError) throw error;
+          failures.push({ provider: candidate, message: cleanText(errorMessage(error), 500) || "未知错误" });
+        }
       }
+    } finally {
+      await fs.rm(outputSchemaPath, { force: true });
     }
     if (!provider || !result) {
       throw new Error(failures.map((failure) => `${compilerProviderLabel(failure.provider)} CLI 调用失败：${failure.message}`).join("；"));
     }
-    const parsed = provider === "codex" ? parseCodexOutput(result.stdout) : parseClaudeOutput(result.stdout);
+    let parsed: unknown;
+    let transportRecovered = false;
+    try {
+      const parseFinalText = (text: string): unknown => {
+        const transport = recoverWorklineTransport(text, WORKLINE_REVIEW_TRANSPORT_SCHEMA);
+        transportRecovered ||= transport.recovered;
+        return transport.value;
+      };
+      parsed = provider === "codex"
+        ? parseCodexOutput(result.stdout, parseFinalText)
+        : parseClaudeOutput(result.stdout, parseFinalText);
+      // Claude may return structured_output directly rather than a result string.
+      if (!transportRecovered && provider === "claude") {
+        parsed = recoverWorklineTransport(JSON.stringify(parsed), WORKLINE_REVIEW_TRANSPORT_SCHEMA).value;
+      }
+    } catch (error) {
+      throw new Error(`${compilerProviderLabel(provider)} 工作脉络输出无效：${errorMessage(error)}`);
+    }
     const rawOutput = asRecord(parsed);
     if (!rawOutput) throw new Error("工作线整理结果不是有效对象。");
     if (JSON.stringify(rawOutput).includes(frozenRoot)) throw new Error("整理模型返回了临时证据路径，拒绝持久化。");
@@ -291,7 +386,10 @@ export async function compileDailyWorklineReview(
     const fallbackWarnings = failures.length > 0
       ? [`${compilerProviderLabel(failures[0]!.provider)} CLI 失败，已由 ${compilerProviderLabel(provider)} 完成：${failures[0]!.message}`]
       : [];
-    const warnings = prioritizeWarnings(normalized.warnings, [...evidenceWarnings, ...fallbackWarnings]);
+    const recoveryWarnings = transportRecovered
+      ? [`${WORKLINE_TRANSPORT_RECOVERY_MARKER}: ${compilerProviderLabel(provider)} 输出已通过本地受限传输恢复；原始标量值未改写。`]
+      : [];
+    const warnings = prioritizeWarnings(normalized.warnings, [...evidenceWarnings, ...fallbackWarnings, ...recoveryWarnings]);
     const generatedAt = (options.now?.() ?? new Date()).toISOString();
     const evidenceCutoff = cleanTimestamp(options.evidenceCutoff) ?? generatedAt;
     const hashInput = JSON.stringify({
@@ -352,7 +450,7 @@ export function buildWorklineReviewPrompt(
     "Use an evidence-led editorial discipline without forcing a fixed ontology: preserve disagreement, counter-evidence, scope, and calibrated uncertainty; describe only a possible change, never an adopted decision; include a falsifiable future observation that names an observable state or result change that could strengthen, narrow, or overturn that possible change; and end each dossier with one real human question that requires judgment. Generic continuation language such as 'continue optimizing if needed' is not an observation.",
     "You must not claim that the user decided, approved, adopted, delegated, migrated, authorized, or sealed anything. Never write first-person conclusions on the user's behalf.",
     "Use only sessionKey and evidenceIds present in the manifest. Do not invent ids, paths, files, projects, results, or completed work. Do not modify files, run project code, resume a Session, deliver content, or start background work.",
-    "Return JSON only. Shape: {\"worklines\":[{\"id\":\"...\",\"title\":\"...\",\"summary\":\"...\",\"status\":\"needs-judgment|ready|running|uncertain\",\"sourceSessionIds\":[\"provider:id\"],\"startedAt\":\"optional ISO\",\"endedAt\":\"optional ISO\",\"participation\":[{\"id\":\"...\",\"kind\":\"user|agent|collaborative|uncertain|running\",\"startAt\":\"optional ISO\",\"endAt\":\"optional ISO\",\"label\":\"...\"}],\"dossier\":{\"title\":\"...\",\"dek\":\"...\",\"blocks\":[{\"id\":\"...\",\"kind\":\"free extensible semantic role\",\"label\":\"optional\",\"title\":\"...\",\"body\":\"...\",\"evidenceIds\":[\"...\"],\"anyFutureField\":\"preserved\"}],\"question\":{\"prompt\":\"real human question\",\"context\":\"optional\"}}}],\"warnings\":[\"coverage, parse, duplicate, or missing-evidence warning\"]}",
+    "Return only the JSON transport requested by the CLI schema. Use null for unavailable optional timestamps, labels, and question context. Semantic block kinds remain free strings. Put any useful future semantic field into extensions as {\"name\":\"fieldName\",\"valueJson\":\"valid JSON encoded as a string\"}; use an empty extensions array when none are needed. Emit transportComplete: true as the final top-level field only after the complete result has been written.",
     `Canonical manifest:\n${JSON.stringify(manifest, null, 2)}`,
     `Canonical evidence catalog:\n${JSON.stringify(evidence, null, 2)}`
   ].join("\n\n");
@@ -486,7 +584,7 @@ function normalizeWorklines(
     }
     const startedAt = cleanTimestamp(record.startedAt);
     const endedAt = cleanTimestamp(record.endedAt);
-    const standardKeys = new Set(["id", "title", "summary", "status", "sourceSessionIds", "startedAt", "endedAt", "participation", "dossier", "payload"]);
+    const standardKeys = new Set(["id", "title", "summary", "status", "sourceSessionIds", "startedAt", "endedAt", "participation", "dossier", "payload", "extensions"]);
     worklines.push({
       id,
       title,
@@ -502,7 +600,11 @@ function normalizeWorklines(
         blocks,
         ...(questionPrompt ? { question: { prompt: questionPrompt, ...(cleanText(questionRecord?.context, 1_000) ? { context: cleanText(questionRecord?.context, 1_000) } : {}) } } : {})
       },
-      payload: { ...(asRecord(record.payload) ? structuredClone(asRecord(record.payload)!) : {}), ...extraFields(record, standardKeys) }
+      payload: {
+        ...(asRecord(record.payload) ? structuredClone(asRecord(record.payload)!) : {}),
+        ...decodeExtensions(record.extensions),
+        ...extraFields(record, standardKeys)
+      }
     });
     seen.add(id);
   }
@@ -704,7 +806,8 @@ function normalizeBlocks(
       evidenceIds,
       payload: {
         ...(asRecord(record.payload) ? structuredClone(asRecord(record.payload)!) : {}),
-        ...extraFields(record, new Set(["id", "kind", "label", "title", "body", "evidenceIds", "payload"]))
+        ...decodeExtensions(record.extensions),
+        ...extraFields(record, new Set(["id", "kind", "label", "title", "body", "evidenceIds", "payload", "extensions"]))
       }
     });
     seen.add(id);
@@ -753,6 +856,23 @@ function normalizeParticipation(value: unknown): DailyReviewParticipationSpan[] 
   return spans;
 }
 
+function decodeExtensions(value: unknown): Record<string, unknown> {
+  if (!Array.isArray(value)) return {};
+  const decoded = Object.create(null) as Record<string, unknown>;
+  for (const item of value.slice(0, 48)) {
+    const record = asRecord(item);
+    const name = cleanText(record?.name, 120);
+    const valueJson = typeof record?.valueJson === "string" ? record.valueJson : undefined;
+    if (!name || UNSAFE_EXTENSION_NAMES.has(name) || valueJson === undefined || Object.hasOwn(decoded, name)) continue;
+    try {
+      decoded[name] = JSON.parse(valueJson) as unknown;
+    } catch {
+      decoded[name] = valueJson;
+    }
+  }
+  return decoded;
+}
+
 function normalizeParticipationKind(value: unknown): DailyReviewParticipationKind | undefined {
   if (value === "user" || value === "agent" || value === "collaborative" || value === "uncertain" || value === "running") return value;
   return value === "unknown" ? "uncertain" : undefined;
@@ -772,15 +892,15 @@ function compilerProviders(enabled: SessionProvider[], preferred?: SessionProvid
   return ordered;
 }
 
-function reviewCompilerArgs(provider: SessionProvider, model: string): string[] {
-  if (provider === "codex") return codexCompilerArgs(model === "default" ? undefined : model);
+function reviewCompilerArgs(provider: SessionProvider, model: string, outputSchemaPath: string): string[] {
+  if (provider === "codex") return codexCompilerArgs(model === "default" ? undefined : model, outputSchemaPath);
   return [
     ...(model === "default" ? [] : ["--model", model]),
     "--print",
     "--output-format",
     "json",
     "--json-schema",
-    JSON.stringify(CLAUDE_REVIEW_SCHEMA),
+    JSON.stringify(WORKLINE_REVIEW_TRANSPORT_SCHEMA),
     "--tools",
     "Read,Glob,Grep",
     "--permission-mode",

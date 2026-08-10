@@ -1,3 +1,21 @@
+# Work Continuity v0.6.2
+
+Work Continuity v0.6.2 fixes the follow-up failure that could appear as `CLI 返回的总结不是有效 JSON` after the provider had already finished organizing the day.
+
+## Fixes
+
+- Gives Codex a strict, product-owned output schema instead of relying on a Prompt-only “return JSON” request.
+- Recovers the provider's known brace-free YAML transport form locally, only when a completion marker and the same strict schema validate; ambiguous, truncated, or YAML-specific structures remain errors.
+- Keeps Traceink semantics open-ended: workline and block roles remain free strings, while future semantic fields travel through a validated extension envelope and return to the ordinary replay payload.
+- Uses the same result envelope for Claude Code and surfaces provider-declared error results directly instead of misreporting their text as malformed JSON.
+- Retains the existing cost boundary: an invalid or semantically incomplete model result never silently triggers a second paid provider call.
+- Verifies that the schema transport is present inside every packaged macOS archive.
+
+## Boundaries
+
+- The v0.6.2 archives remain unsigned and not notarized. macOS may require Control-clicking the app and choosing **Open** for the first launch.
+- This maintenance release changes only the result transport and diagnostics. It does not replace the KSI-informed Traceink Prompt, constrain semantic block vocabulary, or alter sealed history.
+
 # Work Continuity v0.6.1
 
 Work Continuity v0.6.1 fixes the first-run failure that could appear as `CLI 输出超过 4 MB 限制` while organizing a day with many or very long Codex Sessions.
