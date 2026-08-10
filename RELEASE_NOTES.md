@@ -1,3 +1,20 @@
+# Work Continuity v0.6.1
+
+Work Continuity v0.6.1 fixes the first-run failure that could appear as `CLI 输出超过 4 MB 限制` while organizing a day with many or very long Codex Sessions.
+
+## Fixes
+
+- Streams Codex JSONL output and retains only the final Traceink result and bounded structured diagnostics. Large reasoning, command, and tool-progress events no longer fill the app's result buffer or leak into error messages.
+- Keeps the 4 MB safety boundary on the actual final result instead of applying it to all intermediate provider traffic.
+- Gives the Traceink compiler an explicit bounded-batch reading contract for long frozen transcripts, including coverage tracking and visible missing-range reporting.
+- Shows structured Claude Code `result` and `errors[]` diagnostics instead of reducing failures to a bare exit code.
+- Uses a bounded graceful-stop → forced-stop lifecycle so a timed-out or malformed provider call cannot leave a hidden CLI process running.
+
+## Boundaries
+
+- The v0.6.1 archives remain unsigned and not notarized. macOS may require Control-clicking the app and choosing **Open** for the first launch.
+- This maintenance release preserves the v0.6.0 Today Board, Traceink prompt profile, sealed history, and human-authority workflow; it does not introduce a new compact-evidence ontology or silently discard experimental evidence.
+
 # Work Continuity v0.6.0
 
 Work Continuity v0.6.0 replaces the capture-led Today surface with one evidence-led Today Board. A day now moves through a visible `raw → compiled → stale → sealed` lifecycle: source Sessions remain independent until you ask the app to organize them, new evidence never silently rewrites an existing compilation, and a sealed historical page stays fixed.

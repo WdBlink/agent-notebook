@@ -91,7 +91,7 @@ Use `dist:macos` for desktop packages. `release:plugin:macos` is only for the de
 8. Write and save a reflection, open **今日收口**, select zero to three continuation bookmarks, and seal the active generation. If a refresh activates a newer generation while the review is open, both the stale save and stale seal must fail without modifying the newer package.
 9. Reopen the sealed date. Confirm the selected workline package, evidence links, original reflection, and bookmarks are read-only and no model request occurs.
 
-These v0.6.0 archives are unsigned and not notarized. A first manual launch may require Control-clicking **Work Continuity.app** and choosing **Open**.
+These v0.6.1 archives are unsigned and not notarized. A first manual launch may require Control-clicking **Work Continuity.app** and choosing **Open**.
 
 ## Legacy Obsidian Plugin Compatibility
 

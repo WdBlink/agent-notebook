@@ -4,6 +4,11 @@ import type {
   SessionSummaryBatch
 } from "./agent-sessions";
 import type { AgentPlatform, AgentSessionStatus, AgentWorkSession, CockpitSettings } from "./types";
+import {
+  createCliOutputCollector,
+  structuredCliError,
+  type CliStdoutMode
+} from "./cli-output-collector";
 
 export interface CliRunRequest {
   command: string;
@@ -11,6 +16,7 @@ export interface CliRunRequest {
   stdin: string;
   cwd: string;
   timeoutMs: number;
+  stdoutMode?: CliStdoutMode;
 }
 
 export interface CliRunResult {
@@ -49,7 +55,6 @@ export interface CliSummarizerOptions {
   onBatch?: (batch: SessionSummaryBatch) => void | Promise<void>;
 }
 
-const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 180_000;
 
 const CLAUDE_RESPONSE_SCHEMA = {
@@ -201,7 +206,14 @@ async function runProvider(
           "--no-session-persistence"
         ];
 
-  const result = await runner({ command, args, stdin: prompt, cwd: homeDir, timeoutMs });
+  const result = await runner({
+    command,
+    args,
+    stdin: prompt,
+    cwd: homeDir,
+    timeoutMs,
+    stdoutMode: platform === "codex" ? "codex-jsonl" : "single-json"
+  });
   const parsed = platform === "codex" ? parseCodexOutput(result.stdout) : parseClaudeOutput(result.stdout);
   const normalized = normalizeProviderResponse(parsed, platform, sessions);
   const warnings =
@@ -312,39 +324,81 @@ function runChildProcess(
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true
     });
-    let stdout = "";
-    let stderr = "";
+    const collector = createCliOutputCollector(request.stdoutMode);
     let settled = false;
+    let closed = false;
+    let terminationError: Error | undefined;
+    let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const stopChild = (): void => {
+      child.kill("SIGTERM");
+      if (forceKillTimer) return;
+      forceKillTimer = setTimeout(() => {
+        if (!closed) child.kill("SIGKILL");
+      }, 500);
+      const timerWithUnref = forceKillTimer as ReturnType<typeof setTimeout> & { unref?: () => void };
+      timerWithUnref.unref?.();
+    };
 
     const finish = (error?: Error): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
       if (error) reject(error);
-      else resolve({ stdout, stderr });
+      else {
+        try {
+          resolve(collector.finish());
+        } catch (collectorError) {
+          reject(collectorError);
+        }
+      }
+    };
+    const terminate = (error: Error): void => {
+      if (terminationError) return;
+      terminationError = error;
+      stopChild();
     };
 
     const append = (target: "stdout" | "stderr", chunk: unknown): void => {
-      const text = String(chunk);
-      if (target === "stdout") stdout += text;
-      else stderr += text;
-      if (stdout.length + stderr.length > MAX_OUTPUT_BYTES) {
-        child.kill("SIGTERM");
-        finish(new Error("CLI 输出超过 4 MB 限制"));
+      if (terminationError) return;
+      try {
+        if (target === "stdout") collector.pushStdout(chunk);
+        else collector.pushStderr(chunk);
+      } catch (collectorError) {
+        terminate(collectorError instanceof Error ? collectorError : new Error("CLI 输出处理失败"));
       }
     };
 
     const timer = setTimeout(() => {
-      child.kill("SIGTERM");
-      finish(new Error(`CLI 总结超过 ${Math.round(request.timeoutMs / 1000)} 秒`));
+      terminate(new Error(`CLI 总结超过 ${Math.round(request.timeoutMs / 1000)} 秒`));
     }, request.timeoutMs);
 
     child.stdout.on("data", (chunk) => append("stdout", chunk));
     child.stderr.on("data", (chunk) => append("stderr", chunk));
-    child.on("error", (error) => finish(error));
+    child.on("error", (error) => {
+      closed = true;
+      finish(terminationError ?? error);
+    });
     child.on("close", (code, signal) => {
+      closed = true;
+      if (forceKillTimer) clearTimeout(forceKillTimer);
+      if (terminationError) {
+        finish(terminationError);
+        return;
+      }
       if (code === 0) finish();
-      else finish(new Error(`CLI 退出码 ${code ?? signal ?? "unknown"}`));
+      else {
+        let snapshot: CliRunResult = { stdout: "", stderr: "" };
+        try {
+          snapshot = collector.finish();
+        } catch (collectorError) {
+          finish(collectorError instanceof Error ? collectorError : new Error("CLI 输出处理失败"));
+          return;
+        }
+        const detail = structuredCliError(snapshot.stdout) || tail(snapshot.stderr, 500);
+        finish(new Error(`CLI 退出码 ${code ?? signal ?? "unknown"}${detail ? `：${detail}` : ""}`));
+      }
     });
     child.stdin.end(request.stdin);
   });

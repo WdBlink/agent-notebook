@@ -42,13 +42,13 @@ The primary product is a standalone macOS app. It does not require Obsidian and 
 
 ## macOS Install
 
-Work Continuity v0.6.0 ships a DMG and ZIP for each current Mac architecture:
+Work Continuity v0.6.1 ships a DMG and ZIP for each current Mac architecture:
 
 ```text
-dist/macos/Work Continuity-0.6.0-macos-arm64.dmg
-dist/macos/Work Continuity-0.6.0-macos-arm64.zip
-dist/macos/Work Continuity-0.6.0-macos-x64.dmg
-dist/macos/Work Continuity-0.6.0-macos-x64.zip
+dist/macos/Work Continuity-0.6.1-macos-arm64.dmg
+dist/macos/Work Continuity-0.6.1-macos-arm64.zip
+dist/macos/Work Continuity-0.6.1-macos-x64.dmg
+dist/macos/Work Continuity-0.6.1-macos-x64.zip
 ```
 
 Use `arm64` on Apple Silicon and `x64` on Intel. The DMG is the normal install path; the ZIP is a fallback archive of the same app bundle.
@@ -83,7 +83,7 @@ Compilation failures remain visible. A failed refresh does not replace the last 
 
 The local notebook store preserves review package generations, admitted evidence references, per-workline human reflection, continuation bookmarks, and sealed pages. This lets a historical day replay the material that was actually reviewed rather than silently recompiling against newer Sessions or a newer prompt.
 
-The store also continues to normalize legacy v0.5 note records and delivery receipts. Those records and the explicit Wiki/CTX delivery APIs remain compatibility data; note capture and delivery are no longer the primary Today workflow in v0.6.0.
+The store also continues to normalize legacy v0.5 note records and delivery receipts. Those records and the explicit Wiki/CTX delivery APIs remain compatibility data; note capture and delivery are no longer the primary Today workflow in v0.6.x.
 
 ## Quick Start From Source
 

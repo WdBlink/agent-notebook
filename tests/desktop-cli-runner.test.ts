@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { access, mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { runDesktopCli } from "../app/desktop/cli-runner";
 
@@ -40,4 +43,80 @@ test("desktop CLI runner surfaces a structured stdout error when the provider ex
     }),
     /Unsupported value: 'max'.*reasoning\.effort/
   );
+});
+
+test("desktop CLI runner streams past verbose Codex tool events and keeps only the final answer", async () => {
+  const result = await runDesktopCli({
+    command: process.execPath,
+    args: [
+      "-e",
+      `const noisy = JSON.stringify({type:"item.completed",item:{type:"command_execution",aggregated_output:"NOISE".repeat(1024 * 1024)}}); const answer = JSON.stringify({type:"item.completed",item:{type:"agent_message",text:"{\\\"worklines\\\":[]}"}}); process.stdout.write(noisy + "\\n" + answer + "\\n");`
+    ],
+    stdin: "",
+    cwd: process.cwd(),
+    timeoutMs: 5_000,
+    stdoutMode: "codex-jsonl"
+  });
+
+  assert.equal(result.stdout.includes("NOISE"), false);
+  assert.match(result.stdout, /agent_message/);
+  assert.ok(Buffer.byteLength(result.stdout) < 2_048);
+});
+
+test("desktop CLI runner surfaces Claude result errors written only to stdout", async () => {
+  await assert.rejects(
+    () => runDesktopCli({
+      command: process.execPath,
+      args: [
+        "-e",
+        `process.stdout.write(JSON.stringify({type:"result",subtype:"error_during_execution",is_error:true,result:"Review material exceeded the provider context window"})); process.exitCode = 1;`
+      ],
+      stdin: "",
+      cwd: process.cwd(),
+      timeoutMs: 5_000
+    }),
+    /Review material exceeded the provider context window/
+  );
+});
+
+test("desktop CLI runner surfaces Claude errors-array envelopes written only to stdout", async () => {
+  await assert.rejects(
+    () => runDesktopCli({
+      command: process.execPath,
+      args: [
+        "-e",
+        `process.stdout.write(JSON.stringify({type:"result",subtype:"error_during_execution",is_error:true,errors:["Frozen evidence could not be read","Second diagnostic"]})); process.exitCode = 1;`
+      ],
+      stdin: "",
+      cwd: process.cwd(),
+      timeoutMs: 5_000,
+      stdoutMode: "single-json"
+    }),
+    /Frozen evidence could not be read.*Second diagnostic/
+  );
+});
+
+test("desktop CLI runner force-kills a provider that ignores graceful timeout shutdown", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "work-continuity-cli-kill-"));
+  const survivorMarker = path.join(tempDir, "survived.txt");
+  try {
+    await assert.rejects(
+      () => runDesktopCli({
+        command: process.execPath,
+        args: [
+          "-e",
+          `const fs=require("node:fs"); process.on("SIGTERM",()=>{}); setTimeout(()=>fs.writeFileSync(${JSON.stringify(survivorMarker)},"alive"),850); setInterval(()=>{},1000);`
+        ],
+        stdin: "",
+        cwd: process.cwd(),
+        timeoutMs: 100
+      }),
+      /CLI 总结超过 0 秒/
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    await assert.rejects(access(survivorMarker), (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });

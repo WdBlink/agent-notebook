@@ -1,8 +1,7 @@
 import { spawn } from "node:child_process";
 import os from "node:os";
 import type { CliRunner, CliRunRequest, CliRunResult } from "../../src/agent-summary";
-
-const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
+import { createCliOutputCollector, structuredCliError } from "../../src/cli-output-collector";
 
 export const desktopCliRunner: CliRunner = (request) => runDesktopCli(request);
 
@@ -14,37 +13,76 @@ export function runDesktopCli(request: CliRunRequest): Promise<CliRunResult> {
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true
     });
-    let stdout = "";
-    let stderr = "";
+    const collector = createCliOutputCollector(request.stdoutMode);
     let settled = false;
+    let closed = false;
+    let terminationError: Error | undefined;
+    let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const stopChild = (): void => {
+      child.kill("SIGTERM");
+      if (forceKillTimer) return;
+      forceKillTimer = setTimeout(() => {
+        if (!closed) child.kill("SIGKILL");
+      }, 500);
+      forceKillTimer.unref?.();
+    };
 
     const finish = (error?: Error): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
       if (error) reject(error);
-      else resolve({ stdout, stderr });
+      else {
+        try {
+          resolve(collector.finish());
+        } catch (collectorError) {
+          reject(collectorError);
+        }
+      }
+    };
+    const terminate = (error: Error): void => {
+      if (terminationError) return;
+      terminationError = error;
+      stopChild();
     };
     const append = (target: "stdout" | "stderr", chunk: Buffer | string): void => {
-      if (target === "stdout") stdout += String(chunk);
-      else stderr += String(chunk);
-      if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) > MAX_OUTPUT_BYTES) {
-        child.kill("SIGTERM");
-        finish(new Error("CLI 输出超过 4 MB 限制"));
+      if (terminationError) return;
+      try {
+        if (target === "stdout") collector.pushStdout(chunk);
+        else collector.pushStderr(chunk);
+      } catch (collectorError) {
+        terminate(collectorError instanceof Error ? collectorError : new Error("CLI 输出处理失败"));
       }
     };
 
     const timer = setTimeout(() => {
-      child.kill("SIGTERM");
-      finish(new Error(`CLI 总结超过 ${Math.round(request.timeoutMs / 1000)} 秒`));
+      terminate(new Error(`CLI 总结超过 ${Math.round(request.timeoutMs / 1000)} 秒`));
     }, request.timeoutMs);
     child.stdout.on("data", (chunk: Buffer) => append("stdout", chunk));
     child.stderr.on("data", (chunk: Buffer) => append("stderr", chunk));
-    child.on("error", (error) => finish(error));
+    child.on("error", (error) => {
+      closed = true;
+      finish(terminationError ?? error);
+    });
     child.on("close", (code, signal) => {
+      closed = true;
+      if (forceKillTimer) clearTimeout(forceKillTimer);
+      if (terminationError) {
+        finish(terminationError);
+        return;
+      }
       if (code === 0) finish();
       else {
-        const detail = structuredStdoutError(stdout) || tail(stderr, 500);
+        let snapshot: CliRunResult = { stdout: "", stderr: "" };
+        try {
+          snapshot = collector.finish();
+        } catch (collectorError) {
+          finish(collectorError instanceof Error ? collectorError : new Error("CLI 输出处理失败"));
+          return;
+        }
+        const detail = structuredCliError(snapshot.stdout) || tail(snapshot.stderr, 500);
         finish(new Error(`CLI 退出码 ${code ?? signal ?? "unknown"}${detail ? `：${detail}` : ""}`));
       }
     });
@@ -65,42 +103,4 @@ function desktopCliEnvironment(): NodeJS.ProcessEnv {
 function tail(value: string, length: number): string {
   const compact = value.replace(/\s+/g, " ").trim();
   return compact.length > length ? compact.slice(-length) : compact;
-}
-
-function structuredStdoutError(value: string): string {
-  let result = "";
-  for (const line of value.split(/\r?\n/)) {
-    if (!line.trim().startsWith("{")) continue;
-    try {
-      const event = JSON.parse(line) as Record<string, unknown>;
-      const error = asRecord(event.error);
-      const item = asRecord(event.item);
-      const candidate =
-        (event.type === "turn.failed" && typeof error?.message === "string" ? error.message : "") ||
-        (event.type === "error" && typeof event.message === "string" ? event.message : "") ||
-        (item?.type === "error" && typeof item.message === "string" ? item.message : "");
-      if (candidate) result = nestedErrorMessage(candidate);
-    } catch {
-      // Provider stdout can contain ordinary progress lines; only structured errors are admitted.
-    }
-  }
-  return tail(result, 500);
-}
-
-function nestedErrorMessage(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed.startsWith("{")) return trimmed;
-  try {
-    const record = asRecord(JSON.parse(trimmed));
-    const nested = asRecord(record?.error);
-    if (typeof nested?.message === "string") return nested.message;
-    if (typeof record?.message === "string") return record.message;
-  } catch {
-    // Preserve the outer provider message when its payload is not valid JSON.
-  }
-  return trimmed;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }

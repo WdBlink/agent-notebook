@@ -13,6 +13,7 @@ import {
 import { createEmptyData } from "../src/state";
 import type { AgentWorkSession, CockpitSettings } from "../src/types";
 import type { CliRunRequest } from "../src/agent-summary";
+import { CliProtocolError } from "../src/cli-output-collector";
 
 const passThroughTranscriptFreezer: WorklineTranscriptFreezer = async (sessions, use) =>
   use(sessions, "/tmp/work-continuity-test-freeze");
@@ -269,6 +270,11 @@ test("one Prompt reconstructs a cross-provider workline and keeps only verified 
     "--skip-git-repo-check"
   ]);
   assert.match(requests[0]?.stdin ?? "", /complete admitted manifest/i);
+  assert.match(requests[0]?.stdin ?? "", /bounded batches/i);
+  assert.match(requests[0]?.stdin ?? "", /coverage register/i);
+  assert.match(requests[0]?.stdin ?? "", /Never cat or print a whole large transcript/i);
+  assert.match(requests[0]?.stdin ?? "", /inventory event types and timestamps/i);
+  assert.equal(requests[0]?.stdoutMode, "codex-jsonl");
   assert.match(requests[0]?.stdin ?? "", /weak hints, never authority/i);
   for (const marker of ["failed paths", "route changes", "conflicts", "scope", "current stop", "user participation", "Agent-independent work"]) {
     assert.match(requests[0]?.stdin ?? "", new RegExp(marker, "i"));
@@ -303,7 +309,7 @@ test("one Prompt reconstructs a cross-provider workline and keeps only verified 
   assert.equal(review.rawOutput.worklines ? true : false, true);
   assert.equal(review.warnings.includes("Claude transcript ended before the final user reply; prior context is unknown."), true);
   assert.equal(review.provenance?.compiler.id, "workline-review");
-  assert.equal(review.provenance?.compiler.version, "2");
+  assert.equal(review.provenance?.compiler.version, "3");
   assert.equal(review.provenance?.promptProfile, "traceink-review-v1");
   assert.equal(review.provenance?.model.provider, "codex");
   assert.equal(review.provenance?.model.name, "review-model");
@@ -365,6 +371,32 @@ test("semantic validation failure never triggers a second provider call", async 
       }
     ),
     /没有返回可用的跨会话工作线/
+  );
+
+  assert.deepEqual(commands, ["codex"]);
+});
+
+test("a local final-output protocol failure never spends a second provider call", async () => {
+  const commands: string[] = [];
+  const settings: CockpitSettings = {
+    ...createEmptyData().settings,
+    enabledSessionProviders: ["codex", "claude"]
+  };
+
+  await assert.rejects(
+    () => compileDailyWorklineReview(
+      settings,
+      "2026-08-09",
+      [session({ id: "codex-one", path: "/tmp/codex-one.jsonl" })],
+      {
+        transcriptFreezer: passThroughTranscriptFreezer,
+        runner: async (request) => {
+          commands.push(request.command);
+          throw new CliProtocolError("final-output-too-large", "Codex 最终整理结果超过 4 MB 限制");
+        }
+      }
+    ),
+    /最终整理结果超过 4 MB/
   );
 
   assert.deepEqual(commands, ["codex"]);
