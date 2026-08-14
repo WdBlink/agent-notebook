@@ -1,0 +1,11 @@
+{
+  "scope": "explicit-files",
+  "logicalDate": "2026-08-09",
+  "files": [
+    "../ksi-review-day/codex-scheduler.jsonl",
+    "../ksi-review-day/claude-representation.jsonl",
+    "../ksi-review-day/codex-research-ir.jsonl",
+    "../ksi-review-day/results-scheduler-runs.md",
+    "../ksi-review-day/research-ir-draft.md"
+  ]
+}

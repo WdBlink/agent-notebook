@@ -477,23 +477,22 @@ test("recovered transport cannot bypass the existing evidence-id gate or trigger
     enabledSessionProviders: ["codex", "claude"]
   };
 
-  await assert.rejects(
-    () => compileDailyWorklineReview(
-      settings,
-      "2026-08-09",
-      [session({ id: "codex-one", path: "/tmp/codex-one.jsonl" })],
-      {
-        transcriptFreezer: passThroughTranscriptFreezer,
-        runner: async (request) => {
-          commands.push(request.command);
-          return codexTextResult(semanticWorklineYaml("session:codex:invented"));
-        }
+  const review = await compileDailyWorklineReview(
+    settings,
+    "2026-08-09",
+    [session({ id: "codex-one", path: "/tmp/codex-one.jsonl" })],
+    {
+      transcriptFreezer: passThroughTranscriptFreezer,
+      runner: async (request) => {
+        commands.push(request.command);
+        return codexTextResult(semanticWorklineYaml("session:codex:invented"));
       }
-    ),
-    /没有返回可用的跨会话工作线/
+    }
   );
 
   assert.deepEqual(commands, ["codex"]);
+  assert.deepEqual(review.worklines[0]?.dossier.blocks[0]?.evidenceIds, []);
+  assert.match(review.warnings.join(" "), /未验证证据/);
 });
 
 test("a local final-output protocol failure never spends a second provider call", async () => {
@@ -640,7 +639,7 @@ test("transport extensions cannot overwrite object prototype control fields", as
   assert.equal(({} as { polluted?: boolean }).polluted, undefined);
 });
 
-test("rejects a workline that omits any required Prompt-profile semantic gate", async () => {
+test("preserves a workline and reports diagnostics when a Prompt-profile semantic role is missing", async () => {
   const omissions: Array<{ name: string; output: Record<string, unknown> }> = [
     {
       name: "admitted material evidence",
@@ -661,15 +660,13 @@ test("rejects a workline that omits any required Prompt-profile semantic gate", 
   ];
 
   for (const omission of omissions) {
-    await assert.rejects(
-      () => runReview({ worklines: [omission.output] }),
-      /没有返回可用的跨会话工作线/,
-      omission.name
-    );
+    const review = await runReview({ worklines: [omission.output] });
+    assert.equal(review.worklines.length, 1, omission.name);
+    assert.match(review.warnings.join(" "), /材料不完整/, omission.name);
   }
 });
 
-test("rejects a vague modal continuation as a future observation", async () => {
+test("preserves a vague modal continuation with a visible quality diagnostic", async () => {
   const vague = semanticWorkline({
     dossier: {
       blocks: [
@@ -679,13 +676,12 @@ test("rejects a vague modal continuation as a future observation", async () => {
     }
   });
 
-  await assert.rejects(
-    () => runReview({ worklines: [vague] }),
-    /没有返回可用的跨会话工作线/
-  );
+  const review = await runReview({ worklines: [vague] });
+  assert.equal(review.worklines.length, 1);
+  assert.match(review.warnings.join(" "), /缺少可证伪的未来观察/);
 });
 
-test("rejects a newly compiled workline when any substantive block lacks admitted evidence", async () => {
+test("preserves unsupported generated blocks while marking their missing evidence", async () => {
   const unsupported = semanticWorkline({
     dossier: {
       blocks: [
@@ -696,10 +692,37 @@ test("rejects a newly compiled workline when any substantive block lacks admitte
     }
   });
 
-  await assert.rejects(
-    () => runReview({ worklines: [unsupported] }),
-    /没有返回可用的跨会话工作线/
+  const review = await runReview({ worklines: [unsupported] });
+  assert.equal(review.worklines.length, 1);
+  assert.equal(review.worklines[0]?.dossier.blocks.length, 3);
+  assert.match(review.warnings.join(" "), /缺少已采纳证据支持/);
+});
+
+test("never deletes a workline whose future observation is carried in an extension", async () => {
+  const output = semanticWorkline({
+    dossier: {
+      blocks: [{
+        id: "state-chain",
+        kind: "state-chain",
+        title: "路线变化",
+        body: "当前证据支持重新评估。",
+        evidenceIds: ["session:codex:codex-one"],
+        extensions: [{
+          name: "future_observation",
+          valueJson: JSON.stringify("若真实任务再次出现同类失败，这个判断应被加强；否则应收窄。")
+        }]
+      }]
+    }
+  });
+
+  const review = await runReview({ worklines: [output] });
+
+  assert.equal(review.worklines.length, 1);
+  assert.equal(
+    review.worklines[0]?.dossier.blocks[0]?.payload.future_observation,
+    "若真实任务再次出现同类失败，这个判断应被加强；否则应收窄。"
   );
+  assert.match(review.warnings.join(" "), /材料不完整/);
 });
 
 test("reload preserves a semantically incomplete legacy package while quality inspection remains derived", () => {

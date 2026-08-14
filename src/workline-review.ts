@@ -581,8 +581,7 @@ function normalizeWorklines(
     const participation = normalizeParticipation(record?.participation);
     const qualityIssues = semanticGateIssues(blocks, participation, questionPrompt);
     if (qualityIssues.length > 0 && semanticMode === "strict") {
-      warnings.push(`${title} 未满足 Prompt 语义质量门：${qualityIssues.join("、")}，已忽略。`);
-      continue;
+      warnings.push(`${title} 的生成材料不完整：${qualityIssues.join("、")}，已保留供回看。`);
     }
     const startedAt = cleanTimestamp(record.startedAt);
     const endedAt = cleanTimestamp(record.endedAt);
