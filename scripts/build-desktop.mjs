@@ -7,6 +7,7 @@ const mode = process.argv[2] ?? "production";
 const isProd = mode === "production";
 const watch = process.argv.includes("--watch");
 const outdir = path.join(process.cwd(), "dist", "desktop");
+const traceinkOutdir = path.join(outdir, "skills", "traceink");
 
 const common = {
   bundle: true,
@@ -19,11 +20,17 @@ const common = {
 };
 
 await fs.mkdir(outdir, { recursive: true });
+await fs.mkdir(path.join(traceinkOutdir, "references"), { recursive: true });
 await Promise.all([
   fs.copyFile("app/desktop/index.html", path.join(outdir, "index.html")),
   fs.copyFile("app/desktop/renderer.css", path.join(outdir, "renderer.css")),
   fs.copyFile("app/desktop/assets/app-icon.png", path.join(outdir, "app-icon.png")),
-  fs.copyFile("app/desktop/assets/app-icon.icns", path.join(outdir, "app-icon.icns"))
+  fs.copyFile("app/desktop/assets/app-icon.icns", path.join(outdir, "app-icon.icns")),
+  fs.copyFile("skills/traceink/SKILL.md", path.join(traceinkOutdir, "SKILL.md")),
+  fs.copyFile(
+    "skills/traceink/references/editorial-contract.md",
+    path.join(traceinkOutdir, "references", "editorial-contract.md")
+  )
 ]);
 
 const rootPackage = JSON.parse(await fs.readFile("package.json", "utf8"));

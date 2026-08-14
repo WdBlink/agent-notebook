@@ -43,9 +43,24 @@ try {
   }
 
   const files = new Set(asar.listPackage(appAsar));
-  for (const required of ["/main.js", "/preload.cjs", "/renderer.js", "/renderer.css", "/index.html", "/app-icon.png"]) {
+  for (const required of [
+    "/main.js",
+    "/preload.cjs",
+    "/renderer.js",
+    "/renderer.css",
+    "/index.html",
+    "/app-icon.png",
+    "/skills/traceink/SKILL.md",
+    "/skills/traceink/references/editorial-contract.md"
+  ]) {
     if (!files.has(required)) throw new Error(`Packaged app is missing ${required}.`);
   }
+  await assertPackagedBytesEqual(appAsar, "skills/traceink/SKILL.md", "skills/traceink/SKILL.md");
+  await assertPackagedBytesEqual(
+    appAsar,
+    "skills/traceink/references/editorial-contract.md",
+    "skills/traceink/references/editorial-contract.md"
+  );
   const main = asar.extractFile(appAsar, "main.js").toString("utf8");
   const preload = asar.extractFile(appAsar, "preload.cjs").toString("utf8");
   const renderer = asar.extractFile(appAsar, "renderer.js").toString("utf8");
@@ -121,6 +136,12 @@ async function findAppBundle(root) {
 
 async function assertFile(file) {
   if (!(await fs.stat(file)).isFile()) throw new Error(`Expected file: ${file}`);
+}
+
+async function assertPackagedBytesEqual(appAsar, packagedPath, canonicalPath) {
+  const packaged = asar.extractFile(appAsar, packagedPath);
+  const canonical = await fs.readFile(canonicalPath);
+  if (!packaged.equals(canonical)) throw new Error(`Packaged ${packagedPath} does not match ${canonicalPath}.`);
 }
 
 async function exists(file) {
