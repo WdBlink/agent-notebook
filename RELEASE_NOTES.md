@@ -1,3 +1,27 @@
+# Work Continuity v0.7.0
+
+Work Continuity v0.7.0 moves daily workline preparation out of the user's waiting path. Today remains one continuous work surface: source Sessions stay readable while the app prepares the day's review in the background, and a finished package appears without requiring the user to watch a model run.
+
+## Highlights
+
+- Adds one optional local daily preparation time under **Sources**. It is off by default and runs only while Work Continuity is open; there is no login item, wake service, daemon, or general automation center.
+- Keeps the raw Today Board usable during preparation. A run is represented only as a small `正在准备工作脉络…` state; the UI never exposes Skill, KSI, Prompt, or pipeline controls.
+- Makes **现在整理** non-blocking. The same background path serves manual and scheduled preparation, deduplicates repeated starts, and atomically publishes a new package only after compilation and validation succeed.
+- Uses exactly one enabled provider per preparation attempt. A slow or failed run never silently repeats the full day with a second provider and doubles time or model spend.
+- Persists first-run failures as retryable diagnostics without replacing source Sessions or a previously readable package.
+- Gives daily workline preparation priority over low-value Session-title generation, preventing competing model calls while a day still needs compilation.
+- Preserves the existing human-authority boundary: the app prepares evidence-linked worklines, but reflection, continuation choices, and sealing still require explicit user action.
+
+## Verification
+
+- The full suite covers schedule normalization, one-attempt gating, background deduplication, raw/failure persistence, the single-provider boundary, and all prior review/seal invariants.
+- A real Electron test starts with a due schedule, performs no review click, receives a compiled workline through a fake local provider CLI, and verifies that the result is durable while user reflection remains blank.
+
+## Boundaries
+
+- Work Continuity must remain open for the configured daily preparation time. v0.7.0 does not wake the Mac or install a system service.
+- The archives remain unsigned and not notarized. macOS may require Control-clicking the app and choosing **Open** for the first launch.
+
 # Work Continuity v0.6.2
 
 Work Continuity v0.6.2 fixes the follow-up failure that could appear as `CLI 返回的总结不是有效 JSON` after the provider had already finished organizing the day.

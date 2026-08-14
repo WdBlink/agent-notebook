@@ -136,16 +136,16 @@ test("refresh failure preserves the active package asset and records only a diag
   assert.equal(after.lastCompilationError, "模型暂时不可用");
 });
 
-test("raw compile failure leaves the day raw instead of creating a fake draft", async () => {
+test("raw compile failure leaves the day raw and persists a retryable diagnostic", async () => {
   const harness = createHarness(createEmptyNotebookDocument(), [new Error("没有可用模型")]);
 
   await assert.rejects(harness.prepare("compile"), /没有可用模型/);
 
   assert.equal(harness.compileCalls, 1);
   assert.equal(harness.commitCalls, 0);
-  assert.equal(harness.failureCalls, 0);
+  assert.equal(harness.failureCalls, 1);
   assert.equal(notebookStateForDate(harness.document, logicalDate, sessions).todayBoard.mode, "raw");
-  assert.equal(harness.document.pages[logicalDate], undefined);
+  assert.equal(harness.document.pages[logicalDate]?.lastCompilationError, "没有可用模型");
 });
 
 test("sealed day rejects before the compiler is invoked", async () => {

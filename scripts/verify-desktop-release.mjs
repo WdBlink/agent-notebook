@@ -58,7 +58,8 @@ try {
     "schema-enforced Traceink result transport": ["--output-schema", "traceink-review-output", "valueJson"],
     "bounded local Traceink transport recovery": ["traceink-local-transport-recovery-v1", "transportComplete"],
     "bounded provider output collection": ["codex-jsonl", "single-json", "final-output-too-large", "SIGKILL"],
-    "controlled review-provider fallback": ["compilerProviders", "reviewCompilerArgs"],
+    "single-provider daily preparation": ["allowProviderFallback", "dailyReviewScheduleEnabled", "dailyReviewScheduleTime"],
+    "background daily preparation": ["desktop:prepare-daily-review", "preparing", "scheduled"],
     "frozen Traceink evidence": ["workline-evidence-manifest-v2", "transcriptCapture", "freezeCapturedPrefix"],
     "generation-preserving review store": ["packageGenerations", "activePackageGenerationId"],
     "generation-safe reflection and sealing": ["desktop:save-daily-draft", "desktop:seal-daily-page", "expectedActiveGenerationId"],
@@ -73,6 +74,7 @@ try {
 
   assertMarkers("renderer", renderer, {
     "explicit daily-review preparation": ["prepareDailyReview"],
+    "unobtrusive scheduled preparation": ["review-schedule", "dailyReviewScheduleEnabled", "dailyReviewScheduleTime", "today-primary-action"],
     "Today workline board": ["today-board", "today-worklines", "workline-participation"],
     "evidence reader": ["review-reader", "review-block-evidence"],
     "legacy mutable artifact disclosure": ["review-evidence-reference"],

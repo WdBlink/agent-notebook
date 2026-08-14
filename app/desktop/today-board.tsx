@@ -12,6 +12,7 @@ import {
 import { useEffect, useId, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import type { DailySessionActivity, SessionActivityLane } from "../../src/session-activity";
+import type { DailyReviewPreparationState } from "../../src/daily-review-schedule";
 import type { AgentPlatform, AgentWorkSession, SessionProvider } from "../../src/types";
 import type { TodayBoardPackageGeneration } from "../../src/today-board";
 import type { DailyReviewEvidence, DailyReviewPackage, DailyWorklineReview } from "../../src/workline-review";
@@ -69,9 +70,11 @@ export function TodayBoard({
 }: TodayBoardProps): ReactElement {
   const [provider, setProvider] = useState<ProviderFilter>("all");
   const [expandedWorklines, setExpandedWorklines] = useState<Set<string>>(() => new Set());
-  const [preparing, setPreparing] = useState(false);
+  const [requestingPreparation, setRequestingPreparation] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const board = state.notebook.todayBoard;
+  const preparation = state.reviewPreparation;
+  const preparing = preparation.status === "preparing" || requestingPreparation;
   const generation = board.activeGeneration;
   const review = generation?.package;
   const activeReflections = generation
@@ -112,17 +115,17 @@ export function TodayBoard({
     .map((revision) => sessionByIdentity.get(revision.identity))
     .filter((session): session is AgentWorkSession => Boolean(session))
     .filter((session) => matchesSessionFilters(session, selectedProjectKey, provider));
-  const displayedError = actionError ?? board.compilationError ?? error;
+  const displayedError = actionError ?? preparation.message ?? board.compilationError ?? error;
 
   async function prepare(mode: "compile" | "refresh"): Promise<void> {
-    setPreparing(true);
+    setRequestingPreparation(true);
     setActionError(null);
     try {
       onNotebook(await window.agentWhiteboard.prepareDailyReview(state.activeDate, mode));
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : "工作脉络整理没有完成；上一版仍然可读。");
     } finally {
-      setPreparing(false);
+      setRequestingPreparation(false);
     }
   }
 
@@ -147,15 +150,15 @@ export function TodayBoard({
         <div className="today-title-block">
           <span className="today-kicker">TODAY / LOCAL EVIDENCE</span>
           <h1 id="today-board-title">今天的工作现场</h1>
-          <p>{modeDescription(board.mode, generation)}</p>
+          <p>{modeDescription(board.mode, generation, preparation)}</p>
         </div>
         <div className="today-board-state-line" aria-live="polite">
           <span data-mode={board.mode}>{modeLabel(board.mode)}</span>
-          {generation ? <small>材料截止 {formatDateTime(generation.evidenceCutoff)}</small> : <small>{sessions.length} 条独立 Session</small>}
+          {generation ? <small>材料截止 {formatDateTime(generation.evidenceCutoff)}</small> : preparation.status === "scheduled" ? <small>{preparation.time} 自动准备</small> : <small>{sessions.length} 条独立 Session</small>}
         </div>
         {board.mode === "raw" ? (
           <button type="button" className="today-primary-action" disabled={preparing || sessions.length === 0} onClick={() => void prepare("compile")}>
-            <Sparkles size={16} />{preparing ? "正在整理工作脉络…" : "整理工作脉络"}
+            <Sparkles size={16} />{preparing ? "正在准备工作脉络…" : preparation.status === "failed" ? "重新整理" : "现在整理"}
           </button>
         ) : board.mode === "stale" ? (
           <button type="button" className="today-primary-action" disabled={preparing} onClick={() => void prepare("refresh")}>
@@ -452,8 +455,15 @@ function modeLabel(mode: DesktopNotebookState["todayBoard"]["mode"]): string {
   return mode === "raw" ? "原始会话" : mode === "compiled" ? "已整理" : mode === "stale" ? "有新证据" : "已封存";
 }
 
-function modeDescription(mode: DesktopNotebookState["todayBoard"]["mode"], generation?: TodayBoardPackageGeneration): string {
-  if (mode === "raw") return "每条 Session 保持独立；整理只在你明确启动时发生。";
+function modeDescription(
+  mode: DesktopNotebookState["todayBoard"]["mode"],
+  generation: TodayBoardPackageGeneration | undefined,
+  preparation: DailyReviewPreparationState
+): string {
+  if (mode === "raw" && preparation.status === "preparing") return "工作现场仍可阅读；工作脉络会在后台准备好后自动出现。";
+  if (mode === "raw" && preparation.status === "scheduled") return `每条 Session 保持独立；今天 ${preparation.time} 会自动准备工作脉络。`;
+  if (mode === "raw" && preparation.status === "failed") return "原始 Session 仍然完整可读；你可以稍后重新整理。";
+  if (mode === "raw") return "每条 Session 保持独立；需要时可以把它们整理成跨会话工作脉络。";
   if (mode === "stale") return "上一版工作脉络保持可读，新到达的证据单独列在下方。";
   if (mode === "sealed") return "这份材料与人的原始墨迹已经固定；打开历史日期不会再次调用模型。";
   return generation ? "跨 Session 工作脉络已经生成，原始来源仍可逐条展开。" : "工作脉络材料已准备。";

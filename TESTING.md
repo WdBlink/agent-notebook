@@ -34,7 +34,7 @@ For a faster desktop-only browser pass after `build:desktop`:
 npx playwright test tests/e2e/desktop-app.spec.ts
 ```
 
-The desktop coverage includes Session discovery and parsing, activity evidence, Today Board projection, explicit compile/refresh preparation, Traceink prompt and evidence contracts, atomic generation commits, stale evidence, transcript authorization, notebook recovery, per-workline human reflection, generation-safe saving and sealing, historical replay, the five navigation surfaces, responsive windows, and copy-only Session recovery.
+The desktop coverage includes Session discovery and parsing, activity evidence, Today Board projection, scheduled and immediate background preparation, Traceink prompt and evidence contracts, single-provider attempts, atomic generation commits, stale evidence, transcript authorization, notebook recovery, per-workline human reflection, generation-safe saving and sealing, historical replay, the five navigation surfaces, responsive windows, and copy-only Session recovery.
 
 ## macOS Release Packages
 
@@ -83,15 +83,16 @@ Use `dist:macos` for desktop packages. `release:plugin:macos` is only for the de
 
 1. Open **Sources**, enable at least one provider with fixture or real local Sessions, and select an unsealed date.
 2. Confirm **raw** shows independent Session lanes. Activity labels must distinguish explicit human intervention, observed Agent-independent work, collaborative/running spans, and uncertainty without turning duration into importance.
-3. Choose **整理工作脉络** and confirm the board changes to **compiled** only after preparation succeeds.
-4. Expand a workline's source Sessions, open its dossier, and reopen at least one admitted transcript or artifact from the evidence reader.
-5. Confirm generated interpretation is labeled, the dossier leaves a real human question, and the reflection field starts blank.
-6. Add later evidence for the same date and refresh the snapshot. Confirm **stale** preserves the prior workline generation while listing the uncompiled evidence separately.
-7. Choose **更新工作脉络** and confirm success appends and activates a new generation; a failure must leave the prior generation readable.
-8. Write and save a reflection, open **今日收口**, select zero to three continuation bookmarks, and seal the active generation. If a refresh activates a newer generation while the review is open, both the stale save and stale seal must fail without modifying the newer package.
-9. Reopen the sealed date. Confirm the selected workline package, evidence links, original reflection, and bookmarks are read-only and no model request occurs.
+3. Leave the schedule off and choose **现在整理**. Confirm raw Session lanes remain readable while preparation runs and the board changes to **compiled** only after preparation succeeds.
+4. Return to **Sources**, enable **每日自动准备工作脉络**, choose a time a minute or two ahead, and leave the app open. Confirm the same preparation begins without another click and exposes no Skill, Prompt, or pipeline controls.
+5. Expand a workline's source Sessions, open its dossier, and reopen at least one admitted transcript or artifact from the evidence reader.
+6. Confirm generated interpretation is labeled, the dossier leaves a real human question, and the reflection field starts blank.
+7. Add later evidence for the same date and refresh the snapshot. Confirm **stale** preserves the prior workline generation while listing the uncompiled evidence separately.
+8. Choose **更新工作脉络** and confirm success appends and activates a new generation; a failure must leave the prior generation readable.
+9. Write and save a reflection, open **今日收口**, select zero to three continuation bookmarks, and seal the active generation. If a refresh activates a newer generation while the review is open, both the stale save and stale seal must fail without modifying the newer package.
+10. Reopen the sealed date. Confirm the selected workline package, evidence links, original reflection, and bookmarks are read-only and no model request occurs.
 
-These v0.6.2 archives are unsigned and not notarized. A first manual launch may require Control-clicking **Work Continuity.app** and choosing **Open**.
+These v0.7.0 archives are unsigned and not notarized. A first manual launch may require Control-clicking **Work Continuity.app** and choosing **Open**.
 
 ## Legacy Obsidian Plugin Compatibility
 

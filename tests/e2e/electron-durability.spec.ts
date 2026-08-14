@@ -160,6 +160,94 @@ test("real Electron save, seal, and relaunch preserve the exact reviewed generat
   }
 });
 
+test("real Electron prepares the scheduled workline in the background without a user action", async () => {
+  test.slow();
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "work-continuity-electron-schedule-"));
+  const home = path.join(root, "home");
+  const userData = path.join(root, "user-data");
+  const scanRoot = path.join(home, ".codex", "sessions");
+  const logicalDate = new Date().toISOString().slice(0, 10);
+  const sessionPath = path.join(scanRoot, `rollout-${logicalDate}-scheduled.jsonl`);
+  const fakeCodex = path.join(root, "fake-codex.mjs");
+  await Promise.all([
+    fs.mkdir(userData, { recursive: true }),
+    fs.mkdir(scanRoot, { recursive: true })
+  ]);
+
+  await fs.writeFile(sessionPath, [
+    JSON.stringify({ timestamp: `${logicalDate}T09:00:00.000Z`, type: "session_meta", payload: { id: "scheduled-session", cwd: home } }),
+    JSON.stringify({ timestamp: `${logicalDate}T09:01:00.000Z`, type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "验证每天自动准备工作脉络" }] } }),
+    JSON.stringify({ timestamp: `${logicalDate}T09:05:00.000Z`, type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "完成本地调度与原子写入验证。" }] } })
+  ].join("\n"), "utf8");
+
+  const transport = {
+    worklines: [{
+      id: "scheduled-workline",
+      title: "后台准备 · 日终工作脉络",
+      summary: "应用在约定时间后自行准备了可回看的工作线。",
+      status: "needs-judgment",
+      sourceSessionIds: ["codex:scheduled-session"],
+      startedAt: `${logicalDate}T09:00:00.000Z`,
+      endedAt: `${logicalDate}T09:05:00.000Z`,
+      participation: [{ id: "scheduled-participation", kind: "collaborative", startAt: `${logicalDate}T09:01:00.000Z`, endAt: `${logicalDate}T09:05:00.000Z`, label: "你参与后由 Agent 推进" }],
+      dossier: {
+        title: "定时准备已经形成一份可回看材料",
+        dek: "这里保留事实与证据，把判断留给用户。",
+        blocks: [{
+          id: "scheduled-future",
+          kind: "future-observation",
+          label: "未来观察",
+          title: "下次打开时材料是否已经出现",
+          body: "如果后台准备链路稳定，后续打开应用时工作脉络会直接出现；失败则仍保留原始 Session。",
+          evidenceIds: ["session:codex:scheduled-session"],
+          extensions: []
+        }],
+        question: { prompt: "这份材料是否足以让你开始自己的回看？", context: "系统不替用户形成结论。" }
+      },
+      extensions: []
+    }],
+    warnings: [],
+    transportComplete: true
+  };
+  await fs.writeFile(fakeCodex, [
+    "#!/usr/bin/env node",
+    "process.stdin.resume();",
+    "process.stdin.on('end', () => {",
+    `  const text = ${JSON.stringify(JSON.stringify(transport))};`,
+    "  process.stdout.write(JSON.stringify({type:'item.completed',item:{type:'agent_message',text}}) + '\\n');",
+    "});"
+  ].join("\n"), { encoding: "utf8", mode: 0o700 });
+
+  const cockpit = createEmptyData({
+    sessionScanRoots: [scanRoot],
+    enabledSessionProviders: ["codex"],
+    sessionSummaryMode: "native",
+    codexCliPath: fakeCodex,
+    dailyReviewScheduleEnabled: true,
+    dailyReviewScheduleTime: "00:00"
+  });
+  await fs.writeFile(path.join(userData, "cockpit-data.json"), `${JSON.stringify(cockpit, null, 2)}\n`, "utf8");
+
+  let electronApp: ElectronApplication | undefined;
+  try {
+    electronApp = await electron.launch({
+      args: [`--user-data-dir=${userData}`, path.resolve("dist/desktop")],
+      env: { ...process.env, HOME: home, TZ: "UTC" }
+    });
+    const page = await readyWindow(electronApp);
+    await expect(page.getByText("后台准备 · 日终工作脉络", { exact: true })).toBeVisible({ timeout: 15_000 });
+    const state = await page.evaluate(() => window.agentWhiteboard.getState());
+    expect(state.reviewPreparation.status).toBe("ready");
+    expect(state.notebook.todayBoard.mode).toBe("compiled");
+    expect(state.notebook.todayBoard.activeGeneration?.package.compilerProvider).toBe("codex");
+    expect(state.notebook.page.status).toBe("draft");
+    expect(state.notebook.page.worklineReflections).toEqual([]);
+  } finally {
+    await electronApp?.close().catch(() => undefined);
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 async function readyWindow(electronApp: ElectronApplication): Promise<Page> {
   const page = await electronApp.firstWindow();
   await expect(page.locator(".today-board")).toBeVisible();

@@ -53,13 +53,11 @@ export async function runDailyReviewPreparation<TResult>(
     });
     if (reviewPackage.logicalDate !== input.logicalDate) throw new Error("模型返回的回看日期与请求日期不一致。");
   } catch (error) {
-    if (input.board.mode !== "raw") {
-      await dependencies.recordFailure({
-        logicalDate: input.logicalDate,
-        message: errorMessage(error),
-        expectedActiveGenerationId
-      });
-    }
+    await dependencies.recordFailure({
+      logicalDate: input.logicalDate,
+      message: errorMessage(error),
+      expectedActiveGenerationId
+    });
     throw error;
   }
   return dependencies.commitSuccess({

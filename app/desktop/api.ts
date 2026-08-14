@@ -2,6 +2,7 @@ import type { AgentPlatform, CockpitData, SessionProvider } from "../../src/type
 import type { DailySessionActivity } from "../../src/session-activity";
 import type { DailyReviewPackage } from "../../src/workline-review";
 import type { TodayBoardPackageGeneration, TodayBoardProjection } from "../../src/today-board";
+import type { DailyReviewPreparationState } from "../../src/daily-review-schedule";
 
 export type DailyReviewPreparationMode = "compile" | "refresh";
 
@@ -14,6 +15,7 @@ export interface DesktopState {
   notebook: DesktopNotebookState;
   activity: DailySessionActivity;
   summaryJob?: DesktopSummaryJob;
+  reviewPreparation: DailyReviewPreparationState;
 }
 
 export type NotebookNoteKind = "thought" | "web" | "note";
@@ -132,6 +134,8 @@ export interface DesktopSettingsPatch {
   enabledSessionProviders?: SessionProvider[];
   sessionScanRoots?: string[];
   knowledgeRoot?: string;
+  dailyReviewScheduleEnabled?: boolean;
+  dailyReviewScheduleTime?: string;
 }
 
 export interface ProjectContextDocument {

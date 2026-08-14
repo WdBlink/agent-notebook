@@ -34,7 +34,8 @@ The primary product is a standalone macOS app. It does not require Obsidian and 
 ## What the App Does
 
 - **Today Board** — move one day through an explicit `raw → compiled → stale → sealed` lifecycle without hiding the underlying Sessions.
-- **Traceink reconstruction** — organize shared intent across Codex and Claude Code on demand, preserve conflict and uncertainty, and stop at questions that still need a person.
+- **Background preparation** — optionally choose one daily local time so the day's evidence-linked worklines can be ready when you return; source Sessions remain readable while preparation runs.
+- **Evidence reconstruction** — organize shared intent across Codex and Claude Code, preserve conflict and uncertainty, and stop at questions that still need a person.
 - **Honest activity** — distinguish explicit human interventions, observed Agent-independent activity, collaborative spans, running work, and evidence that is too weak to classify.
 - **Evidence-led review** — open a workline dossier, trace generated claims back to admitted Sessions or artifacts, and read source transcripts in place.
 - **Human closeout** — write reflection in a blank field, optionally keep up to three continuation bookmarks, and seal the exact active generation without AI-authored first-person conclusions.
@@ -42,13 +43,13 @@ The primary product is a standalone macOS app. It does not require Obsidian and 
 
 ## macOS Install
 
-Work Continuity v0.6.2 ships a DMG and ZIP for each current Mac architecture:
+Work Continuity v0.7.0 ships a DMG and ZIP for each current Mac architecture:
 
 ```text
-dist/macos/Work Continuity-0.6.2-macos-arm64.dmg
-dist/macos/Work Continuity-0.6.2-macos-arm64.zip
-dist/macos/Work Continuity-0.6.2-macos-x64.dmg
-dist/macos/Work Continuity-0.6.2-macos-x64.zip
+dist/macos/Work Continuity-0.7.0-macos-arm64.dmg
+dist/macos/Work Continuity-0.7.0-macos-arm64.zip
+dist/macos/Work Continuity-0.7.0-macos-x64.dmg
+dist/macos/Work Continuity-0.7.0-macos-x64.zip
 ```
 
 Use `arm64` on Apple Silicon and `x64` on Intel. The DMG is the normal install path; the ZIP is a fallback archive of the same app bundle.
@@ -59,12 +60,13 @@ These initial builds are unsigned and not notarized. On first launch, macOS may 
 
 1. Launch Work Continuity and open **Sources**.
 2. Enable Codex, Claude Code, or both. The default read roots are `~/.codex/sessions`, `~/.codex/archived_sessions`, and `~/.claude/projects`.
-3. Choose an uncompiled date. Its Today Board starts in **raw** and shows independent Session lanes plus only activity that can be supported by timestamps and authorship.
-4. Choose **整理工作脉络** when you want a review package. Compilation is explicit; it does not run continuously in the background.
-5. In **compiled**, scan the cross-Session workline board. Expand source Sessions or open one evidence dossier at a time.
-6. If later evidence arrives, the day becomes **stale**. The previous generation stays readable while new evidence is listed separately; choose **更新工作脉络** only when you want a new generation.
-7. Read the dossier, reopen evidence, and choose **看完了，开始思考** when you are ready to write. The reflection field starts blank and preserves your original words.
-8. Choose **今日收口**, review the exact active generation and your writing, select any continuation bookmarks, and seal. Historical sealed dates reopen without another model call.
+3. Optionally set **每日自动准备工作脉络** to one local time. It is off by default and runs only while the app remains open.
+4. Choose an uncompiled date. Its Today Board starts in **raw** and shows independent Session lanes plus only activity that can be supported by timestamps and authorship.
+5. Choose **现在整理** when you want to start immediately, or let the configured daily time start the same preparation path. The board remains readable while preparation runs.
+6. In **compiled**, scan the cross-Session workline board. Expand source Sessions or open one evidence dossier at a time.
+7. If later evidence arrives, the day becomes **stale**. The previous generation stays readable while new evidence is listed separately; choose **更新工作脉络** only when you want a new generation.
+8. Read the dossier, reopen evidence, and choose **看完了，开始思考** when you are ready to write. The reflection field starts blank and preserves your original words.
+9. Choose **今日收口**, review the exact active generation and your writing, select any continuation bookmarks, and seal. Historical sealed dates reopen without another model call.
 
 Resume actions copy a verified command. Work Continuity never executes that command automatically.
 
@@ -72,12 +74,12 @@ Resume actions copy a verified command. Work Continuity never executes that comm
 
 | State | What you see | What changes it |
 | --- | --- | --- |
-| **raw** | Independent Session lanes and observed activity | An explicit compile request |
+| **raw** | Independent Session lanes and observed activity; they remain usable during preparation | **现在整理** or the configured local preparation time |
 | **compiled** | A Traceink workline package covering the current evidence cutoff | New evidence or an explicit seal |
 | **stale** | The prior package plus a separate list of uncompiled evidence | An explicit refresh request |
 | **sealed** | The selected package generation, evidence links, human reflection, and bookmarks as read-only history | Nothing; the day is immutable |
 
-Compilation failures remain visible. A failed refresh does not replace the last readable generation, and a reflection save or seal request is rejected if its generation is no longer active.
+Preparation runs through one enabled provider per attempt and never silently repeats the entire day through a second provider. Failures remain visible and retryable without replacing raw Sessions or the last readable generation. A reflection save or seal request is rejected if its generation is no longer active.
 
 ## Historical Assets and Legacy Compatibility
 
@@ -125,11 +127,11 @@ Traceink uses the versioned `traceink-review-v1` prompt profile as an evidence-l
 
 The compiler may prepare basis evidence, but it cannot manufacture commitment. It is forbidden from claiming that the person decided, approved, adopted, delegated, migrated, authorized, or sealed anything. Generated semantic blocks remain extensible. Work Continuity requests a strict CLI result envelope and locally validates it; when a provider exhibits the known brace-free YAML transport defect, the app can recover only that narrow syntax without rewriting semantic values. Evidence membership, provenance, replay-safe generations, explicit actions, and sealed immutability remain mechanically enforced.
 
-Compilation runs through an installed provider CLI in read-only, ephemeral mode and can read the verified Codex and Claude manifest together. Product-owned Codex model and reasoning settings are isolated from interactive user configuration so they remain a compatible pair. If that CLI cannot be invoked and the other provider is already enabled, Work Continuity tries the other provider once; an invalid semantic result never triggers a second paid call or a thin-summary fallback. The default review models inherit the inexpensive smart-title defaults. Override them with `WORK_CONTINUITY_CODEX_REVIEW_MODEL` or `WORK_CONTINUITY_CLAUDE_REVIEW_MODEL`.
+Compilation runs through one installed provider CLI in read-only, ephemeral mode and can read the verified Codex and Claude evidence manifest together. Product-owned Codex model and reasoning settings are isolated from interactive user configuration so they remain a compatible pair. Each manual or scheduled attempt uses one enabled provider only; a failure never silently repeats the full day through another provider or falls back to a thin summary. The default review models inherit the inexpensive smart-title defaults. Override them with `WORK_CONTINUITY_CODEX_REVIEW_MODEL` or `WORK_CONTINUITY_CLAUDE_REVIEW_MODEL`.
 
 ## Local Model / Smart Session Titles
 
-Work Continuity renders provider metadata first, then asks the installed Codex and Claude Code CLIs for compact titles and progress summaries in the background. The default models are `gpt-5.3-codex-spark` and `fable`; override them with `WORK_CONTINUITY_CODEX_SUMMARY_MODEL` and `WORK_CONTINUITY_CLAUDE_SUMMARY_MODEL`, or set `WORK_CONTINUITY_DISABLE_SUMMARIES=1` for metadata-only mode.
+Work Continuity renders provider metadata first. Low-priority smart titles may be generated only after the current day's workline material is already compiled or sealed, so they cannot compete with the primary review preparation. The default models are `gpt-5.3-codex-spark` and `fable`; override them with `WORK_CONTINUITY_CODEX_SUMMARY_MODEL` and `WORK_CONTINUITY_CLAUDE_SUMMARY_MODEL`, or set `WORK_CONTINUITY_DISABLE_SUMMARIES=1` for metadata-only mode.
 
 These calls use the provider account and network already configured on the Mac. Original Session files remain read-only, generated summaries are cached locally, and failures stay visible instead of selecting a more expensive model silently.
 

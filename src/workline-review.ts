@@ -109,6 +109,7 @@ export interface WorklineReviewRunnerOptions {
   evidenceCutoff?: string;
   now?: () => Date;
   transcriptFreezer?: WorklineTranscriptFreezer;
+  allowProviderFallback?: boolean;
 }
 
 export type WorklineTranscriptFreezer = <T>(
@@ -315,7 +316,8 @@ export async function compileDailyWorklineReview(
   const runner = options.runner;
   if (!runner) throw new Error("当前运行时不能启动工作线整理模型。");
 
-  const providers = compilerProviders(settings.enabledSessionProviders, options.preferredProvider);
+  const orderedProviders = compilerProviders(settings.enabledSessionProviders, options.preferredProvider);
+  const providers = options.allowProviderFallback === false ? orderedProviders.slice(0, 1) : orderedProviders;
   const homeDir = options.homeDir ?? os.homedir();
   const evidence = buildEvidenceManifest(sessions);
   const pathOnlyArtifactCount = sessions.reduce((total, session) => total + session.artifacts.length, 0);

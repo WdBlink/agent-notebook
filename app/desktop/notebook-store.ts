@@ -213,16 +213,19 @@ export function recordDailyCompilationFailure(
   now = new Date(),
   expectedActiveGenerationId?: string | null
 ): NotebookDocument {
-  const existing = document.pages[logicalDate];
-  if (!existing || existing.status !== "draft") throw new Error("请先开始整理今天。");
+  const ensured = document.pages[logicalDate]
+    ? document
+    : composeDailyPage(document, logicalDate, [], now);
+  const existing = ensured.pages[logicalDate];
+  if (!existing || existing.status !== "draft") throw new Error("这一天当前不能记录整理失败。");
   if (expectedActiveGenerationId !== undefined && (existing.activePackageGenerationId ?? null) !== expectedActiveGenerationId) {
-    return document;
+    return ensured;
   }
   const lastCompilationError = cleanText(error, 2_000) || "整理失败，请重试。";
   return {
-    ...document,
+    ...ensured,
     pages: {
-      ...document.pages,
+      ...ensured.pages,
       [logicalDate]: { ...existing, lastCompilationError, updatedAt: now.toISOString() }
     }
   };

@@ -366,6 +366,14 @@ function App(): ReactElement {
                 setState(next);
                 showNotice("LLM-Wiki 根目录已经更新");
               }}
+              onReviewSchedule={async (enabled, time) => {
+                const next = await window.agentWhiteboard.updateSettings({
+                  dailyReviewScheduleEnabled: enabled,
+                  dailyReviewScheduleTime: time
+                });
+                setState(next);
+                showNotice(enabled ? `每天 ${time} 自动准备工作脉络` : "已关闭每日自动整理");
+              }}
             />
           ) : null}
         </section>
@@ -1071,13 +1079,16 @@ function DocumentDrawer({ document, onClose, onOpen }: { document: ProjectContex
   return <div className="drawer-layer"><button className="drawer-backdrop" type="button" aria-label="关闭项目文档" onClick={onClose} /><aside className="document-drawer"><header><div><span className="kicker">Project document / read only</span><h2>{document.label}</h2><code>{document.relativePath}</code></div><button type="button" aria-label="关闭" onClick={onClose}><X size={19} /></button></header><pre>{document.content}</pre><footer><button type="button" onClick={onOpen}><ExternalLink size={15} />在默认应用打开</button></footer></aside></div>;
 }
 
-function SourcesPanel({ state, onProvider, onAddRoot, onOpenPath, onKnowledgeRoot }: { state: DesktopState; onProvider(provider: SessionProvider): void; onAddRoot(): void; onOpenPath(target: string): void; onKnowledgeRoot(): void }): ReactElement {
+function SourcesPanel({ state, onProvider, onAddRoot, onOpenPath, onKnowledgeRoot, onReviewSchedule }: { state: DesktopState; onProvider(provider: SessionProvider): void; onAddRoot(): void; onOpenPath(target: string): void; onKnowledgeRoot(): void; onReviewSchedule(enabled: boolean, time: string): void }): ReactElement {
   const enabled = new Set(state.data.settings.enabledSessionProviders);
+  const scheduleEnabled = state.data.settings.dailyReviewScheduleEnabled;
+  const scheduleTime = state.data.settings.dailyReviewScheduleTime;
   return (
     <section className="view sources-view">
       <ViewHeading kicker="Trust surface / local evidence" title="Sources" />
       <div className="source-grid">
         <div className="source-main">
+          <div className="source-record review-schedule static"><Clock3 size={18} /><span><strong>每日自动准备工作脉络</strong><code>{scheduleEnabled ? `每天 ${scheduleTime}` : "未开启"}</code><small>应用保持运行时在后台整理；可能使用本地配置的模型额度。</small></span><div className="review-schedule-controls"><label><input type="checkbox" checked={scheduleEnabled} onChange={(event) => onReviewSchedule(event.target.checked, scheduleTime)} /><span>{scheduleEnabled ? "已开启" : "开启"}</span></label><input type="time" aria-label="每日自动整理时间" value={scheduleTime} disabled={!scheduleEnabled} onChange={(event) => onReviewSchedule(scheduleEnabled, event.target.value)} /></div></div>
           <div className="source-record knowledge-root"><Archive size={18} /><span><strong>LLM-Wiki knowledge root</strong><code>{state.notebook.knowledgeRoot}</code><small>INGEST → {state.notebook.knowledgeRawPath}</small></span><em>protocol</em><div><button type="button" onClick={() => onOpenPath(state.notebook.knowledgeRawPath)}>打开 raw</button><button type="button" onClick={onKnowledgeRoot}>管理根目录</button></div></div>
           {(["codex", "claude"] as SessionProvider[]).map((provider) => <button type="button" className="source-record" key={provider} onClick={() => onProvider(provider)}><Bot size={18} /><span><strong>{platformLabel(provider)} sessions</strong><code>{provider === "codex" ? "~/.codex/sessions/" : "~/.claude/projects/"}</code></span><em data-enabled={enabled.has(provider)}>{enabled.has(provider) ? "connected" : "disabled"}</em></button>)}
           <div className="source-record static"><Archive size={18} /><span><strong>Archived sessions</strong><code>provider-specific archives</code></span><em>read only</em></div>

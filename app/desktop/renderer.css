@@ -287,6 +287,14 @@ code, kbd { font-family: var(--mono); }
 .source-record code { margin-top: 5px; overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .source-record em { color: var(--green); font: 650 8px var(--mono); font-style: normal; text-transform: uppercase; }
 .source-record em[data-enabled="false"] { color: var(--faint); }
+.source-record.review-schedule { grid-template-columns: 26px minmax(0,1fr) auto; background: rgba(255,255,255,.28); }
+.source-record.review-schedule span small { display: block; max-width: 560px; margin-top: 5px; color: var(--muted); font-size: 9px; line-height: 1.45; }
+.review-schedule-controls { display: flex; align-items: center; gap: 10px; }
+.review-schedule-controls label { min-height: 32px; display: inline-flex; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-strong); color: var(--muted); font-size: 9px; cursor: pointer; }
+.review-schedule-controls label:has(input:checked) { color: var(--green); border-color: #aab9ad; background: #eef2ed; }
+.review-schedule-controls input[type="checkbox"] { accent-color: var(--green); }
+.review-schedule-controls input[type="time"] { min-height: 32px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface-strong); font: 600 10px var(--mono); }
+.review-schedule-controls input[type="time"]:disabled { color: var(--faint); background: transparent; }
 .add-root { margin-top: 16px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-strong); cursor: pointer; }
 .source-grid aside { display: grid; align-content: start; gap: 24px; }
 .policy-list { border-top: 1px solid var(--line-strong); }
@@ -456,6 +464,8 @@ code, kbd { font-family: var(--mono); }
   .map-inspector > nav button { font-size: 9px; }
   .source-record { grid-template-columns: 22px minmax(0,1fr); }
   .source-record em { grid-column: 2; }
+  .source-record.review-schedule { grid-template-columns: 22px minmax(0,1fr); }
+  .review-schedule-controls { grid-column: 2; justify-content: space-between; }
   .evidence-drawer footer { grid-template-columns: 1fr auto; }
   .evidence-drawer footer > code { grid-column: 1 / -1; grid-row: 1; }
   .drawer-content, .document-drawer pre { padding-right: 18px; padding-left: 18px; }

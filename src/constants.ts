@@ -43,7 +43,9 @@ export const DEFAULT_SETTINGS: CockpitSettings = {
   sessionSummaryMode: "native",
   runtimeNodePath: "node",
   codexCliPath: "codex",
-  claudeCliPath: "claude"
+  claudeCliPath: "claude",
+  dailyReviewScheduleEnabled: false,
+  dailyReviewScheduleTime: "18:30"
 };
 
 export const TASK_CATEGORIES: TaskCategory[] = ["research", "build", "write", "analysis", "admin", "other"];

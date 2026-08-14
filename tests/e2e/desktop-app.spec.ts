@@ -293,7 +293,9 @@ async function installDesktopApi(page: Page): Promise<void> {
           sessionSummaryMode: "native",
           runtimeNodePath: "node",
           codexCliPath: "codex",
-          claudeCliPath: "claude"
+          claudeCliPath: "claude",
+          dailyReviewScheduleEnabled: false,
+          dailyReviewScheduleTime: "18:30"
         },
         plans: [],
         workSessionSnapshot: {
@@ -307,7 +309,18 @@ async function installDesktopApi(page: Page): Promise<void> {
         whiteboardRevision: 0
       },
       notebook: createNotebook(activeDate, scopedSessions, scenario),
-      activity: createActivity(activeDate, scopedSessions)
+      activity: createActivity(activeDate, scopedSessions),
+      reviewPreparation: {
+        enabled: false,
+        time: "18:30",
+        logicalDate: activeDate,
+        status: scenario === "raw" ? "off" : "ready",
+        scheduledFor: undefined as string | undefined,
+        trigger: undefined as "manual" | "scheduled" | undefined,
+        startedAt: undefined as string | undefined,
+        finishedAt: undefined as string | undefined,
+        message: undefined as string | undefined
+      }
     });
     };
     const readPersistedSnapshot = (): any | null => {
@@ -363,6 +376,7 @@ async function installDesktopApi(page: Page): Promise<void> {
     (window as unknown as { openedPaths: string[] }).openedPaths = [];
     (window as unknown as { transcriptRequests: unknown[] }).transcriptRequests = [];
     (window as unknown as { copiedTexts: string[] }).copiedTexts = [];
+    (window as unknown as { settingsPatches: unknown[] }).settingsPatches = [];
     (window as unknown as { setTodayScenario: (next: TodayScenario) => void }).setTodayScenario = (next: TodayScenario) => {
       persistedSnapshot = null;
       window.name = "";
@@ -371,6 +385,20 @@ async function installDesktopApi(page: Page): Promise<void> {
       notifyState();
     };
     (window as unknown as { setPrepareFailure: (fail: boolean) => void }).setPrepareFailure = (fail: boolean) => { prepareShouldFail = fail; };
+    (window as unknown as { setReviewPreparation: (status: "off" | "scheduled" | "preparing" | "failed", message?: string) => void }).setReviewPreparation = (status, message) => {
+      state.reviewPreparation = {
+        ...state.reviewPreparation,
+        enabled: status !== "off",
+        time: state.data.settings.dailyReviewScheduleTime,
+        logicalDate: state.activeDate,
+        status,
+        ...(status === "preparing" ? { trigger: "scheduled", startedAt: `${state.activeDate}T18:30:00+08:00` } : {}),
+        ...(status === "scheduled" ? { scheduledFor: `${state.activeDate}T${state.data.settings.dailyReviewScheduleTime}` } : {}),
+        ...(message ? { message } : {})
+      };
+      state = structuredClone(state);
+      notifyState();
+    };
     (window as unknown as { prepareCallCount: () => number }).prepareCallCount = () => prepareCalls;
     (window as unknown as { advanceTodayGeneration: () => void }).advanceTodayGeneration = () => {
       const current = state.notebook.todayBoard.activeGeneration;
@@ -445,8 +473,16 @@ async function installDesktopApi(page: Page): Promise<void> {
     (window as unknown as { agentWhiteboard: unknown }).agentWhiteboard = {
       getState: async (date?: string) => loadState(date),
       refreshSessions: async (date?: string) => loadState(date),
-      updateSettings: async (patch: { enabledSessionProviders?: string[]; sessionScanRoots?: string[]; knowledgeRoot?: string }) => {
+      updateSettings: async (patch: { enabledSessionProviders?: string[]; sessionScanRoots?: string[]; knowledgeRoot?: string; dailyReviewScheduleEnabled?: boolean; dailyReviewScheduleTime?: string }) => {
+        (window as unknown as { settingsPatches: unknown[] }).settingsPatches.push(structuredClone(patch));
+        const previousSettings = structuredClone(state.data.settings);
         state = createState(patch.enabledSessionProviders ?? state.data.settings.enabledSessionProviders, state.activeDate, scenario);
+        state.data.settings = { ...state.data.settings, ...previousSettings, ...patch };
+        state.reviewPreparation.enabled = state.data.settings.dailyReviewScheduleEnabled;
+        state.reviewPreparation.time = state.data.settings.dailyReviewScheduleTime;
+        if (state.notebook.todayBoard.mode === "raw") {
+          state.reviewPreparation.status = state.data.settings.dailyReviewScheduleEnabled ? "scheduled" : "off";
+        }
         if (patch.sessionScanRoots) state.data.settings.sessionScanRoots = patch.sessionScanRoots;
         if (patch.knowledgeRoot) {
           state.notebook.knowledgeRoot = patch.knowledgeRoot;
@@ -482,6 +518,7 @@ async function installDesktopApi(page: Page): Promise<void> {
         prepareCalls += 1;
         if (prepareShouldFail) {
           state.notebook.todayBoard.compilationError = "整理模型暂时不可用；上一版仍然可读。";
+          state.reviewPreparation = { ...state.reviewPreparation, enabled: state.data.settings.dailyReviewScheduleEnabled, time: state.data.settings.dailyReviewScheduleTime, logicalDate: state.activeDate, status: "failed", message: "整理模型暂时不可用；上一版仍然可读。" };
           notifyState();
           throw new Error("整理模型暂时不可用；上一版仍然可读。");
         }
@@ -610,9 +647,42 @@ test("today board keeps raw Sessions as independent evidence lanes", async ({ pa
   await page.getByRole("button", { name: "回到证据" }).click();
   await expect(rawTranscriptAction).toBeFocused();
 
-  await board.getByRole("button", { name: "整理工作脉络" }).click();
+  await board.getByRole("button", { name: "现在整理" }).click();
   await expect(board.locator(".today-workline")).toHaveCount(2);
   expect(await page.evaluate(() => (window as unknown as { prepareCallCount(): number }).prepareCallCount())).toBe(1);
+});
+
+test("background preparation never replaces the raw work surface", async ({ page }) => {
+  const board = page.locator(".today-board");
+  await page.evaluate(() => (window as unknown as { setReviewPreparation(status: "preparing"): void }).setReviewPreparation("preparing"));
+
+  await expect(board.getByRole("list", { name: "今日会话" }).locator(".today-session-lane")).toHaveCount(4);
+  await expect(board.getByRole("button", { name: "正在准备工作脉络…" })).toBeDisabled();
+  await expect(board.getByText(/工作现场仍可阅读；工作脉络会在后台准备好后自动出现/)).toBeVisible();
+
+  await page.evaluate(() => (window as unknown as { setReviewPreparation(status: "failed", message: string): void }).setReviewPreparation("failed", "本次整理没有完成；原始工作现场仍然可读。"));
+  await expect(board.getByRole("list", { name: "今日会话" }).locator(".today-session-lane")).toHaveCount(4);
+  await expect(board.getByRole("button", { name: "重新整理" })).toBeVisible();
+  await expect(board.getByRole("alert")).toContainText("原始工作现场仍然可读");
+});
+
+test("Sources exposes one restrained daily preparation setting without implementation language", async ({ page }) => {
+  await page.getByRole("button", { name: "Sources", exact: true }).click();
+  const sources = page.locator(".sources-view");
+  await expect(sources.getByText("每日自动准备工作脉络", { exact: true })).toBeVisible();
+  await expect(sources.getByText("未开启", { exact: true })).toBeVisible();
+  expect(await sources.innerText()).not.toMatch(/Skill|Traceink|KSI/i);
+
+  await sources.getByRole("checkbox").check();
+  const time = sources.getByLabel("每日自动整理时间");
+  await expect(time).toBeEnabled();
+  await time.fill("19:45");
+
+  expect(await page.evaluate(() => (window as unknown as { settingsPatches: unknown[] }).settingsPatches)).toEqual([
+    { dailyReviewScheduleEnabled: true, dailyReviewScheduleTime: "18:30" },
+    { dailyReviewScheduleEnabled: true, dailyReviewScheduleTime: "19:45" }
+  ]);
+  await expect(sources.getByText("每天 19:45", { exact: true })).toBeVisible();
 });
 
 test("compiled board discloses exact source topology and opens the selected dossier", async ({ page }) => {
@@ -710,7 +780,7 @@ test("sealed board is read-only and transcript actions send the exact stored pac
   await expect(board.locator(".today-workline")).toHaveCount(2);
   await expect(board.locator(".today-board-toolbar .project-strip")).toHaveCount(0);
   await expect(board.locator(".today-activity-summary")).toHaveCount(0);
-  await expect(board.getByRole("button", { name: /整理工作脉络|更新工作脉络/ })).toHaveCount(0);
+  await expect(board.getByRole("button", { name: /现在整理|更新工作脉络/ })).toHaveCount(0);
   expect(await page.evaluate(() => (window as unknown as { prepareCallCount(): number }).prepareCallCount())).toBe(0);
   await expect(board.getByText("旧代墨迹不应展示。", { exact: true })).toHaveCount(0);
   await expect(board.locator(".today-workline").getByText("封页以后仍保留人的原始判断。", { exact: true })).toBeVisible();
@@ -801,7 +871,7 @@ test("legacy note persistence remains available without a capture entry on Today
 });
 
 test("end-of-day flow stores personal ink and seals an immutable page", async ({ page }) => {
-  await page.getByRole("button", { name: "整理工作脉络" }).click();
+  await page.getByRole("button", { name: "现在整理" }).click();
   await page.locator(".today-workline").first().getByRole("button", { name: "打开材料" }).click();
   const ritual = page.getByRole("dialog", { name: "日终回看" });
   await ritual.getByRole("button", { name: "看完了，开始思考" }).click();
@@ -818,7 +888,7 @@ test("end-of-day flow stores personal ink and seals an immutable page", async ({
   await ritual.getByRole("button", { name: "收笔并封存" }).click();
   await expect(page.getByText("已封存", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("今天到这里，明天继续验证闭环。")).toBeVisible();
-  await expect(page.getByRole("button", { name: /整理工作脉络|更新工作脉络|今日收口/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /现在整理|更新工作脉络|今日收口/ })).toHaveCount(0);
   await expect(page.locator(".today-board")).toBeFocused();
 });
 
@@ -866,7 +936,7 @@ test("an open seal review keeps its generation identity and rejects sealing afte
 
 test("generation-aware save, seal, reload, and history reopen preserve the exact sealed review", async ({ page }) => {
   const board = page.locator(".today-board");
-  await board.getByRole("button", { name: "整理工作脉络" }).click();
+  await board.getByRole("button", { name: "现在整理" }).click();
 
   await board.locator(".today-workline").first().getByRole("button", { name: "打开材料" }).click();
   let review = page.getByRole("dialog", { name: "日终回看" });
@@ -937,7 +1007,7 @@ test("generation-aware save, seal, reload, and history reopen preserve the exact
   await expect(page.locator(".today-workline").first()).not.toContainText("A · 第一代判断");
 
   await page.getByRole("button", { name: "查看前一天" }).click();
-  await expect(page.locator(".today-board").getByRole("button", { name: "整理工作脉络" })).toBeVisible();
+  await expect(page.locator(".today-board").getByRole("button", { name: "现在整理" })).toBeVisible();
   await page.getByRole("button", { name: "查看后一天" }).click();
   await expect(page.locator(".today-board").getByText("已封存", { exact: true }).first()).toBeVisible();
   await expect(page.locator(".today-workline").first()).toContainText("B · 第二代判断");
@@ -946,7 +1016,7 @@ test("generation-aware save, seal, reload, and history reopen preserve the exact
 });
 
 test("daily review reconstructs worklines before the user writes their own reflection", async ({ page }) => {
-  await page.getByRole("button", { name: "整理工作脉络" }).click();
+  await page.getByRole("button", { name: "现在整理" }).click();
   const board = page.locator(".today-board");
   await expect(board.locator(".today-workline")).toHaveCount(2);
   await expect(board.getByText("你参与", { exact: true }).first()).toBeVisible();
@@ -971,7 +1041,7 @@ test("daily review reconstructs worklines before the user writes their own refle
 
 test("daily review remains usable without horizontal overflow in a narrow window", async ({ page }) => {
   await page.setViewportSize({ width: 720, height: 620 });
-  await page.getByRole("button", { name: "整理工作脉络" }).click();
+  await page.getByRole("button", { name: "现在整理" }).click();
   await expect(page.locator(".today-workline")).toHaveCount(2);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
   await page.locator(".today-workline").first().getByRole("button", { name: "打开材料" }).click();

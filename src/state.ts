@@ -7,6 +7,7 @@ import {
   TASK_CATEGORIES,
   TASK_PRIORITIES
 } from "./constants";
+import { normalizeDailyReviewScheduleTime } from "./daily-review-schedule";
 import type {
   AgentPlatform,
   AgentSessionStatus,
@@ -538,7 +539,9 @@ export function normalizeSettings(input: unknown): CockpitSettings {
     sessionSummaryMode: settings.sessionSummaryMode === "metadata" ? "metadata" : "native",
     runtimeNodePath: cleanCommand(settings.runtimeNodePath, DEFAULT_SETTINGS.runtimeNodePath),
     codexCliPath: cleanCommand(settings.codexCliPath, DEFAULT_SETTINGS.codexCliPath),
-    claudeCliPath: cleanCommand(settings.claudeCliPath, DEFAULT_SETTINGS.claudeCliPath)
+    claudeCliPath: cleanCommand(settings.claudeCliPath, DEFAULT_SETTINGS.claudeCliPath),
+    dailyReviewScheduleEnabled: settings.dailyReviewScheduleEnabled === true,
+    dailyReviewScheduleTime: normalizeDailyReviewScheduleTime(settings.dailyReviewScheduleTime)
   };
 }
 

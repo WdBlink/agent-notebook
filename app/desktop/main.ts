@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, shell, type OpenDialogOptions } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, powerMonitor, shell, type OpenDialogOptions } from "electron";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -8,10 +8,11 @@ import { compileDailyWorklineReview } from "../../src/workline-review";
 import { loadAgentWorkSnapshot, mergeSessionSummaries, type RuntimeFileStat, type RuntimeFileSystem } from "../../src/agent-sessions";
 import { DEFAULT_SESSION_SCAN_ROOTS } from "../../src/constants";
 import { createEmptyData, localDateString, normalizeData, setWorkSessionSnapshot } from "../../src/state";
-import type { CockpitData, SessionProvider } from "../../src/types";
+import { deriveDailyReviewPreparationState, normalizeDailyReviewScheduleTime, shouldScheduleSessionSummaries, shouldStartAutomaticDailyReview, type DailyReviewPreparationTrigger } from "../../src/daily-review-schedule";
+import type { AgentWorkSnapshot, CockpitData, SessionProvider } from "../../src/types";
 import type { DailyDraftInput, DailyReviewPreparationMode, DailySealInput, DesktopNotebookState, DesktopSettingsPatch, DesktopState, DesktopSummaryJob, NotebookNote, NotebookNoteInput, ProjectContextDocument, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState } from "./api";
 import { runDailyReviewPreparation } from "./daily-review-preparation";
-import { loadFreshDailyReviewSnapshot } from "./daily-review-snapshot";
+import { DailyReviewBackgroundCoordinator } from "./daily-review-background";
 import { desktopCliRunner } from "./cli-runner";
 import {
   appendDailyReviewGeneration,
@@ -76,6 +77,9 @@ const sessionActivityCache = createSessionActivityCache({
     });
   }
 });
+const dailyReviewCoordinator = new DailyReviewBackgroundCoordinator();
+let dailyReviewScheduleTimer: NodeJS.Timeout | undefined;
+let dailyReviewScheduleEvaluationRunning = false;
 
 const runtimeFs: RuntimeFileSystem = {
   async stat(filePath: string): Promise<RuntimeFileStat> {
@@ -103,13 +107,20 @@ void app.whenReady().then(async () => {
   await refreshSnapshot(activeDate);
   if (process.platform === "darwin") app.dock?.setIcon(path.join(__dirname, "app-icon.png"));
   createWindow();
+  startDailyReviewSchedule();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    void evaluateAutomaticDailyReview();
   });
+  powerMonitor.on("resume", () => { void evaluateAutomaticDailyReview(); });
 });
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
+});
+
+app.on("before-quit", () => {
+  if (dailyReviewScheduleTimer) clearInterval(dailyReviewScheduleTimer);
 });
 
 ipcMain.handle("desktop:get-state", async (_event, date?: string) => {
@@ -132,20 +143,27 @@ ipcMain.handle("desktop:update-settings", async (_event, patch: DesktopSettingsP
   const current = await ensureLoaded();
   const enabledSessionProviders = normalizeProviders(patch.enabledSessionProviders, current.settings.enabledSessionProviders);
   const sessionScanRoots = normalizeRoots(patch.sessionScanRoots, current.settings.sessionScanRoots);
+  const sourcesChanged = patch.enabledSessionProviders !== undefined || patch.sessionScanRoots !== undefined;
   data = normalizeData({
     ...current,
     settings: {
       ...current.settings,
       enabledSessionProviders,
-      sessionScanRoots
+      sessionScanRoots,
+      dailyReviewScheduleEnabled: patch.dailyReviewScheduleEnabled ?? current.settings.dailyReviewScheduleEnabled,
+      dailyReviewScheduleTime: patch.dailyReviewScheduleTime === undefined
+        ? current.settings.dailyReviewScheduleTime
+        : normalizeDailyReviewScheduleTime(patch.dailyReviewScheduleTime)
     }
   });
   await persistStore(data);
   if (patch.knowledgeRoot !== undefined) {
     await mutateNotebook(activeDate, (currentNotebook) => setKnowledgeRoot(currentNotebook, patch.knowledgeRoot!));
   }
-  await refreshSnapshot(activeDate);
-  return buildState();
+  if (sourcesChanged) await refreshSnapshot(activeDate);
+  const state = await buildState();
+  void evaluateAutomaticDailyReview();
+  return state;
 });
 
 ipcMain.handle("desktop:create-notebook-note", async (_event, date: string, input: NotebookNoteInput) => {
@@ -214,11 +232,11 @@ ipcMain.handle("desktop:route-notebook-note-to-project", async (_event, noteId: 
 });
 
 ipcMain.handle("desktop:prepare-daily-review", async (_event, date: string, mode: DailyReviewPreparationMode) => {
-  return prepareDailyReviewForDate(date, mode);
+  return startDailyReviewForDate(date, mode, "manual");
 });
 
 ipcMain.handle("desktop:compose-daily-page", async (_event, date: string) => {
-  return prepareDailyReviewForDate(date);
+  return startDailyReviewForDate(date, undefined, "manual");
 });
 
 ipcMain.handle("desktop:save-daily-draft", async (_event, date: string, input: DailyDraftInput) => {
@@ -276,25 +294,43 @@ ipcMain.handle("desktop:open-path", async (_event, target: string, reveal?: bool
   }
 });
 
-async function prepareDailyReviewForDate(
+async function startDailyReviewForDate(
   requestedDate: string,
-  requestedMode?: DailyReviewPreparationMode
+  requestedMode: DailyReviewPreparationMode | undefined,
+  trigger: DailyReviewPreparationTrigger,
+  prefetchedSnapshot?: AgentWorkSnapshot
 ): Promise<DesktopNotebookState> {
   const logicalDate = String(requestedDate ?? "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(logicalDate)) throw new Error("回看日期无效。");
-  const snapshot = await loadFreshDailyReviewSnapshot(logicalDate, {
-    refreshSnapshot,
-    async loadSnapshot() {
-      return (await ensureLoaded()).workSessionSnapshot;
-    }
+  const activeRun = dailyReviewCoordinator.activeRun;
+  if (activeRun && activeRun.logicalDate !== logicalDate) throw new Error("另一天的工作脉络正在准备，请稍后再试。");
+  const existingBoard = notebookView(logicalDate).todayBoard;
+  if (existingBoard.mode === "sealed") throw new Error("这一天已经封页，不能重新整理。");
+  const mode = requestedMode ?? (existingBoard.mode === "raw" ? "compile" : "refresh");
+  dailyReviewCoordinator.start({
+    logicalDate,
+    trigger,
+    run: () => performDailyReviewForDate(logicalDate, mode, prefetchedSnapshot),
+    onStateChange: broadcastState
+  });
+  return notebookView(logicalDate);
+}
+
+async function performDailyReviewForDate(
+  logicalDate: string,
+  requestedMode: DailyReviewPreparationMode,
+  prefetchedSnapshot?: AgentWorkSnapshot
+): Promise<void> {
+  const snapshot = prefetchedSnapshot ?? await refreshSnapshot(logicalDate, {
+    scheduleSummaries: false,
+    publish: logicalDate === activeDate
   });
   const current = await ensureLoaded();
   const capturedSessions = structuredClone(snapshot.sessions);
   const board = notebookStateForDate(notebook, logicalDate, capturedSessions).todayBoard;
-  const mode = requestedMode ?? (board.mode === "raw" ? "compile" : "refresh");
-  return runDailyReviewPreparation({
+  await runDailyReviewPreparation({
     logicalDate,
-    mode,
+    mode: requestedMode,
     snapshotDate: snapshot.date,
     evidenceCutoff: snapshot.generatedAt,
     sessions: capturedSessions,
@@ -303,7 +339,9 @@ async function prepareDailyReviewForDate(
     compile({ logicalDate: date, evidenceCutoff, capturedSessions: sessions }) {
       return compileDailyWorklineReview(current.settings, date, sessions, {
         runner: desktopCliRunner,
-        evidenceCutoff
+        evidenceCutoff,
+        timeoutMs: 30 * 60 * 1_000,
+        allowProviderFallback: false
       });
     },
     commitSuccess({ reviewPackage, capturedSessions: sessions, expectedActiveGenerationId }) {
@@ -439,7 +477,10 @@ async function persistSummaryCache(): Promise<void> {
   await fs.writeFile(summaryCachePath(), `${JSON.stringify(summaryCache, null, 2)}\n`, "utf8");
 }
 
-async function refreshSnapshot(date: string): Promise<void> {
+async function refreshSnapshot(
+  date: string,
+  options: { scheduleSummaries?: boolean; publish?: boolean } = {}
+): Promise<AgentWorkSnapshot> {
   const runId = ++summaryRunId;
   const current = await ensureLoaded();
   const snapshot = await loadAgentWorkSnapshot(current.settings, {
@@ -453,9 +494,23 @@ async function refreshSnapshot(date: string): Promise<void> {
   });
   const cached = readCachedSessionSummaries(summaryCache, date, snapshot.sessions, summaryModels);
   const cachedSnapshot = { ...snapshot, sessions: mergeSessionSummaries(snapshot.sessions, cached.summaries) };
-  data = normalizeData(setWorkSessionSnapshot(current, cachedSnapshot));
-  await persistStore(data);
-  scheduleSessionSummaries(runId, date, snapshot.sessions, cached.misses, current.settings);
+  const reviewMode = notebookStateForDate(notebook, date, cachedSnapshot.sessions).todayBoard.mode;
+  if (options.publish !== false) {
+    data = normalizeData(setWorkSessionSnapshot(current, cachedSnapshot));
+    await persistStore(data);
+  }
+  if (options.scheduleSummaries !== false && options.publish !== false && shouldScheduleSessionSummaries(reviewMode)) {
+    scheduleSessionSummaries(runId, date, snapshot.sessions, cached.misses, current.settings);
+  } else if (options.publish !== false && !shouldScheduleSessionSummaries(reviewMode)) {
+    summaryJob = {
+      status: "idle",
+      total: 0,
+      completed: 0,
+      models: summaryModels,
+      message: "工作脉络优先；Session 标题整理暂不占用模型。"
+    };
+  }
+  return cachedSnapshot;
 }
 
 function scheduleSessionSummaries(
@@ -565,16 +620,69 @@ async function buildState(): Promise<DesktopState> {
     ...notebook.notes.map((note) => note.logicalDate),
     ...Object.keys(notebook.pages)
   ])).sort((a, b) => b.localeCompare(a)).slice(0, 70);
+  const notebookState = notebookStateForDate(notebook, requestDate, current.workSessionSnapshot.sessions);
   return {
     data: current,
     activeDate: requestDate,
     activityDates,
     appVersion: app.getVersion(),
     userDataPath: app.getPath("userData"),
-    notebook: notebookStateForDate(notebook, requestDate, current.workSessionSnapshot.sessions),
+    notebook: notebookState,
     activity,
-    summaryJob
+    summaryJob,
+    reviewPreparation: deriveDailyReviewPreparationState({
+      enabled: current.settings.dailyReviewScheduleEnabled,
+      time: current.settings.dailyReviewScheduleTime,
+      logicalDate: requestDate,
+      today: localDateString(),
+      boardMode: notebookState.todayBoard.mode,
+      sessionCount: current.workSessionSnapshot.sessions.length,
+      ...(notebookState.page.lastCompilationError ? { compilationError: notebookState.page.lastCompilationError } : {}),
+      ...(dailyReviewCoordinator.activeRun ? { activeRun: dailyReviewCoordinator.activeRun } : {})
+    })
   };
+}
+
+function startDailyReviewSchedule(): void {
+  if (dailyReviewScheduleTimer) clearInterval(dailyReviewScheduleTimer);
+  dailyReviewScheduleTimer = setInterval(() => { void evaluateAutomaticDailyReview(); }, 30_000);
+  dailyReviewScheduleTimer.unref?.();
+  void evaluateAutomaticDailyReview();
+}
+
+async function evaluateAutomaticDailyReview(now = new Date()): Promise<void> {
+  if (dailyReviewScheduleEvaluationRunning || dailyReviewCoordinator.activeRun) return;
+  const current = await ensureLoaded();
+  if (!current.settings.dailyReviewScheduleEnabled) return;
+  const logicalDate = localDateString(now);
+  const clock = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  if (clock < current.settings.dailyReviewScheduleTime) return;
+  if (dailyReviewCoordinator.hasScheduledAttempt(logicalDate)) return;
+
+  dailyReviewScheduleEvaluationRunning = true;
+  try {
+    const snapshot = await refreshSnapshot(logicalDate, {
+      scheduleSummaries: false,
+      publish: activeDate === logicalDate
+    });
+    const board = notebookStateForDate(notebook, logicalDate, snapshot.sessions).todayBoard;
+    if (!shouldStartAutomaticDailyReview({
+      enabled: current.settings.dailyReviewScheduleEnabled,
+      time: current.settings.dailyReviewScheduleTime,
+      logicalDate,
+      now,
+      sessionCount: snapshot.sessions.length,
+      boardMode: board.mode,
+      hasFailure: Boolean(board.compilationError),
+      inFlight: Boolean(dailyReviewCoordinator.activeRun),
+      attempted: dailyReviewCoordinator.hasScheduledAttempt(logicalDate)
+    })) return;
+    await startDailyReviewForDate(logicalDate, board.mode === "raw" ? "compile" : "refresh", "scheduled", snapshot);
+  } catch {
+    // A local scan failure leaves Today usable and will be retried at the next scheduler tick.
+  } finally {
+    dailyReviewScheduleEvaluationRunning = false;
+  }
 }
 
 async function findActivityDates(roots: string[], providers: SessionProvider[]): Promise<string[]> {

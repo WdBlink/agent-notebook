@@ -19,6 +19,8 @@ export interface CockpitSettings {
   runtimeNodePath: string;
   codexCliPath: string;
   claudeCliPath: string;
+  dailyReviewScheduleEnabled: boolean;
+  dailyReviewScheduleTime: string;
 }
 
 export interface IntentInput {

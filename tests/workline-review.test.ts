@@ -391,6 +391,33 @@ test("review falls back once to another enabled provider when the preferred CLI 
   assert.match(review.warnings.join(" "), /Codex.*失败.*Claude Code/i);
 });
 
+test("a single-provider review attempt never restarts the work with another enabled provider", async () => {
+  const commands: string[] = [];
+  const settings: CockpitSettings = {
+    ...createEmptyData().settings,
+    enabledSessionProviders: ["codex", "claude"]
+  };
+
+  await assert.rejects(
+    () => compileDailyWorklineReview(
+      settings,
+      "2026-08-09",
+      [session({ id: "codex-one", path: "/tmp/codex-one.jsonl" })],
+      {
+        allowProviderFallback: false,
+        transcriptFreezer: passThroughTranscriptFreezer,
+        runner: async (request) => {
+          commands.push(request.command);
+          throw new Error("CLI 总结超过 300 秒");
+        }
+      }
+    ),
+    /Codex CLI 调用失败/
+  );
+
+  assert.deepEqual(commands, ["codex"]);
+});
+
 test("semantic validation failure never triggers a second provider call", async () => {
   const commands: string[] = [];
   const settings: CockpitSettings = {

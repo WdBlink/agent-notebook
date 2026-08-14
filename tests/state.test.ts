@@ -157,6 +157,28 @@ test("session provider selection keeps an intentional empty selection and remove
   );
 });
 
+test("daily review preparation is disabled by default and persists one valid local time", () => {
+  const defaults = normalizeData({ schemaVersion: 4, settings: {}, plans: [] }).settings;
+  assert.equal(defaults.dailyReviewScheduleEnabled, false);
+  assert.equal(defaults.dailyReviewScheduleTime, "18:30");
+
+  const configured = normalizeData({
+    schemaVersion: 4,
+    settings: { dailyReviewScheduleEnabled: true, dailyReviewScheduleTime: "21:15" },
+    plans: []
+  }).settings;
+  assert.equal(configured.dailyReviewScheduleEnabled, true);
+  assert.equal(configured.dailyReviewScheduleTime, "21:15");
+
+  const invalid = normalizeData({
+    schemaVersion: 4,
+    settings: { dailyReviewScheduleEnabled: "yes", dailyReviewScheduleTime: "tomorrow" },
+    plans: []
+  }).settings;
+  assert.equal(invalid.dailyReviewScheduleEnabled, false);
+  assert.equal(invalid.dailyReviewScheduleTime, "18:30");
+});
+
 test("a stale stored plan is not kept active after normalization", () => {
   const normalized = normalizeData({
     schemaVersion: 2,
