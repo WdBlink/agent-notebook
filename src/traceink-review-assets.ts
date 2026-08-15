@@ -49,8 +49,12 @@ export interface TraceinkNavigationItemV1 {
   evidenceIds: string[];
 }
 
+export type TraceinkProposalCategoryV1 = "judgment" | "tomorrow" | "ctx" | "background" | "today-only";
+
 export interface TraceinkProposalNavigationItemV1 extends TraceinkNavigationItemV1 {
-  category: "judgment" | "tomorrow" | "ctx" | "background" | "today-only";
+  category: TraceinkProposalCategoryV1;
+  /** Fallible presentation sidecar; rawMarkdown remains the semantic authority. */
+  proposalText: string;
   sourceQuote: string;
 }
 
@@ -78,6 +82,26 @@ export interface UserReflectionAssetV1 {
   createdAt: string;
   savedAt: string;
   contentHash: Sha256;
+}
+
+export type TraceinkProposalDispositionActionV1 = "accept" | "dismiss" | "defer" | "rewrite";
+
+/**
+ * One immutable interaction receipt. It records only how the user wants the
+ * proposal presented; it grants no destination-write or execution authority.
+ */
+export interface TraceinkProposalDispositionV1 {
+  schemaVersion: 1;
+  id: string;
+  logicalDate: string;
+  worklineId: string;
+  proposalArtifact: TraceinkArtifactReferenceV1 & { stage: "proposals" };
+  proposalId: string;
+  category: TraceinkProposalCategoryV1;
+  revision: number;
+  action: TraceinkProposalDispositionActionV1;
+  rewriteText?: string;
+  decidedAt: string;
 }
 
 export interface TraceinkArtifactV1 {
@@ -120,6 +144,21 @@ export type TraceinkDossierArtifactDraftV1 = Omit<
   "id" | "revision" | "outputHash"
 >;
 
+export type TraceinkProposalsArtifactV1 = Omit<
+  TraceinkArtifactV1,
+  "stage" | "worklineId" | "sourceReflection" | "navigation"
+> & {
+  stage: "proposals";
+  worklineId: string;
+  sourceReflection: UserReflectionAssetReferenceV1;
+  navigation: TraceinkProposalNavigationItemV1[];
+};
+
+export type TraceinkProposalsArtifactDraftV1 = Omit<
+  TraceinkProposalsArtifactV1,
+  "id" | "revision" | "outputHash"
+>;
+
 export interface TraceinkWorklineSelectionV1 {
   worklineId: string;
   ordinal: number;
@@ -145,12 +184,19 @@ const COVERAGE_DISPOSITIONS = new Set<TraceinkCoverageEntryV1["disposition"]>([
   "truncated",
   "failed"
 ]);
-const PROPOSAL_CATEGORIES = new Set<TraceinkProposalNavigationItemV1["category"]>([
+export const TRACEINK_PROPOSAL_CATEGORIES = [
   "judgment",
   "tomorrow",
   "ctx",
   "background",
   "today-only"
+] as const satisfies readonly TraceinkProposalCategoryV1[];
+const PROPOSAL_CATEGORIES = new Set<TraceinkProposalCategoryV1>(TRACEINK_PROPOSAL_CATEGORIES);
+const PROPOSAL_DISPOSITION_ACTIONS = new Set<TraceinkProposalDispositionActionV1>([
+  "accept",
+  "dismiss",
+  "defer",
+  "rewrite"
 ]);
 const STORAGE_DIAGNOSTIC_PREFIX = "Traceink storage diagnostic:";
 
@@ -322,6 +368,49 @@ export function normalizeUserReflectionAssetV1(value: unknown): UserReflectionAs
     createdAt,
     savedAt,
     contentHash
+  };
+}
+
+export function normalizeTraceinkProposalDispositionV1(
+  value: unknown
+): TraceinkProposalDispositionV1 | undefined {
+  const raw = asRecord(value);
+  if (!raw || raw.schemaVersion !== 1) return undefined;
+  const id = nonEmptyString(raw.id);
+  const logicalDate = logicalDateString(raw.logicalDate);
+  const worklineId = nonEmptyString(raw.worklineId);
+  const proposalArtifact = normalizeTraceinkArtifactReferenceV1(raw.proposalArtifact);
+  const proposalId = nonEmptyString(raw.proposalId);
+  const category = proposalCategory(raw.category);
+  const revision = positiveInteger(raw.revision);
+  const action = proposalDispositionAction(raw.action);
+  const rewriteText = raw.rewriteText === undefined ? undefined : nonEmptyStringPreservingBytes(raw.rewriteText);
+  const decidedAt = timestamp(raw.decidedAt);
+  if (
+    !id ||
+    !logicalDate ||
+    !worklineId ||
+    !proposalArtifact ||
+    proposalArtifact.stage !== "proposals" ||
+    !proposalId ||
+    !category ||
+    !revision ||
+    !action ||
+    !decidedAt ||
+    (action === "rewrite" ? !rewriteText : raw.rewriteText !== undefined)
+  ) return undefined;
+  return {
+    schemaVersion: 1,
+    id,
+    logicalDate,
+    worklineId,
+    proposalArtifact: { ...proposalArtifact, stage: "proposals" },
+    proposalId,
+    category,
+    revision,
+    action,
+    ...(rewriteText !== undefined ? { rewriteText } : {}),
+    decidedAt
   };
 }
 
@@ -526,15 +615,16 @@ function normalizeNavigation(
       referencedEvidenceIds.push(evidenceId);
     }
     const category = proposalCategory(raw.category);
+    const proposalText = nonEmptyString(raw.proposalText);
     const sourceQuote = nonEmptyString(raw.sourceQuote);
     seen.add(id);
-    const hasProposalMetadata = hasOwn(raw, "category") || hasOwn(raw, "sourceQuote");
-    if (hasProposalMetadata && (!category || !sourceQuote)) {
+    const hasProposalMetadata = hasOwn(raw, "category") || hasOwn(raw, "proposalText") || hasOwn(raw, "sourceQuote");
+    if (hasProposalMetadata && (!category || !proposalText || !sourceQuote)) {
       blocked += 1;
       continue;
     }
-    if (category && sourceQuote) {
-      navigation.push({ id, markdownAnchor, evidenceIds: referencedEvidenceIds, category, sourceQuote });
+    if (category && proposalText && sourceQuote) {
+      navigation.push({ id, markdownAnchor, evidenceIds: referencedEvidenceIds, category, proposalText, sourceQuote });
     } else {
       navigation.push({ id, markdownAnchor, evidenceIds: referencedEvidenceIds });
     }
@@ -646,4 +736,14 @@ function proposalCategory(value: unknown): TraceinkProposalNavigationItemV1["cat
   return typeof value === "string" && PROPOSAL_CATEGORIES.has(value as TraceinkProposalNavigationItemV1["category"])
     ? value as TraceinkProposalNavigationItemV1["category"]
     : undefined;
+}
+
+function proposalDispositionAction(value: unknown): TraceinkProposalDispositionActionV1 | undefined {
+  return typeof value === "string" && PROPOSAL_DISPOSITION_ACTIONS.has(value as TraceinkProposalDispositionActionV1)
+    ? value as TraceinkProposalDispositionActionV1
+    : undefined;
+}
+
+function nonEmptyStringPreservingBytes(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
 }

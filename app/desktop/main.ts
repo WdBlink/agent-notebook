@@ -4,14 +4,14 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCliSessionSummarizer } from "../../src/agent-summary";
-import { compileTraceinkDossier, compileTraceinkIndex } from "../../src/traceink-review";
-import type { TraceinkArtifactReferenceV1, TraceinkIndexArtifactV1, TraceinkWorklineSelectionV1 } from "../../src/traceink-review-assets";
+import { compileTraceinkDossier, compileTraceinkIndex, compileTraceinkProposals } from "../../src/traceink-review";
+import type { TraceinkArtifactReferenceV1, TraceinkIndexArtifactV1, TraceinkWorklineSelectionV1, UserReflectionAssetReferenceV1 } from "../../src/traceink-review-assets";
 import { loadAgentWorkSnapshot, mergeSessionSummaries, type RuntimeFileStat, type RuntimeFileSystem } from "../../src/agent-sessions";
 import { DEFAULT_SESSION_SCAN_ROOTS, MAX_WORK_SESSION_SNAPSHOT_SESSIONS } from "../../src/constants";
 import { createEmptyData, localDateString, normalizeData, setWorkSessionSnapshot } from "../../src/state";
 import { deriveDailyReviewPreparationState, normalizeDailyReviewScheduleTime, shouldScheduleSessionSummaries, shouldStartAutomaticDailyReview, type DailyReviewPreparationTrigger } from "../../src/daily-review-schedule";
 import type { AgentWorkSession, AgentWorkSnapshot, CockpitData, SessionProvider } from "../../src/types";
-import type { DailyDraftInput, DailyReviewPreparationMode, DailySealInput, DesktopNotebookState, DesktopSettingsPatch, DesktopState, DesktopSummaryJob, NotebookNote, NotebookNoteInput, ProjectContextDocument, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState } from "./api";
+import type { DailyDraftInput, DailyReviewPreparationMode, DailySealInput, DesktopNotebookState, DesktopSettingsPatch, DesktopState, DesktopSummaryJob, NotebookNote, NotebookNoteInput, ProjectContextDocument, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState, TraceinkProposalDispositionInput } from "./api";
 import { DailyReviewBackgroundCoordinator } from "./daily-review-background";
 import { desktopCliRunner } from "./cli-runner";
 import {
@@ -46,7 +46,17 @@ import {
   traceinkAssetStorePath,
   type TraceinkAssetRepository
 } from "./traceink-asset-repository";
-import { activeIndexReferenceForDate, appendTraceinkDossierRevision, appendTraceinkReflectionRevision, latestTraceinkDossier } from "./traceink-asset-store";
+import {
+  activeIndexReferenceForDate,
+  appendTraceinkDossierRevision,
+  appendTraceinkProposalDisposition,
+  appendTraceinkProposalsRevision,
+  appendTraceinkReflectionRevision,
+  findTraceinkArtifact,
+  findTraceinkReflection,
+  latestTraceinkDossier,
+  latestTraceinkProposals
+} from "./traceink-asset-store";
 import { runTraceinkReviewPreparation } from "./traceink-review-preparation";
 import {
   automaticTraceinkEligibilityMode,
@@ -289,6 +299,61 @@ ipcMain.handle("desktop:save-traceink-reflection", async (_event, date: string, 
     const artifact = document.artifacts.find((item) => item.id === dossier?.artifactId && item.stage === "dossier" && item.revision === dossier?.revision && item.outputHash === dossier?.outputHash);
     if (!artifact || artifact.logicalDate !== logicalDate) throw new Error("证据档案已经变化，请重新打开后再保存。");
     return appendTraceinkReflectionRevision(document, dossier, String(text ?? ""), new Date().toISOString());
+  });
+  return buildState();
+});
+
+ipcMain.handle("desktop:prepare-traceink-proposals", async (_event, date: string, reflectionReference: UserReflectionAssetReferenceV1) => {
+  const logicalDate = cleanDate(date, activeDate);
+  const repository = requireTraceinkAssetRepository();
+  const startingDocument = repository.snapshot();
+  const reflection = findTraceinkReflection(startingDocument, reflectionReference);
+  if (!reflection || reflection.logicalDate !== logicalDate) {
+    throw new Error("保存的回顾已经变化，请重新打开后再整理提案。");
+  }
+  if (latestTraceinkProposals(startingDocument, reflection)) return buildState();
+  const dossier = findTraceinkArtifact(startingDocument, reflection.dossier);
+  if (!dossier || dossier.stage !== "dossier" || !dossier.worklineId) {
+    throw new Error("回顾引用的证据档案已经不可用。");
+  }
+  const current = await ensureLoaded();
+  const { sourceReflection: _sourceReflection, ...dossierFields } = dossier;
+  const draft = await compileTraceinkProposals(current.settings, {
+    ...dossierFields,
+    stage: "dossier",
+    worklineId: dossier.worklineId
+  }, reflection, {
+    runner: desktopCliRunner,
+    timeoutMs: 30 * 60 * 1_000
+  });
+  await repository.mutate((document) => appendTraceinkProposalsRevision(
+    document,
+    draft,
+    reflectionReference,
+    null
+  ));
+  return buildState();
+});
+
+ipcMain.handle("desktop:dispose-traceink-proposal", async (
+  _event,
+  date: string,
+  proposals: TraceinkArtifactReferenceV1 & { stage: "proposals" },
+  proposalId: string,
+  input: TraceinkProposalDispositionInput
+) => {
+  const logicalDate = cleanDate(date, activeDate);
+  const repository = requireTraceinkAssetRepository();
+  await repository.mutate((document) => {
+    const artifact = findTraceinkArtifact(document, proposals);
+    if (!artifact || artifact.stage !== "proposals" || artifact.logicalDate !== logicalDate) {
+      throw new Error("回顾提案已经变化，请重新打开后再处理。");
+    }
+    return appendTraceinkProposalDisposition(document, proposals, String(proposalId ?? ""), {
+      action: input?.action,
+      ...(input?.rewriteText !== undefined ? { rewriteText: input.rewriteText } : {}),
+      decidedAt: new Date().toISOString()
+    });
   });
   return buildState();
 });

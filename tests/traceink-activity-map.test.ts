@@ -29,6 +29,7 @@ test("Traceink natural-language index projects workline Session lanes and preser
 
 function workline(worklineId: string, ordinal: number, title: string): TraceinkWorklineReviewState {
   return {
+    proposalItems: [],
     selection: {
       worklineId,
       ordinal,

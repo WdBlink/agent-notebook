@@ -4,7 +4,12 @@ import type { DailyReviewPackage } from "../../src/workline-review";
 import type { TodayBoardPackageGeneration, TodayBoardProjection } from "../../src/today-board";
 import type { DailyReviewPreparationState } from "../../src/daily-review-schedule";
 import type { TraceinkReviewProjection } from "../../src/traceink-review-state";
-import type { TraceinkArtifactReferenceV1, TraceinkWorklineSelectionV1 } from "../../src/traceink-review-assets";
+import type {
+  TraceinkArtifactReferenceV1,
+  TraceinkProposalDispositionActionV1,
+  TraceinkWorklineSelectionV1,
+  UserReflectionAssetReferenceV1
+} from "../../src/traceink-review-assets";
 
 export type DailyReviewPreparationMode = "compile" | "refresh";
 
@@ -142,6 +147,11 @@ export interface DesktopSettingsPatch {
   dailyReviewScheduleTime?: string;
 }
 
+export interface TraceinkProposalDispositionInput {
+  action: TraceinkProposalDispositionActionV1;
+  rewriteText?: string;
+}
+
 export interface ProjectContextDocument {
   id: string;
   kind: "overview" | "progress" | "spec" | "decision";
@@ -201,6 +211,13 @@ export interface DesktopApi {
   prepareDailyReview(date: string, mode: DailyReviewPreparationMode): Promise<DesktopNotebookState>;
   prepareTraceinkDossier(date: string, selection: TraceinkWorklineSelectionV1): Promise<DesktopState>;
   saveTraceinkReflection(date: string, dossier: TraceinkArtifactReferenceV1 & { stage: "dossier" }, text: string): Promise<DesktopState>;
+  prepareTraceinkProposals(date: string, reflection: UserReflectionAssetReferenceV1): Promise<DesktopState>;
+  disposeTraceinkProposal(
+    date: string,
+    proposals: TraceinkArtifactReferenceV1 & { stage: "proposals" },
+    proposalId: string,
+    input: TraceinkProposalDispositionInput
+  ): Promise<DesktopState>;
   composeDailyPage(date: string): Promise<DesktopNotebookState>;
   saveDailyDraft(date: string, input: DailyDraftInput): Promise<DesktopNotebookState>;
   sealDailyPage(date: string, input: DailySealInput): Promise<DesktopNotebookState>;

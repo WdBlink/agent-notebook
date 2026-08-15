@@ -2,12 +2,20 @@ import type {
   TraceinkAssetStoreDocumentV1,
   TraceinkIndexArtifactReferenceV1
 } from "../app/desktop/traceink-asset-store";
-import { latestTraceinkDossier, latestTraceinkReflection } from "../app/desktop/traceink-asset-store";
+import {
+  latestTraceinkDossier,
+  latestTraceinkProposalDispositions,
+  latestTraceinkProposals,
+  latestTraceinkReflection
+} from "../app/desktop/traceink-asset-store";
 import {
   normalizeTraceinkArtifactReferenceV1,
   normalizeTraceinkArtifactV1,
   type TraceinkIndexArtifactV1,
   type TraceinkDossierArtifactV1,
+  type TraceinkProposalCategoryV1,
+  type TraceinkProposalDispositionV1,
+  type TraceinkProposalsArtifactV1,
   type TraceinkWorklineSelectionV1,
   type UserReflectionAssetV1
 } from "./traceink-review-assets";
@@ -30,6 +38,17 @@ export interface TraceinkWorklineReviewState {
   selection: TraceinkWorklineSelectionV1;
   dossier?: TraceinkDossierArtifactV1;
   reflection?: UserReflectionAssetV1;
+  proposals?: TraceinkProposalsArtifactV1;
+  proposalItems: TraceinkProposalItemReviewState[];
+}
+
+export interface TraceinkProposalItemReviewState {
+  proposalId: string;
+  category: TraceinkProposalCategoryV1;
+  proposalText: string;
+  sourceQuote: string;
+  evidenceIds: string[];
+  latestDisposition?: TraceinkProposalDispositionV1;
 }
 
 interface ExactSessionRevision {
@@ -107,7 +126,28 @@ export function projectTraceinkReview(
     worklines: traceinkWorklineSelections(resolved.artifact).map((selection) => {
       const dossier = latestTraceinkDossier(store, resolved.reference, selection.worklineId);
       const reflection = dossier ? latestTraceinkReflection(store, dossier) : undefined;
-      return { selection, ...(dossier ? { dossier } : {}), ...(reflection ? { reflection } : {}) };
+      const proposals = reflection ? latestTraceinkProposals(store, reflection) : undefined;
+      const dispositionByProposalId = proposals
+        ? new Map(latestTraceinkProposalDispositions(store, proposals).map((item) => [item.proposalId, item]))
+        : new Map<string, TraceinkProposalDispositionV1>();
+      const proposalItems: TraceinkProposalItemReviewState[] = proposals?.navigation.map((item) => {
+        const latestDisposition = dispositionByProposalId.get(item.id);
+        return {
+          proposalId: item.id,
+          category: item.category,
+          proposalText: item.proposalText,
+          sourceQuote: item.sourceQuote,
+          evidenceIds: [...item.evidenceIds],
+          ...(latestDisposition ? { latestDisposition } : {})
+        };
+      }) ?? [];
+      return {
+        selection,
+        ...(dossier ? { dossier } : {}),
+        ...(reflection ? { reflection } : {}),
+        ...(proposals ? { proposals } : {}),
+        proposalItems
+      };
     }),
     ...freshnessDiagnostic({ current, stored, absentStoredCount })
   };

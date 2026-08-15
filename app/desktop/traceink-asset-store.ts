@@ -3,18 +3,25 @@ import {
   isTraceinkLogicalDate,
   normalizeTraceinkArtifactReferenceV1,
   normalizeTraceinkArtifactV1,
+  normalizeTraceinkProposalDispositionV1,
   normalizeUserReflectionAssetV1,
   sha256TraceinkText,
   traceinkArtifactReference,
+  userReflectionAssetReference,
   type TraceinkArtifactReferenceV1,
   type TraceinkArtifactV1,
   type TraceinkDossierArtifactDraftV1,
   type TraceinkDossierArtifactV1,
   type TraceinkIndexArtifactDraftV1,
   type TraceinkIndexArtifactV1,
+  type TraceinkProposalDispositionActionV1,
+  type TraceinkProposalDispositionV1,
   type TraceinkProposalNavigationItemV1,
+  type TraceinkProposalsArtifactDraftV1,
+  type TraceinkProposalsArtifactV1,
   type UserReflectionAssetV1
 } from "../../src/traceink-review-assets";
+import { TRACEINK_PROPOSAL_CATEGORIES } from "../../src/traceink-review-assets";
 
 export type TraceinkIndexArtifactReferenceV1 = TraceinkArtifactReferenceV1 & { stage: "index" };
 
@@ -22,13 +29,15 @@ export interface TraceinkAssetStoreDocumentV1 {
   schemaVersion: 1;
   artifacts: TraceinkArtifactV1[];
   reflections: UserReflectionAssetV1[];
+  /** Optional only for backward-compatible loading of pre-interaction v1 files. */
+  proposalDispositions?: TraceinkProposalDispositionV1[];
   activeIndexByDate: Record<string, TraceinkIndexArtifactReferenceV1>;
 }
 
 export type TraceinkAssetStoreDocument = TraceinkAssetStoreDocumentV1;
 
 export function createEmptyTraceinkAssetStore(): TraceinkAssetStoreDocumentV1 {
-  return { schemaVersion: 1, artifacts: [], reflections: [], activeIndexByDate: {} };
+  return { schemaVersion: 1, artifacts: [], reflections: [], proposalDispositions: [], activeIndexByDate: {} };
 }
 
 export const createEmptyTraceinkAssetStoreDocument = createEmptyTraceinkAssetStore;
@@ -71,12 +80,19 @@ export function normalizeTraceinkAssetStore(value: unknown): TraceinkAssetStoreD
   const resolvedArtifactByReference = new Map(
     resolvedArtifacts.map((artifact) => [referenceKey(traceinkArtifactReference(artifact)), artifact])
   );
+  const proposalDispositions = stableProposalDispositionLineages(uniqueProposalDispositions(
+    (Array.isArray(raw.proposalDispositions) ? raw.proposalDispositions : [])
+      .map(normalizeTraceinkProposalDispositionV1)
+      .filter(isPresent)
+      .filter((disposition) => proposalDispositionResolves(disposition, resolvedArtifactByReference))
+  ));
   const activeIndexByDate = normalizeActiveIndexes(raw.activeIndexByDate, resolvedArtifactByReference);
 
   return {
     schemaVersion: 1,
     artifacts: resolvedArtifacts,
     reflections,
+    proposalDispositions,
     activeIndexByDate
   };
 }
@@ -154,6 +170,7 @@ export function appendTraceinkIndexRevision(
     schemaVersion: 1,
     artifacts: [...current.artifacts, artifact],
     reflections: current.reflections,
+    proposalDispositions: current.proposalDispositions ?? [],
     activeIndexByDate: {
       ...current.activeIndexByDate,
       [artifact.logicalDate]: reference
@@ -252,6 +269,155 @@ export function latestTraceinkReflection(
     .sort((left, right) => right.revision - left.revision)[0];
 }
 
+export function appendTraceinkProposalsRevision(
+  document: TraceinkAssetStoreDocumentV1,
+  draft: TraceinkProposalsArtifactDraftV1,
+  expectedReflection: ReturnType<typeof userReflectionAssetReference>,
+  expectedProposals?: (TraceinkArtifactReferenceV1 & { stage: "proposals" }) | null
+): TraceinkAssetStoreDocumentV1 {
+  const current = canonicalStore(document);
+  const reflection = reflectionForReference(current, expectedReflection);
+  if (!reflection) throw new Error("Traceink saved reflection changed before proposals could be appended.");
+  const dossier = findTraceinkArtifact(current, reflection.dossier);
+  let latestReflection: UserReflectionAssetV1 | undefined;
+  if (dossier?.stage === "dossier" && dossier.worklineId) {
+    const { sourceReflection: _sourceReflection, ...dossierFields } = dossier;
+    latestReflection = latestTraceinkReflection(current, {
+      ...dossierFields,
+      stage: "dossier",
+      worklineId: dossier.worklineId
+    });
+  }
+  if (!latestReflection || !sameReflectionReference(
+    userReflectionAssetReference(latestReflection),
+    expectedReflection
+  )) throw new Error("Traceink saved reflection changed before proposals could be appended.");
+  const activeProposals = latestTraceinkProposals(current, reflection);
+  if (
+    expectedProposals !== undefined &&
+    !sameOptionalArtifactReference(
+      activeProposals ? traceinkArtifactReference(activeProposals) : undefined,
+      expectedProposals
+    )
+  ) throw new Error("Traceink proposals changed before this revision could be appended.");
+  if (
+    draft.schemaVersion !== 1 ||
+    draft.stage !== "proposals" ||
+    draft.logicalDate !== reflection.logicalDate ||
+    draft.worklineId !== reflection.worklineId ||
+    !sameReflectionReference(draft.sourceReflection, expectedReflection) ||
+    hasOwn(draft, "id") ||
+    hasOwn(draft, "revision") ||
+    hasOwn(draft, "outputHash")
+  ) throw new Error("Traceink proposal draft identity is invalid.");
+  if (!draft.rawMarkdown.includes(reflection.text)) {
+    throw new Error("Traceink proposal draft must preserve the user's reflection verbatim.");
+  }
+  assertCompleteProposalNavigation(draft.navigation, draft.rawMarkdown, reflection.text);
+
+  const artifactId = traceinkProposalsArtifactId(expectedReflection);
+  const revision = 1 + Math.max(0, ...current.artifacts
+    .filter((artifact) => artifact.id === artifactId && artifact.stage === "proposals")
+    .map((artifact) => artifact.revision));
+  const normalized = normalizeTraceinkArtifactV1({
+    ...draft,
+    id: artifactId,
+    revision,
+    outputHash: sha256TraceinkText(draft.rawMarkdown)
+  });
+  const artifact = asProposalsArtifact(normalized);
+  if (!artifact) throw new Error("Traceink proposal draft failed integrity validation.");
+  return { ...current, artifacts: [...current.artifacts, artifact] };
+}
+
+export function latestTraceinkProposals(
+  document: TraceinkAssetStoreDocumentV1,
+  reflection: UserReflectionAssetV1
+): TraceinkProposalsArtifactV1 | undefined {
+  const id = traceinkProposalsArtifactId(userReflectionAssetReference(reflection));
+  const artifact = document.artifacts
+    .filter((candidate) => candidate.id === id && candidate.stage === "proposals")
+    .sort((left, right) => right.revision - left.revision)[0];
+  const proposals = asProposalsArtifact(normalizeTraceinkArtifactV1(artifact));
+  return proposals &&
+    proposals.rawMarkdown.includes(reflection.text) &&
+    sameReflectionReference(proposals.sourceReflection, userReflectionAssetReference(reflection))
+    ? proposals
+    : undefined;
+}
+
+export function findTraceinkReflection(
+  document: TraceinkAssetStoreDocumentV1,
+  reference: ReturnType<typeof userReflectionAssetReference>
+): UserReflectionAssetV1 | undefined {
+  const reflection = reflectionForReference(document, reference);
+  return reflection ? structuredClone(reflection) : undefined;
+}
+
+export function appendTraceinkProposalDisposition(
+  document: TraceinkAssetStoreDocumentV1,
+  proposalReference: TraceinkArtifactReferenceV1 & { stage: "proposals" },
+  proposalId: string,
+  input: {
+    action: TraceinkProposalDispositionActionV1;
+    rewriteText?: string;
+    decidedAt: string;
+  }
+): TraceinkAssetStoreDocumentV1 {
+  const current = canonicalStore(document);
+  const artifact = asProposalsArtifact(findTraceinkArtifact(current, proposalReference));
+  if (!artifact) throw new Error("Traceink proposal artifact changed before disposition could be recorded.");
+  const proposal = artifact.navigation.find((item) => item.id === proposalId);
+  if (!proposal) throw new Error("Traceink proposal item does not belong to this proposal artifact.");
+  if (!Number.isFinite(Date.parse(input.decidedAt))) throw new Error("Traceink proposal disposition time is invalid.");
+  if (input.action === "rewrite") {
+    if (typeof input.rewriteText !== "string" || !input.rewriteText.trim()) {
+      throw new Error("Traceink proposal rewrite text is required.");
+    }
+  } else if (input.rewriteText !== undefined) {
+    throw new Error("Traceink proposal rewrite text is only valid for a rewrite disposition.");
+  }
+  const id = traceinkProposalDispositionId(proposalReference, proposalId);
+  const revision = 1 + Math.max(0, ...(current.proposalDispositions ?? [])
+    .filter((item) => item.id === id)
+    .map((item) => item.revision));
+  const disposition = normalizeTraceinkProposalDispositionV1({
+    schemaVersion: 1,
+    id,
+    logicalDate: artifact.logicalDate,
+    worklineId: artifact.worklineId,
+    proposalArtifact: proposalReference,
+    proposalId,
+    category: proposal.category,
+    revision,
+    action: input.action,
+    ...(input.rewriteText !== undefined ? { rewriteText: input.rewriteText } : {}),
+    decidedAt: input.decidedAt
+  });
+  if (!disposition) throw new Error("Traceink proposal disposition failed integrity validation.");
+  return {
+    ...current,
+    proposalDispositions: [...(current.proposalDispositions ?? []), disposition]
+  };
+}
+
+export function latestTraceinkProposalDispositions(
+  document: TraceinkAssetStoreDocumentV1,
+  artifact: TraceinkProposalsArtifactV1
+): TraceinkProposalDispositionV1[] {
+  const reference = traceinkArtifactReference(artifact);
+  const latest = new Map<string, TraceinkProposalDispositionV1>();
+  for (const item of document.proposalDispositions ?? []) {
+    if (referenceKey(item.proposalArtifact) !== referenceKey(reference)) continue;
+    const previous = latest.get(item.proposalId);
+    if (!previous || item.revision > previous.revision) latest.set(item.proposalId, item);
+  }
+  return artifact.navigation.flatMap((proposal) => {
+    const disposition = latest.get(proposal.id);
+    return disposition ? [structuredClone(disposition)] : [];
+  });
+}
+
 export function activeIndexReferenceForDate(
   document: TraceinkAssetStoreDocumentV1,
   logicalDate: string
@@ -284,6 +450,12 @@ export function traceinkDossierArtifactId(index: TraceinkIndexArtifactReferenceV
     throw new Error("Traceink dossier source identity is invalid.");
   }
   return `traceink-dossier-${sha256TraceinkText(`${normalized.artifactId}\0${normalized.revision}\0${normalized.outputHash}\0${worklineId}`).slice(0, 32)}`;
+}
+
+export function traceinkProposalsArtifactId(
+  reflection: ReturnType<typeof userReflectionAssetReference>
+): string {
+  return `traceink-proposals-${sha256TraceinkText(`${reflection.reflectionId}\0${reflection.revision}\0${reflection.contentHash}`).slice(0, 32)}`;
 }
 
 function canonicalStore(document: TraceinkAssetStoreDocumentV1): TraceinkAssetStoreDocumentV1 {
@@ -352,6 +524,27 @@ function uniqueReflections(reflections: UserReflectionAssetV1[]): UserReflection
     : result.filter((reflection) => !conflicts.has(reflectionRevisionKey(reflection)));
 }
 
+function uniqueProposalDispositions(
+  dispositions: TraceinkProposalDispositionV1[]
+): TraceinkProposalDispositionV1[] {
+  const result: TraceinkProposalDispositionV1[] = [];
+  const byIdentity = new Map<string, TraceinkProposalDispositionV1>();
+  const conflicts = new Set<string>();
+  for (const disposition of dispositions) {
+    const key = proposalDispositionRevisionKey(disposition);
+    const previous = byIdentity.get(key);
+    if (!previous) {
+      byIdentity.set(key, disposition);
+      result.push(disposition);
+      continue;
+    }
+    if (JSON.stringify(previous) !== JSON.stringify(disposition)) conflicts.add(key);
+  }
+  return conflicts.size === 0
+    ? result
+    : result.filter((item) => !conflicts.has(proposalDispositionRevisionKey(item)));
+}
+
 function stableArtifactLineages(artifacts: TraceinkArtifactV1[]): TraceinkArtifactV1[] {
   const lineageById = new Map<string, string>();
   const conflicts = new Set<string>();
@@ -387,6 +580,28 @@ function stableReflectionLineages(reflections: UserReflectionAssetV1[]): UserRef
     : reflections.filter((reflection) => !conflicts.has(reflection.id));
 }
 
+function stableProposalDispositionLineages(
+  dispositions: TraceinkProposalDispositionV1[]
+): TraceinkProposalDispositionV1[] {
+  const lineageById = new Map<string, string>();
+  const conflicts = new Set<string>();
+  for (const disposition of dispositions) {
+    const lineage = JSON.stringify([
+      disposition.logicalDate,
+      disposition.worklineId,
+      disposition.proposalArtifact,
+      disposition.proposalId,
+      disposition.category
+    ]);
+    const previous = lineageById.get(disposition.id);
+    if (previous === undefined) lineageById.set(disposition.id, lineage);
+    else if (previous !== lineage) conflicts.add(disposition.id);
+  }
+  return conflicts.size === 0
+    ? dispositions
+    : dispositions.filter((item) => !conflicts.has(item.id));
+}
+
 function reflectionDossierResolves(
   reflection: UserReflectionAssetV1,
   artifactByReference: ReadonlyMap<string, TraceinkArtifactV1>
@@ -400,20 +615,42 @@ function reflectionDossierResolves(
   );
 }
 
+function proposalDispositionResolves(
+  disposition: TraceinkProposalDispositionV1,
+  artifactByReference: ReadonlyMap<string, TraceinkArtifactV1>
+): boolean {
+  const artifact = asProposalsArtifact(artifactByReference.get(referenceKey(disposition.proposalArtifact)));
+  const proposal = artifact?.navigation.find((item) => item.id === disposition.proposalId);
+  return Boolean(
+    artifact &&
+    proposal &&
+    disposition.id === traceinkProposalDispositionId(disposition.proposalArtifact, disposition.proposalId) &&
+    artifact.logicalDate === disposition.logicalDate &&
+    artifact.worklineId === disposition.worklineId &&
+    proposal.category === disposition.category
+  );
+}
+
 function blockInvalidProposalSourceQuotes(
   artifact: TraceinkArtifactV1,
   reflection: UserReflectionAssetV1
 ): TraceinkArtifactV1 {
-  let blocked = 0;
+  let blockedSourceQuotes = 0;
+  let blockedProposalTexts = 0;
   const navigation = artifact.navigation.filter((item) => {
     if (!isProposalNavigationItem(item)) return true;
-    const resolves = item.sourceQuote.length > 0 && reflection.text.includes(item.sourceQuote);
-    if (!resolves) blocked += 1;
-    return resolves;
+    const sourceResolves = item.sourceQuote.length > 0 && reflection.text.includes(item.sourceQuote);
+    const proposalResolves = item.proposalText.length > 0 && artifact.rawMarkdown.includes(item.proposalText);
+    if (!sourceResolves) blockedSourceQuotes += 1;
+    if (!proposalResolves) blockedProposalTexts += 1;
+    return sourceResolves && proposalResolves;
   });
   const diagnostics: string[] = [];
-  if (blocked > 0) {
-    diagnostics.push(`Traceink storage diagnostic: blocked ${blocked} proposal source quote(s) that do not resolve to the saved reflection.`);
+  if (blockedSourceQuotes > 0) {
+    diagnostics.push(`Traceink storage diagnostic: blocked ${blockedSourceQuotes} proposal source quote(s) that do not resolve to the saved reflection.`);
+  }
+  if (blockedProposalTexts > 0) {
+    diagnostics.push(`Traceink storage diagnostic: blocked ${blockedProposalTexts} proposal text sidecar(s) that do not resolve to rawMarkdown.`);
   }
   if (!artifact.rawMarkdown.includes(reflection.text)) {
     diagnostics.push("Traceink storage diagnostic: proposal rawMarkdown does not reproduce the saved reflection verbatim.");
@@ -429,7 +666,75 @@ function blockInvalidProposalSourceQuotes(
 function isProposalNavigationItem(
   item: TraceinkArtifactV1["navigation"][number]
 ): item is TraceinkProposalNavigationItemV1 {
-  return "category" in item && "sourceQuote" in item;
+  return "category" in item && "proposalText" in item && "sourceQuote" in item;
+}
+
+function asProposalsArtifact(artifact: TraceinkArtifactV1 | undefined): TraceinkProposalsArtifactV1 | undefined {
+  if (
+    !artifact ||
+    artifact.stage !== "proposals" ||
+    !artifact.worklineId ||
+    !artifact.sourceReflection ||
+    artifact.navigation.some((item) => !isProposalNavigationItem(item)) ||
+    TRACEINK_PROPOSAL_CATEGORIES.some((category) =>
+      !artifact.navigation.some((item) => isProposalNavigationItem(item) && item.category === category)
+    )
+  ) return undefined;
+  return {
+    ...artifact,
+    stage: "proposals",
+    worklineId: artifact.worklineId,
+    sourceReflection: artifact.sourceReflection,
+    navigation: artifact.navigation as TraceinkProposalNavigationItemV1[]
+  };
+}
+
+function assertCompleteProposalNavigation(
+  navigation: TraceinkProposalsArtifactDraftV1["navigation"],
+  rawMarkdown: string,
+  reflectionText: string
+): void {
+  const categories = new Set<string>();
+  const ids = new Set<string>();
+  for (const item of navigation) {
+    if (
+      !isProposalNavigationItem(item) ||
+      ids.has(item.id) ||
+      !item.proposalText.trim() ||
+      !rawMarkdown.includes(item.proposalText) ||
+      !item.sourceQuote.trim() ||
+      !reflectionText.includes(item.sourceQuote)
+    ) throw new Error("Traceink proposal navigation does not resolve to rawMarkdown and the saved reflection.");
+    ids.add(item.id);
+    categories.add(item.category);
+  }
+  if (TRACEINK_PROPOSAL_CATEGORIES.some((category) => !categories.has(category))) {
+    throw new Error("Traceink proposal navigation must include all five categories.");
+  }
+}
+
+function reflectionForReference(
+  document: TraceinkAssetStoreDocumentV1,
+  reference: ReturnType<typeof userReflectionAssetReference>
+): UserReflectionAssetV1 | undefined {
+  return document.reflections.find((reflection) => sameReflectionReference(
+    userReflectionAssetReference(reflection),
+    reference
+  ));
+}
+
+function sameReflectionReference(
+  left: ReturnType<typeof userReflectionAssetReference>,
+  right: ReturnType<typeof userReflectionAssetReference>
+): boolean {
+  return reflectionReferenceKey(left) === reflectionReferenceKey(right);
+}
+
+function traceinkProposalDispositionId(
+  artifact: TraceinkArtifactReferenceV1,
+  proposalId: string
+): string {
+  return `traceink-proposal-disposition-${sha256TraceinkText(`${referenceKey(artifact)}\0${proposalId}`).slice(0, 32)}`;
 }
 
 function referenceMatchesArtifact(reference: TraceinkArtifactReferenceV1, artifact: TraceinkArtifactV1): boolean {
@@ -461,6 +766,15 @@ function sameOptionalIndexReference(
   );
 }
 
+function sameOptionalArtifactReference(
+  current: TraceinkArtifactReferenceV1 | undefined,
+  expected: TraceinkArtifactReferenceV1 | null
+): boolean {
+  if (!current || !expected) return !current && expected === null;
+  const normalizedExpected = normalizeTraceinkArtifactReferenceV1(expected);
+  return Boolean(normalizedExpected && referenceKey(current) === referenceKey(normalizedExpected));
+}
+
 function referenceKey(reference: TraceinkArtifactReferenceV1): string {
   return JSON.stringify([reference.artifactId, reference.stage, reference.revision, reference.outputHash]);
 }
@@ -481,6 +795,10 @@ function reflectionRevisionKey(reflection: UserReflectionAssetV1): string {
   return JSON.stringify([reflection.id, reflection.revision]);
 }
 
+function proposalDispositionRevisionKey(disposition: TraceinkProposalDispositionV1): string {
+  return JSON.stringify([disposition.id, disposition.revision]);
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -494,6 +812,7 @@ function isCanonicalStoreEnvelope(value: unknown): value is TraceinkAssetStoreDo
     raw.schemaVersion === 1 &&
     Array.isArray(raw.artifacts) &&
     Array.isArray(raw.reflections) &&
+    (raw.proposalDispositions === undefined || Array.isArray(raw.proposalDispositions)) &&
     asRecord(raw.activeIndexByDate)
   );
 }

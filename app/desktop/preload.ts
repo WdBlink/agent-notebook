@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { DailyDraftInput, DailyReviewPreparationMode, DailySealInput, DesktopApi, DesktopNotebookState, DesktopSettingsPatch, DesktopState, NotebookNote, NotebookNoteInput, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState } from "./api";
-import type { TraceinkArtifactReferenceV1, TraceinkWorklineSelectionV1 } from "../../src/traceink-review-assets";
+import type { DailyDraftInput, DailyReviewPreparationMode, DailySealInput, DesktopApi, DesktopNotebookState, DesktopSettingsPatch, DesktopState, NotebookNote, NotebookNoteInput, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState, TraceinkProposalDispositionInput } from "./api";
+import type { TraceinkArtifactReferenceV1, TraceinkWorklineSelectionV1, UserReflectionAssetReferenceV1 } from "../../src/traceink-review-assets";
 
 const api: DesktopApi = {
   getState(date?: string): Promise<DesktopState> {
@@ -38,6 +38,17 @@ const api: DesktopApi = {
   },
   saveTraceinkReflection(date: string, dossier: TraceinkArtifactReferenceV1 & { stage: "dossier" }, text: string): Promise<DesktopState> {
     return ipcRenderer.invoke("desktop:save-traceink-reflection", date, dossier, text) as Promise<DesktopState>;
+  },
+  prepareTraceinkProposals(date: string, reflection: UserReflectionAssetReferenceV1): Promise<DesktopState> {
+    return ipcRenderer.invoke("desktop:prepare-traceink-proposals", date, reflection) as Promise<DesktopState>;
+  },
+  disposeTraceinkProposal(
+    date: string,
+    proposals: TraceinkArtifactReferenceV1 & { stage: "proposals" },
+    proposalId: string,
+    input: TraceinkProposalDispositionInput
+  ): Promise<DesktopState> {
+    return ipcRenderer.invoke("desktop:dispose-traceink-proposal", date, proposals, proposalId, input) as Promise<DesktopState>;
   },
   composeDailyPage(date: string): Promise<DesktopNotebookState> {
     return ipcRenderer.invoke("desktop:compose-daily-page", date) as Promise<DesktopNotebookState>;

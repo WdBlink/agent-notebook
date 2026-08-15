@@ -142,6 +142,7 @@ function strictNormalizeDocument(value: unknown): TraceinkAssetStoreDocumentV1 {
     raw?.schemaVersion !== 1 ||
     !Array.isArray(raw.artifacts) ||
     !Array.isArray(raw.reflections) ||
+    (raw.proposalDispositions !== undefined && !Array.isArray(raw.proposalDispositions)) ||
     !isRecord(raw.activeIndexByDate)
   ) {
     throw new Error("Traceink asset store envelope is invalid.");
@@ -150,6 +151,8 @@ function strictNormalizeDocument(value: unknown): TraceinkAssetStoreDocumentV1 {
   if (
     normalized.artifacts.length !== raw.artifacts.length ||
     normalized.reflections.length !== raw.reflections.length ||
+    (Array.isArray(raw.proposalDispositions) &&
+      (normalized.proposalDispositions?.length ?? 0) !== raw.proposalDispositions.length) ||
     Object.keys(normalized.activeIndexByDate).length !== Object.keys(raw.activeIndexByDate).length
   ) {
     throw new Error("Traceink asset store failed integrity validation.");

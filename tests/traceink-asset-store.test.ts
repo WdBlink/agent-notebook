@@ -24,7 +24,13 @@ test("index appends preserve exact Markdown while retaining immutable revisions 
   const first = appendTraceinkIndexRevision(empty, indexDraft(rawMarkdown));
   const firstArtifact = first.artifacts[0];
 
-  assert.deepEqual(empty, { schemaVersion: 1, artifacts: [], reflections: [], activeIndexByDate: {} });
+  assert.deepEqual(empty, {
+    schemaVersion: 1,
+    artifacts: [],
+    reflections: [],
+    proposalDispositions: [],
+    activeIndexByDate: {}
+  });
   assert.ok(firstArtifact);
   assert.equal(firstArtifact.rawMarkdown, rawMarkdown);
   assert.equal(firstArtifact.outputHash, hash(rawMarkdown));
@@ -258,7 +264,7 @@ test("proposal and reflection references resolve exact immutable revisions or ar
     savedAt: "2026-08-15T19:01:00.000Z",
     contentHash: hash(reflectionText)
   } as const;
-  const proposalMarkdown = `# proposals\r\n${reflectionText}`;
+  const proposalMarkdown = `# proposals\r\n${reflectionText}\r\n保留自己的判断\r\n`;
   const proposal: TraceinkArtifactV1 = {
     ...baseArtifact("traceink-proposals-workline-a", "proposals", proposalMarkdown),
     worklineId: "workline-a",
@@ -273,6 +279,7 @@ test("proposal and reflection references resolve exact immutable revisions or ar
         markdownAnchor: "proposal-good",
         evidenceIds: [],
         category: "judgment",
+        proposalText: "保留自己的判断",
         sourceQuote: "我自己的判断"
       },
       {
@@ -280,6 +287,7 @@ test("proposal and reflection references resolve exact immutable revisions or ar
         markdownAnchor: "proposal-invented",
         evidenceIds: [],
         category: "tomorrow",
+        proposalText: "虚构的明日动作",
         sourceQuote: "反思中从未出现的句子"
       },
       {

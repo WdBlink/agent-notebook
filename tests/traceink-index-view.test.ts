@@ -138,6 +138,7 @@ test("offers one dossier entry per canonical workline without pre-writing human 
     activeIndex: index,
     uncompiledEvidence: [],
     worklines: [1, 2].map((ordinal) => ({
+      proposalItems: [],
       selection: {
         worklineId: `workline-${ordinal}`,
         ordinal,
