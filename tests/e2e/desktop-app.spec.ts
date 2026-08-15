@@ -578,6 +578,7 @@ async function installDesktopApi(page: Page): Promise<void> {
     let persistedSnapshot = readPersistedSnapshot();
     let scenario: TodayScenario = persistedSnapshot ? "sealed" : "raw";
     let prepareShouldFail = false;
+    let failNextGoldenDossier = false;
     let prepareCalls = persistedSnapshot?.prepareCalls ?? 0;
     let lastDraftGenerationCheck: { expected: string | null; active: string | null } | null = null;
     let lastSealGenerationCheck: { expected: string | null; active: string | null } | null = null;
@@ -697,6 +698,7 @@ async function installDesktopApi(page: Page): Promise<void> {
       notifyState();
     };
     (window as unknown as { setPrepareFailure: (fail: boolean) => void }).setPrepareFailure = (fail: boolean) => { prepareShouldFail = fail; };
+    (window as unknown as { failNextGoldenDossier: () => void }).failNextGoldenDossier = () => { failNextGoldenDossier = true; };
     (window as unknown as { setReviewPreparation: (status: "off" | "scheduled" | "preparing" | "failed", message?: string) => void }).setReviewPreparation = (status, message) => {
       state.reviewPreparation = {
         ...state.reviewPreparation,
@@ -760,6 +762,42 @@ async function installDesktopApi(page: Page): Promise<void> {
       state.notebook.page.status = "sealed";
       state.notebook.page.sealedAt = `${state.activeDate}T22:16:00+08:00`;
       state.notebook.todayBoard.mode = "sealed";
+      state = structuredClone(state);
+      notifyState();
+    };
+    (window as unknown as { rotateGoldenTraceinkIndex: () => void }).rotateGoldenTraceinkIndex = () => {
+      const activeIndex = state.traceinkReview.activeIndex;
+      if (!activeIndex || !state.traceinkReview.worklines) throw new Error("canonical Traceink index missing");
+      const revision = activeIndex.revision + 1;
+      const outputHash = "e".repeat(64);
+      const sourceIndex = {
+        artifactId: activeIndex.id,
+        stage: "index",
+        revision,
+        outputHash
+      };
+      state.traceinkReview.activeIndex = {
+        ...activeIndex,
+        revision,
+        outputHash,
+        producer: {
+          ...activeIndex.producer,
+          completedAt: `${state.activeDate}T15:02:00+08:00`
+        }
+      };
+      state.traceinkReview.activeIndexReference = structuredClone(sourceIndex);
+      state.traceinkReview.worklines = state.traceinkReview.worklines.map((workline: any) => {
+        const selection = {
+          ...workline.selection,
+          worklineId: `${workline.selection.worklineId}-revision-${revision}`,
+          sourceIndex: structuredClone(sourceIndex)
+        };
+        return {
+          selection,
+          presentation: { ...workline.presentation, selection: structuredClone(selection) },
+          proposalItems: []
+        };
+      });
       state = structuredClone(state);
       notifyState();
     };
@@ -850,6 +888,10 @@ async function installDesktopApi(page: Page): Promise<void> {
       },
       prepareTraceinkDossier: async (date: string, selection: { worklineId: string }) => {
         (window as unknown as { traceinkDossierRequests: unknown[] }).traceinkDossierRequests.push({ date, selection: structuredClone(selection) });
+        if (failNextGoldenDossier) {
+          failNextGoldenDossier = false;
+          throw new Error("证据档案暂时没有完成；当前工作脉络仍可阅读。");
+        }
         const workline = goldenWorkline(selection.worklineId);
         if (!workline) throw new Error("golden workline missing");
         workline.dossier = goldenDossier(workline);
@@ -1117,7 +1159,7 @@ test("today's proven Traceink result stays complete through activity, evidence, 
     if (signal.participation === "共同推进") await expect(activityTrack.getByText("你参与", { exact: true })).toBeVisible();
     await expect(group.getByText("当前停点", { exact: true })).toBeVisible();
     await expect(group).toContainText(signal.stop);
-    await expect(group.locator(".traceink-activity-context span").filter({ hasText: /可能变化|结果/ })).toBeVisible();
+    await expect(group.locator(".traceink-activity-context span").filter({ hasText: /可能变化|结果/ }).first()).toBeVisible();
     await expect(group).toContainText(signal.change);
     await expect(group.getByText("证据", { exact: true })).toBeVisible();
     await expect(group).toContainText(signal.evidence);
@@ -1127,7 +1169,7 @@ test("today's proven Traceink result stays complete through activity, evidence, 
   const dossier = page.getByRole("dialog", { name: titles[0]! });
   await expect(dossier).toBeVisible();
   await expect(dossier).toContainText("不把 AI 的候选解释冒充成你的判断");
-  await expect(dossier.getByRole("region", { name: "可重开证据" })).toBeVisible();
+  await expect(dossier.getByRole("region", { name: "证据登记" })).toBeVisible();
 
   await dossier.locator(".traceink-evidence-register button").first().click();
   await expect(page.getByRole("dialog", { name: /会话记录/ })).toBeVisible();
@@ -1171,6 +1213,71 @@ test("today's proven Traceink result stays complete through activity, evidence, 
     { proposalId: "T1", input: { action: "rewrite", rewriteText: rewrittenTomorrow } }
   ]);
   expect(await page.evaluate(() => (window as unknown as { e2eSideEffectCounts(): unknown }).e2eSideEffectCounts())).toEqual({ wiki: 0, ctx: 0, background: 0 });
+});
+
+test("a new canonical index closes the old dossier and requires reopening from the current revision", async ({ page }) => {
+  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "traceink-golden"): void }).setTodayScenario("traceink-golden"));
+  const board = page.locator(".today-board");
+  const title = "把 Traceink 的真实产物变成 Work Continuity 的核心界面";
+
+  await board.getByRole("button", { name: new RegExp(title) }).click();
+  const oldDossier = page.getByRole("dialog", { name: title });
+  await expect(oldDossier).toBeVisible();
+  await oldDossier.getByPlaceholder("写下你的理解、保留意见或下一步判断…").fill("旧版本下写下的回顾，只能绑定旧 dossier。");
+  await oldDossier.getByRole("button", { name: "保存我的回顾" }).click();
+  await oldDossier.getByRole("button", { name: "整理我的文字" }).click();
+  await expect(oldDossier.getByRole("region", { name: "形成的判断" })).toBeVisible();
+
+  const callsBeforeRotation = await page.evaluate(() => ({
+    reflections: (window as unknown as { traceinkReflectionInputs: unknown[] }).traceinkReflectionInputs.length,
+    proposals: (window as unknown as { traceinkProposalRequests: unknown[] }).traceinkProposalRequests.length,
+    dispositions: (window as unknown as { traceinkProposalDispositions: unknown[] }).traceinkProposalDispositions.length
+  }));
+  await page.evaluate(() => (window as unknown as { rotateGoldenTraceinkIndex(): void }).rotateGoldenTraceinkIndex());
+
+  await expect(page.getByRole("dialog", { name: title })).toHaveCount(0);
+  await expect(page.getByPlaceholder("写下你的理解、保留意见或下一步判断…")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "接受" })).toHaveCount(0);
+  await expect(board.getByText(/版本 2/)).toBeVisible();
+  await page.keyboard.press("Enter");
+  expect(await page.evaluate(() => ({
+    reflections: (window as unknown as { traceinkReflectionInputs: unknown[] }).traceinkReflectionInputs.length,
+    proposals: (window as unknown as { traceinkProposalRequests: unknown[] }).traceinkProposalRequests.length,
+    dispositions: (window as unknown as { traceinkProposalDispositions: unknown[] }).traceinkProposalDispositions.length
+  }))).toEqual(callsBeforeRotation);
+
+  await board.getByRole("button", { name: new RegExp(title) }).click();
+  await expect(page.getByRole("dialog", { name: title })).toBeVisible();
+  const reopenedSelection = await page.evaluate(() => (window as unknown as {
+    traceinkDossierRequests: Array<{ selection: { sourceIndex: unknown } }>;
+  }).traceinkDossierRequests.at(-1)?.selection.sourceIndex);
+  expect(reopenedSelection).toEqual({
+    artifactId: "traceink-index-2026-08-15",
+    stage: "index",
+    revision: 2,
+    outputHash: "e".repeat(64)
+  });
+});
+
+test("a dossier failure stays inside the dialog and can be closed and retried", async ({ page }) => {
+  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "traceink-golden"): void }).setTodayScenario("traceink-golden"));
+  await page.evaluate(() => (window as unknown as { failNextGoldenDossier(): void }).failNextGoldenDossier());
+  const board = page.locator(".today-board");
+  const title = "把 Traceink 的真实产物变成 Work Continuity 的核心界面";
+
+  await board.getByRole("button", { name: new RegExp(title) }).click();
+  const failedDialog = page.getByRole("dialog", { name: title });
+  await expect(failedDialog).toBeVisible();
+  await expect(failedDialog.getByRole("alert")).toContainText("证据档案暂时没有完成");
+  await failedDialog.getByRole("button", { name: "关闭" }).click();
+  await expect(failedDialog).toHaveCount(0);
+
+  await board.getByRole("button", { name: new RegExp(title) }).click();
+  const retriedDialog = page.getByRole("dialog", { name: title });
+  await expect(retriedDialog).toBeVisible();
+  await expect(retriedDialog.getByRole("region", { name: "证据登记" })).toBeVisible();
+  await expect(retriedDialog.getByRole("alert")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as unknown as { traceinkDossierRequests: unknown[] }).traceinkDossierRequests)).toHaveLength(2);
 });
 
 test("background preparation never replaces the raw work surface", async ({ page }) => {
