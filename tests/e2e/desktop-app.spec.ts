@@ -1139,12 +1139,21 @@ test("today's proven Traceink result stays complete through activity, evidence, 
   await ungrouped.getByText("Traceink 未明确归属", { exact: true }).click();
   await expect(ungrouped.getByText("未在索引中逐项列出的 Traceink 子会话", { exact: true })).toBeVisible();
   await expect(ungrouped.getByText("无法确定", { exact: true })).toBeVisible();
-  const expectedSignals = [
+  const expectedSignals: Array<{
+    title: string;
+    time: string;
+    status: string;
+    participation: string;
+    stop: string;
+    change?: string;
+    result?: string;
+    evidence: string;
+  }> = [
     { title: titles[0]!, time: "09:22–14:28", status: "正在推进", participation: "共同推进", stop: "code-mode host is disabled", change: "数据库只负责保存原文", evidence: "部分" },
     { title: titles[1]!, time: "09:16–14:25", status: "正在审计并补齐垂直证据链", participation: "共同推进", stop: "父本/参数动量", change: "历史经验必须真实改变下一轮候选分布", evidence: "长期真实 campaign 证据仍不足" },
-    { title: titles[2]!, time: "12:16–14:28", status: "COMPLETED", participation: "Agent 独立推进", stop: "Campaign 已关闭", change: "49 个 seal candidate", evidence: "高" },
+    { title: titles[2]!, time: "12:16–14:28", status: "COMPLETED", participation: "Agent 独立推进", stop: "Campaign 已关闭", result: "49 个 seal candidate", evidence: "高" },
     { title: titles[3]!, time: "09:19–13:08", status: "AWAITING_HUMAN", participation: "Agent 独立推进", stop: "SSH 可达性与认证证据", change: "等待外部前置证据", evidence: "高" },
-    { title: titles[4]!, time: "08:38–14:23", status: "今日运行完成", participation: "共同推进", stop: "本地先按", change: "有界原始来源核验", evidence: "高" }
+    { title: titles[4]!, time: "08:38–14:23", status: "今日运行完成", participation: "共同推进", stop: "本地先按", change: "有界原始来源核验", result: "候选 100", evidence: "高" }
   ];
   for (const signal of expectedSignals) {
     const group = groups.filter({ has: page.getByText(signal.title, { exact: true }) });
@@ -1159,8 +1168,14 @@ test("today's proven Traceink result stays complete through activity, evidence, 
     if (signal.participation === "共同推进") await expect(activityTrack.getByText("你参与", { exact: true })).toBeVisible();
     await expect(group.getByText("当前停点", { exact: true })).toBeVisible();
     await expect(group).toContainText(signal.stop);
-    await expect(group.locator(".traceink-activity-context span").filter({ hasText: /可能变化|结果/ }).first()).toBeVisible();
-    await expect(group).toContainText(signal.change);
+    if (signal.change) {
+      await expect(group.getByText("可能变化 · AI 整理", { exact: true })).toBeVisible();
+      await expect(group).toContainText(signal.change);
+    }
+    if (signal.result) {
+      await expect(group.getByText("阶段结果 · AI 整理", { exact: true })).toBeVisible();
+      await expect(group).toContainText(signal.result);
+    }
     await expect(group.getByText("证据", { exact: true })).toBeVisible();
     await expect(group).toContainText(signal.evidence);
   }
