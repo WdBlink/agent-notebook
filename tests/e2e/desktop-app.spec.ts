@@ -914,7 +914,7 @@ test("legacy note persistence remains available without a capture entry on Today
   expect(await page.evaluate(() => typeof window.agentWhiteboard.createNotebookNote)).toBe("function");
 });
 
-test("canonical index reconstructs worklines without inventing reflection controls", async ({ page }) => {
+test("canonical index keeps reflection controls hidden until a workline is selected", async ({ page }) => {
   await page.evaluate(() => (window as unknown as { setTodayScenario(next: "traceink"): void }).setTodayScenario("traceink"));
   const board = page.locator(".today-board");
   const document = board.getByRole("article", { name: "Traceink 工作脉络正文" });

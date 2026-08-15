@@ -14,8 +14,11 @@ import {
   TRACEINK_SKILL_BEGIN_MARKER,
   TRACEINK_SKILL_END_MARKER,
   buildTraceinkIndexPrompt,
+  compileTraceinkDossier,
   compileTraceinkIndex
 } from "../src/traceink-review";
+import { traceinkWorklineSelections } from "../src/traceink-index-navigation";
+import { sha256TraceinkText, type TraceinkIndexArtifactV1 } from "../src/traceink-review-assets";
 import { loadTraceinkSkillBundle } from "../src/traceink-skill-bundle";
 import type { AgentWorkSession } from "../src/types";
 import type { WorklineTranscriptFreezer } from "../src/workline-review";
@@ -35,6 +38,51 @@ const passThroughFreezer: WorklineTranscriptFreezer = async (sessions, use) => {
     await rm(root, { recursive: true, force: true });
   }
 };
+
+test("selected workline produces only one exact Traceink dossier with the canonical bundle", async () => {
+  const settings = createEmptyData().settings;
+  settings.enabledSessionProviders = ["codex", "claude"];
+  const bundle = await loadTraceinkSkillBundle();
+  const indexMarkdown = "1. **跨 Session 主线**\n\n你想先展开哪一条？\n";
+  const index: TraceinkIndexArtifactV1 = {
+    schemaVersion: 1,
+    id: "traceink-index-2026-08-15",
+    logicalDate: "2026-08-15",
+    stage: "index",
+    revision: 1,
+    producer: {
+      provider: "codex", model: TRACEINK_INDEX_MODEL, reasoningConfiguration: TRACEINK_INDEX_REASONING,
+      startedAt: "2026-08-15T09:00:00.000Z", completedAt: "2026-08-15T09:05:00.000Z",
+      skill: { packageId: bundle.packageId, version: bundle.version, skillHash: bundle.skillHash, editorialContractHash: bundle.editorialContractHash },
+      scope: reviewScope()
+    },
+    inputEvidenceHash: "1".repeat(64), rawMarkdown: indexMarkdown, outputHash: sha256TraceinkText(indexMarkdown),
+    coverage: [], evidence: [], navigation: [], warnings: []
+  };
+  const selection = traceinkWorklineSelections(index)[0]!;
+  const dossierMarkdown = await readFile("tests/skill-fixtures/traceink-golden/dossier.md", "utf8");
+  let providerCalls = 0;
+  const draft = await compileTraceinkDossier(settings, index, selection, [session()], {
+    transcriptFreezer: passThroughFreezer,
+    bundleLoader: async () => bundle,
+    scope: reviewScope(),
+    runner: async (request) => {
+      if (request.args[0] === "features") return featureResult();
+      providerCalls += 1;
+      assert.match(request.stdin, /steps 4–5/);
+      assert.match(request.stdin, /Do not regenerate the full-day index/);
+      assert.match(request.stdin, /跨 Session 主线/);
+      assert.equal(sliceBetween(request.stdin, TRACEINK_SKILL_BEGIN_MARKER, TRACEINK_SKILL_END_MARKER), bundle.skillText);
+      assert.equal(sliceBetween(request.stdin, TRACEINK_CONTRACT_BEGIN_MARKER, TRACEINK_CONTRACT_END_MARKER), bundle.editorialContractText);
+      return codexResult({ rawMarkdown: dossierMarkdown, transportComplete: true });
+    }
+  });
+  assert.equal(providerCalls, 1);
+  assert.equal(draft.stage, "dossier");
+  assert.equal(draft.worklineId, selection.worklineId);
+  assert.equal(draft.rawMarkdown, dossierMarkdown);
+  assert.equal("sourceReflection" in draft, false);
+});
 
 test("canonical index run embeds the complete Skill, returns exact Markdown, and uses the capable Codex pair", async () => {
   const settings = createEmptyData().settings;

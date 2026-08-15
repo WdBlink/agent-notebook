@@ -2,11 +2,16 @@ import type {
   TraceinkAssetStoreDocumentV1,
   TraceinkIndexArtifactReferenceV1
 } from "../app/desktop/traceink-asset-store";
+import { latestTraceinkDossier, latestTraceinkReflection } from "../app/desktop/traceink-asset-store";
 import {
   normalizeTraceinkArtifactReferenceV1,
   normalizeTraceinkArtifactV1,
-  type TraceinkIndexArtifactV1
+  type TraceinkIndexArtifactV1,
+  type TraceinkDossierArtifactV1,
+  type TraceinkWorklineSelectionV1,
+  type UserReflectionAssetV1
 } from "./traceink-review-assets";
+import { traceinkWorklineSelections } from "./traceink-index-navigation";
 import type { TodayBoardEvidenceRevision } from "./today-board";
 import type { AgentWorkSession } from "./types";
 
@@ -18,6 +23,13 @@ export interface TraceinkReviewProjection {
   activeIndexReference?: TraceinkIndexArtifactReferenceV1;
   uncompiledEvidence: TodayBoardEvidenceRevision[];
   diagnostic?: string;
+  worklines?: TraceinkWorklineReviewState[];
+}
+
+export interface TraceinkWorklineReviewState {
+  selection: TraceinkWorklineSelectionV1;
+  dossier?: TraceinkDossierArtifactV1;
+  reflection?: UserReflectionAssetV1;
 }
 
 interface ExactSessionRevision {
@@ -57,6 +69,7 @@ export function projectTraceinkReview(
     return {
       mode: "raw",
       uncompiledEvidence: current.all,
+      worklines: [],
       ...diagnosticForCurrentCapture(current)
     };
   }
@@ -66,6 +79,7 @@ export function projectTraceinkReview(
     return {
       mode: "raw",
       uncompiledEvidence: current.all,
+      worklines: [],
       diagnostic: boundedDiagnostic("Traceink active index reference failed integrity validation; the raw Session board remains authoritative.")
     };
   }
@@ -90,6 +104,11 @@ export function projectTraceinkReview(
     activeIndex: resolved.artifact,
     activeIndexReference: resolved.reference,
     uncompiledEvidence,
+    worklines: traceinkWorklineSelections(resolved.artifact).map((selection) => {
+      const dossier = latestTraceinkDossier(store, resolved.reference, selection.worklineId);
+      const reflection = dossier ? latestTraceinkReflection(store, dossier) : undefined;
+      return { selection, ...(dossier ? { dossier } : {}), ...(reflection ? { reflection } : {}) };
+    }),
     ...freshnessDiagnostic({ current, stored, absentStoredCount })
   };
 }

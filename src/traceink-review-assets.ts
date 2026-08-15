@@ -109,6 +109,24 @@ export type TraceinkIndexArtifactDraftV1 = Omit<
   "id" | "revision" | "outputHash"
 >;
 
+export type TraceinkDossierArtifactV1 = TraceinkArtifactV1 & {
+  stage: "dossier";
+  worklineId: string;
+  sourceReflection?: never;
+};
+
+export type TraceinkDossierArtifactDraftV1 = Omit<
+  TraceinkDossierArtifactV1,
+  "id" | "revision" | "outputHash"
+>;
+
+export interface TraceinkWorklineSelectionV1 {
+  worklineId: string;
+  ordinal: number;
+  title: string;
+  sourceIndex: TraceinkArtifactReferenceV1 & { stage: "index" };
+}
+
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const LOGICAL_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TRACEINK_STAGES = new Set<TraceinkStage>(["index", "dossier", "proposals"]);

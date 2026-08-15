@@ -1,10 +1,11 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { DailyReviewPreparationState } from "../../src/daily-review-schedule";
 import type { TraceinkReviewProjection } from "../../src/traceink-review-state";
+import type { TraceinkWorklineReviewState } from "../../src/traceink-review-state";
 
 export interface TraceinkIndexViewProps {
   projection: TraceinkReviewProjection;
@@ -44,9 +45,22 @@ export function TraceinkIndexView({
   const headingId = useId();
   const [requestedMode, setRequestedMode] = useState<TraceinkRequestMode | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [selectedWorklineId, setSelectedWorklineId] = useState<string | null>(null);
+  const [dossierOverride, setDossierOverride] = useState<TraceinkWorklineReviewState | null>(null);
+  const [dossierLoading, setDossierLoading] = useState(false);
+  const [reflectionText, setReflectionText] = useState("");
+  const [reflectionSaving, setReflectionSaving] = useState(false);
   const activeIndex = projection.activeIndex;
+  const worklines = projection.worklines ?? [];
   const preparing = preparation.status === "preparing" || requestedMode !== null;
   const displayedError = actionError ?? error ?? (preparation.status === "failed" ? preparation.message : undefined);
+  const selected = dossierOverride?.selection.worklineId === selectedWorklineId
+    ? dossierOverride
+    : worklines.find((item) => item.selection.worklineId === selectedWorklineId);
+
+  useEffect(() => {
+    if (selected?.reflection) setReflectionText(selected.reflection.text);
+  }, [selected?.reflection?.contentHash]);
 
   async function request(mode: TraceinkRequestMode): Promise<void> {
     setRequestedMode(mode);
@@ -57,6 +71,50 @@ export function TraceinkIndexView({
       setActionError(cause instanceof Error ? cause.message : "工作脉络整理没有完成；已有材料没有被替换。");
     } finally {
       setRequestedMode(null);
+    }
+  }
+
+  async function openWorkline(workline: TraceinkWorklineReviewState): Promise<void> {
+    setSelectedWorklineId(workline.selection.worklineId);
+    setDossierOverride(workline);
+    setReflectionText(workline.reflection?.text ?? "");
+    setActionError(null);
+    if (workline.dossier) return;
+    setDossierLoading(true);
+    try {
+      const state = await window.agentWhiteboard.prepareTraceinkDossier(activeIndex!.logicalDate, workline.selection);
+      const next = state.traceinkReview.worklines?.find((item) => item.selection.worklineId === workline.selection.worklineId);
+      if (!next?.dossier) throw new Error("证据档案没有完成。");
+      setDossierOverride(next);
+      setReflectionText(next.reflection?.text ?? "");
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : "这条工作线的证据档案没有完成。");
+    } finally {
+      setDossierLoading(false);
+    }
+  }
+
+  async function saveReflection(): Promise<void> {
+    if (!selected?.dossier || !reflectionText.trim()) return;
+    setReflectionSaving(true);
+    setActionError(null);
+    try {
+      const state = await window.agentWhiteboard.saveTraceinkReflection(
+        selected.dossier.logicalDate,
+        {
+          artifactId: selected.dossier.id,
+          stage: "dossier",
+          revision: selected.dossier.revision,
+          outputHash: selected.dossier.outputHash
+        },
+        reflectionText
+      );
+      const next = state.traceinkReview.worklines?.find((item) => item.selection.worklineId === selected.selection.worklineId);
+      if (next) setDossierOverride(next);
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : "你的回顾没有保存成功。");
+    } finally {
+      setReflectionSaving(false);
     }
   }
 
@@ -186,8 +244,52 @@ export function TraceinkIndexView({
               <ul>{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
             </details>
           ) : null}
+
+          {worklines.length > 0 ? (
+            <section className="traceink-workline-actions" aria-label="展开工作线">
+              <span className="traceink-margin-label">逐条展开</span>
+              {worklines.map((workline) => (
+                <button key={workline.selection.worklineId} type="button" onClick={() => void openWorkline(workline)}>
+                  <strong>{workline.selection.ordinal}</strong>
+                  <span>{workline.selection.title}</span>
+                  <small>{workline.dossier ? "证据档案已保存" : "展开证据档案"}</small>
+                </button>
+              ))}
+            </section>
+          ) : null}
         </aside>
       </div>
+
+      {selectedWorklineId ? (
+        <div className="traceink-dossier-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setSelectedWorklineId(null);
+        }}>
+          <section className="traceink-dossier-reader" role="dialog" aria-modal="true" aria-label={selected?.selection.title ?? "工作线证据档案"}>
+            <header>
+              <div><span className="traceink-index-kicker">SELECTED WORKLINE / EVIDENCE DOSSIER</span><h2>{selected?.selection.title ?? "正在展开工作线"}</h2></div>
+              <button type="button" onClick={() => setSelectedWorklineId(null)}>关闭</button>
+            </header>
+            {dossierLoading ? <div className="traceink-dossier-loading" role="status">正在沿证据链重建这条工作线…</div> : null}
+            {!dossierLoading && selected?.dossier ? (
+              <>
+                <article className="traceink-index-document traceink-dossier-document">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={MARKDOWN_COMPONENTS} urlTransform={preserveInertDestination}>
+                    {selected.dossier.rawMarkdown}
+                  </ReactMarkdown>
+                </article>
+                <section className="traceink-reflection-editor">
+                  <div><span className="traceink-margin-label">你的回顾</span><h3>读完以后，你怎么理解这件事？</h3><p>这里保持空白。AI 不替你写第一人称结论。</p></div>
+                  <textarea value={reflectionText} onChange={(event) => setReflectionText(event.target.value)} placeholder="写下你的理解、保留意见或下一步判断…" />
+                  <div className="traceink-reflection-actions">
+                    {selected.reflection ? <small>已保存版本 {selected.reflection.revision}</small> : <small>尚未保存</small>}
+                    <button type="button" disabled={!reflectionText.trim() || reflectionSaving} onClick={() => void saveReflection()}>{reflectionSaving ? "正在保存…" : "保存我的回顾"}</button>
+                  </div>
+                </section>
+              </>
+            ) : null}
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }

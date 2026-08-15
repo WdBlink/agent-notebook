@@ -131,6 +131,26 @@ test("keeps the current document readable while marking later evidence stale", (
   assert.doesNotMatch(html, /今日收口|开始思考/);
 });
 
+test("offers one dossier entry per canonical workline without pre-writing human reflection", () => {
+  const index = artifact("1. **第一条工作线**\n\n2. **第二条工作线**\n");
+  const projection: TraceinkReviewProjection = {
+    mode: "compiled",
+    activeIndex: index,
+    uncompiledEvidence: [],
+    worklines: [1, 2].map((ordinal) => ({
+      selection: {
+        worklineId: `workline-${ordinal}`,
+        ordinal,
+        title: ordinal === 1 ? "第一条工作线" : "第二条工作线",
+        sourceIndex: { artifactId: index.id, stage: "index", revision: index.revision, outputHash: index.outputHash }
+      }
+    }))
+  };
+  const html = render(projection);
+  assert.equal(html.split("展开证据档案").length - 1, 2);
+  assert.doesNotMatch(html, /保存我的回顾|AI.*替你写/);
+});
+
 test("provides matched loading, error, and no-evidence states", () => {
   const rawWithEvidence: TraceinkReviewProjection = {
     mode: "raw",

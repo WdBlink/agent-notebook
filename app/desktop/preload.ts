@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { DailyDraftInput, DailyReviewPreparationMode, DailySealInput, DesktopApi, DesktopNotebookState, DesktopSettingsPatch, DesktopState, NotebookNote, NotebookNoteInput, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState } from "./api";
+import type { TraceinkArtifactReferenceV1, TraceinkWorklineSelectionV1 } from "../../src/traceink-review-assets";
 
 const api: DesktopApi = {
   getState(date?: string): Promise<DesktopState> {
@@ -31,6 +32,12 @@ const api: DesktopApi = {
   },
   prepareDailyReview(date: string, mode: DailyReviewPreparationMode): Promise<DesktopNotebookState> {
     return ipcRenderer.invoke("desktop:prepare-daily-review", date, mode) as Promise<DesktopNotebookState>;
+  },
+  prepareTraceinkDossier(date: string, selection: TraceinkWorklineSelectionV1): Promise<DesktopState> {
+    return ipcRenderer.invoke("desktop:prepare-traceink-dossier", date, selection) as Promise<DesktopState>;
+  },
+  saveTraceinkReflection(date: string, dossier: TraceinkArtifactReferenceV1 & { stage: "dossier" }, text: string): Promise<DesktopState> {
+    return ipcRenderer.invoke("desktop:save-traceink-reflection", date, dossier, text) as Promise<DesktopState>;
   },
   composeDailyPage(date: string): Promise<DesktopNotebookState> {
     return ipcRenderer.invoke("desktop:compose-daily-page", date) as Promise<DesktopNotebookState>;

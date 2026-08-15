@@ -4,6 +4,7 @@ import type { DailyReviewPackage } from "../../src/workline-review";
 import type { TodayBoardPackageGeneration, TodayBoardProjection } from "../../src/today-board";
 import type { DailyReviewPreparationState } from "../../src/daily-review-schedule";
 import type { TraceinkReviewProjection } from "../../src/traceink-review-state";
+import type { TraceinkArtifactReferenceV1, TraceinkWorklineSelectionV1 } from "../../src/traceink-review-assets";
 
 export type DailyReviewPreparationMode = "compile" | "refresh";
 
@@ -198,6 +199,8 @@ export interface DesktopApi {
   routeNotebookNoteToWiki(noteId: string): Promise<{ notebook: DesktopNotebookState; path: string }>;
   routeNotebookNoteToProject(noteId: string, projectPath: string): Promise<{ notebook: DesktopNotebookState; path: string }>;
   prepareDailyReview(date: string, mode: DailyReviewPreparationMode): Promise<DesktopNotebookState>;
+  prepareTraceinkDossier(date: string, selection: TraceinkWorklineSelectionV1): Promise<DesktopState>;
+  saveTraceinkReflection(date: string, dossier: TraceinkArtifactReferenceV1 & { stage: "dossier" }, text: string): Promise<DesktopState>;
   composeDailyPage(date: string): Promise<DesktopNotebookState>;
   saveDailyDraft(date: string, input: DailyDraftInput): Promise<DesktopNotebookState>;
   sealDailyPage(date: string, input: DailySealInput): Promise<DesktopNotebookState>;

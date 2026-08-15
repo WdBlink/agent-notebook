@@ -4,12 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCliSessionSummarizer } from "../../src/agent-summary";
-import { compileTraceinkIndex } from "../../src/traceink-review";
+import { compileTraceinkDossier, compileTraceinkIndex } from "../../src/traceink-review";
+import type { TraceinkArtifactReferenceV1, TraceinkIndexArtifactV1, TraceinkWorklineSelectionV1 } from "../../src/traceink-review-assets";
 import { loadAgentWorkSnapshot, mergeSessionSummaries, type RuntimeFileStat, type RuntimeFileSystem } from "../../src/agent-sessions";
 import { DEFAULT_SESSION_SCAN_ROOTS, MAX_WORK_SESSION_SNAPSHOT_SESSIONS } from "../../src/constants";
 import { createEmptyData, localDateString, normalizeData, setWorkSessionSnapshot } from "../../src/state";
 import { deriveDailyReviewPreparationState, normalizeDailyReviewScheduleTime, shouldScheduleSessionSummaries, shouldStartAutomaticDailyReview, type DailyReviewPreparationTrigger } from "../../src/daily-review-schedule";
-import type { AgentWorkSnapshot, CockpitData, SessionProvider } from "../../src/types";
+import type { AgentWorkSession, AgentWorkSnapshot, CockpitData, SessionProvider } from "../../src/types";
 import type { DailyDraftInput, DailyReviewPreparationMode, DailySealInput, DesktopNotebookState, DesktopSettingsPatch, DesktopState, DesktopSummaryJob, NotebookNote, NotebookNoteInput, ProjectContextDocument, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState } from "./api";
 import { DailyReviewBackgroundCoordinator } from "./daily-review-background";
 import { desktopCliRunner } from "./cli-runner";
@@ -45,6 +46,7 @@ import {
   traceinkAssetStorePath,
   type TraceinkAssetRepository
 } from "./traceink-asset-repository";
+import { activeIndexReferenceForDate, appendTraceinkDossierRevision, appendTraceinkReflectionRevision, latestTraceinkDossier } from "./traceink-asset-store";
 import { runTraceinkReviewPreparation } from "./traceink-review-preparation";
 import {
   automaticTraceinkEligibilityMode,
@@ -253,6 +255,42 @@ ipcMain.handle("desktop:route-notebook-note-to-project", async (_event, noteId: 
 
 ipcMain.handle("desktop:prepare-daily-review", async (_event, date: string, mode: DailyReviewPreparationMode) => {
   return startDailyReviewForDate(date, mode, "manual");
+});
+
+ipcMain.handle("desktop:prepare-traceink-dossier", async (_event, date: string, selection: TraceinkWorklineSelectionV1) => {
+  const logicalDate = cleanDate(date, activeDate);
+  const repository = requireTraceinkAssetRepository();
+  const store = repository.snapshot();
+  const active = activeIndexReferenceForDate(store, logicalDate);
+  if (!active || JSON.stringify(active) !== JSON.stringify(selection?.sourceIndex)) throw new Error("工作脉络已经更新，请从当前版本重新选择。");
+  const index = store.artifacts.find((artifact): artifact is TraceinkIndexArtifactV1 =>
+    artifact.stage === "index" && artifact.id === active.artifactId && artifact.revision === active.revision && artifact.outputHash === active.outputHash
+  );
+  if (!index) throw new Error("当前工作脉络无法读取。");
+  if (latestTraceinkDossier(store, active, selection.worklineId)) return buildState();
+  const current = await ensureLoaded();
+  const sessions = sessionsForTraceinkArtifact(index, current.workSessionSnapshot.sessions);
+  const scope = index.producer.scope;
+  if (!scope) throw new Error("当前工作脉络缺少冻结材料范围，无法展开档案。");
+  const draft = await compileTraceinkDossier(current.settings, index, selection, sessions, {
+    runner: desktopCliRunner,
+    scope,
+    coverage: index.coverage,
+    timeoutMs: 30 * 60 * 1_000
+  });
+  await repository.mutate((document) => appendTraceinkDossierRevision(document, draft, active));
+  return buildState();
+});
+
+ipcMain.handle("desktop:save-traceink-reflection", async (_event, date: string, dossier: TraceinkArtifactReferenceV1 & { stage: "dossier" }, text: string) => {
+  const logicalDate = cleanDate(date, activeDate);
+  const repository = requireTraceinkAssetRepository();
+  await repository.mutate((document) => {
+    const artifact = document.artifacts.find((item) => item.id === dossier?.artifactId && item.stage === "dossier" && item.revision === dossier?.revision && item.outputHash === dossier?.outputHash);
+    if (!artifact || artifact.logicalDate !== logicalDate) throw new Error("证据档案已经变化，请重新打开后再保存。");
+    return appendTraceinkReflectionRevision(document, dossier, String(text ?? ""), new Date().toISOString());
+  });
+  return buildState();
 });
 
 ipcMain.handle("desktop:compose-daily-page", async (_event, date: string) => {
@@ -734,6 +772,25 @@ async function evaluateAutomaticDailyReview(now = new Date()): Promise<void> {
 function requireTraceinkAssetRepository(): TraceinkAssetRepository {
   if (!traceinkAssetRepository) throw new Error("Traceink 资产仓库尚未加载。");
   return traceinkAssetRepository;
+}
+
+function sessionsForTraceinkArtifact(index: TraceinkIndexArtifactV1, current: AgentWorkSession[]): AgentWorkSession[] {
+  return index.evidence.filter((evidence) => evidence.kind === "session").map((evidence) => {
+    const end = /^bytes 0-(\d+)$/.exec(evidence.locator)?.[1];
+    const session = current.find((candidate) => candidate.platform === evidence.provider && candidate.id === evidence.sessionId && candidate.path === evidence.path);
+    if (!session || !end || !evidence.contentHash) throw new Error(`索引证据 ${evidence.id} 当前无法按原冻结范围重开。`);
+    const byteLength = Number(end);
+    return {
+      ...structuredClone(session),
+      path: evidence.path,
+      transcriptCapture: {
+        canonicalPath: evidence.path,
+        sha256: evidence.contentHash,
+        byteLength,
+        coverage: { startByte: 0, endByte: byteLength }
+      }
+    };
+  });
 }
 
 async function findActivityDates(roots: string[], providers: SessionProvider[]): Promise<string[]> {

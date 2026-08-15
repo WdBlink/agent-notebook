@@ -8,6 +8,8 @@ import {
   traceinkArtifactReference,
   type TraceinkArtifactReferenceV1,
   type TraceinkArtifactV1,
+  type TraceinkDossierArtifactDraftV1,
+  type TraceinkDossierArtifactV1,
   type TraceinkIndexArtifactDraftV1,
   type TraceinkIndexArtifactV1,
   type TraceinkProposalNavigationItemV1,
@@ -159,6 +161,97 @@ export function appendTraceinkIndexRevision(
   };
 }
 
+export function appendTraceinkDossierRevision(
+  document: TraceinkAssetStoreDocumentV1,
+  draft: TraceinkDossierArtifactDraftV1,
+  expectedActiveIndex: TraceinkIndexArtifactReferenceV1
+): TraceinkAssetStoreDocumentV1 {
+  const current = canonicalStore(document);
+  const active = activeIndexReferenceForDate(current, draft.logicalDate);
+  if (!active || !sameIndexReference(active, expectedActiveIndex)) {
+    throw new Error("Traceink active index changed before this dossier could be appended.");
+  }
+  if (draft.schemaVersion !== 1 || draft.stage !== "dossier" || !draft.worklineId || hasOwn(draft, "sourceReflection")) {
+    throw new Error("Traceink dossier draft identity is invalid.");
+  }
+  if (hasOwn(draft, "id") || hasOwn(draft, "revision") || hasOwn(draft, "outputHash")) {
+    throw new Error("Traceink dossier identity, revision, and output hash are store-owned.");
+  }
+  const artifactId = traceinkDossierArtifactId(active, draft.worklineId);
+  const revision = 1 + Math.max(0, ...current.artifacts
+    .filter((artifact) => artifact.id === artifactId && artifact.stage === "dossier")
+    .map((artifact) => artifact.revision));
+  const artifact = normalizeTraceinkArtifactV1({
+    ...draft,
+    id: artifactId,
+    revision,
+    outputHash: sha256TraceinkText(draft.rawMarkdown)
+  });
+  if (!artifact || artifact.stage !== "dossier" || artifact.sourceReflection) {
+    throw new Error("Traceink dossier draft failed integrity validation.");
+  }
+  return { ...current, artifacts: [...current.artifacts, artifact] };
+}
+
+export function latestTraceinkDossier(
+  document: TraceinkAssetStoreDocumentV1,
+  index: TraceinkIndexArtifactReferenceV1,
+  worklineId: string
+): TraceinkDossierArtifactV1 | undefined {
+  const id = traceinkDossierArtifactId(index, worklineId);
+  const candidates = document.artifacts
+    .filter((artifact) => artifact.id === id && artifact.stage === "dossier" && artifact.worklineId === worklineId)
+    .sort((left, right) => right.revision - left.revision);
+  const artifact = candidates[0] ? normalizeTraceinkArtifactV1(candidates[0]) : undefined;
+  if (artifact?.stage !== "dossier" || !artifact.worklineId || artifact.sourceReflection) return undefined;
+  const { sourceReflection: _sourceReflection, ...fields } = artifact;
+  return { ...fields, stage: "dossier", worklineId: artifact.worklineId };
+}
+
+export function appendTraceinkReflectionRevision(
+  document: TraceinkAssetStoreDocumentV1,
+  dossierReference: TraceinkArtifactReferenceV1 & { stage: "dossier" },
+  text: string,
+  savedAt: string
+): TraceinkAssetStoreDocumentV1 {
+  const current = canonicalStore(document);
+  const dossier = findTraceinkArtifact(current, dossierReference);
+  if (!dossier || dossier.stage !== "dossier" || !dossier.worklineId || typeof text !== "string" || !text.trim()) {
+    throw new Error("Traceink reflection must belong to an exact dossier and contain the user's text.");
+  }
+  if (!Number.isFinite(Date.parse(savedAt))) throw new Error("Traceink reflection save time is invalid.");
+  const id = `traceink-reflection-${sha256TraceinkText(`${dossier.id}\0${dossier.revision}\0${dossier.outputHash}`).slice(0, 24)}`;
+  const previous = current.reflections.filter((reflection) => reflection.id === id);
+  const revision = 1 + Math.max(0, ...previous.map((reflection) => reflection.revision));
+  const createdAt = previous.sort((left, right) => left.revision - right.revision)[0]?.createdAt ?? savedAt;
+  const reflection = normalizeUserReflectionAssetV1({
+    schemaVersion: 1,
+    id,
+    logicalDate: dossier.logicalDate,
+    worklineId: dossier.worklineId,
+    dossier: { ...dossierReference, stage: "dossier" },
+    revision,
+    text,
+    createdAt,
+    savedAt,
+    contentHash: sha256TraceinkText(text)
+  });
+  if (!reflection) throw new Error("Traceink reflection failed integrity validation.");
+  return { ...current, reflections: [...current.reflections, reflection] };
+}
+
+export function latestTraceinkReflection(
+  document: TraceinkAssetStoreDocumentV1,
+  dossier: TraceinkDossierArtifactV1
+): UserReflectionAssetV1 | undefined {
+  return document.reflections
+    .filter((reflection) => reflection.worklineId === dossier.worklineId &&
+      reflection.dossier.artifactId === dossier.id &&
+      reflection.dossier.revision === dossier.revision &&
+      reflection.dossier.outputHash === dossier.outputHash)
+    .sort((left, right) => right.revision - left.revision)[0];
+}
+
 export function activeIndexReferenceForDate(
   document: TraceinkAssetStoreDocumentV1,
   logicalDate: string
@@ -183,6 +276,26 @@ export function findTraceinkArtifact(
 export function traceinkIndexArtifactId(logicalDate: string): string {
   if (!isTraceinkLogicalDate(logicalDate)) throw new Error("Traceink index logical date is invalid.");
   return `traceink-index-${logicalDate}`;
+}
+
+export function traceinkDossierArtifactId(index: TraceinkIndexArtifactReferenceV1, worklineId: string): string {
+  const normalized = normalizeTraceinkArtifactReferenceV1(index);
+  if (!normalized || normalized.stage !== "index" || !worklineId.trim()) {
+    throw new Error("Traceink dossier source identity is invalid.");
+  }
+  return `traceink-dossier-${sha256TraceinkText(`${normalized.artifactId}\0${normalized.revision}\0${normalized.outputHash}\0${worklineId}`).slice(0, 32)}`;
+}
+
+function canonicalStore(document: TraceinkAssetStoreDocumentV1): TraceinkAssetStoreDocumentV1 {
+  if (!isCanonicalStoreEnvelope(document)) throw new Error("Traceink asset store document is invalid.");
+  const current = normalizeTraceinkAssetStore(document);
+  if (!isDeepStrictEqual(current, document)) throw new Error("Traceink asset store document failed integrity validation.");
+  return current;
+}
+
+function sameIndexReference(left: TraceinkIndexArtifactReferenceV1, right: TraceinkIndexArtifactReferenceV1): boolean {
+  const normalized = normalizeTraceinkArtifactReferenceV1(right);
+  return Boolean(normalized && normalized.stage === "index" && referenceKey(left) === referenceKey(normalized));
 }
 
 function normalizeActiveIndexes(
