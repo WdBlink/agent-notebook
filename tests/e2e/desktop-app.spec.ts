@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -64,7 +65,8 @@ const baseSessions = [
 ];
 
 async function installDesktopApi(page: Page): Promise<void> {
-  await page.addInitScript(({ sessions }) => {
+  const traceinkMarkdown = await readFile(path.resolve("tests/skill-fixtures/traceink-golden/full-day-index.md"), "utf8");
+  await page.addInitScript(({ sessions, canonicalTraceinkMarkdown }) => {
     const storedPackageSessions = sessions.map((session: any) => ({ ...session }));
     let reviewPromptProfile = "traceink-review-v1";
     const createReviewPackage = (activeDate: string, includeDuplicate = false): any => ({
@@ -145,7 +147,7 @@ async function installDesktopApi(page: Page): Promise<void> {
       warnings: [],
       rawOutput: { worklines: [{ id: "daily-review-direction" }, { id: "trading-credentials" }] }
     });
-    type TodayScenario = "raw" | "compiled" | "stale" | "sealed" | "duplicate";
+    type TodayScenario = "raw" | "compiled" | "stale" | "sealed" | "duplicate" | "traceink" | "traceink-stale";
     const sessionIdentity = (session: any): string => `${session.platform}:${session.id}:${session.path}`;
     const createActivity = (activeDate: string, scopedSessions: typeof sessions): any => ({
       logicalDate: activeDate,
@@ -184,6 +186,76 @@ async function installDesktopApi(page: Page): Promise<void> {
         }
       }
     });
+    const createTraceinkProjection = (activeDate: string, scopedSessions: typeof sessions, scenario: TodayScenario): any => {
+      if (scenario !== "traceink" && scenario !== "traceink-stale") {
+        return {
+          mode: "raw",
+          uncompiledEvidence: scopedSessions.map((session: any) => ({
+            identity: sessionIdentity(session),
+            revision: `revision:${session.updatedAt}`
+          }))
+        };
+      }
+      const hash = "a".repeat(64);
+      const artifact = {
+        schemaVersion: 1,
+        id: `traceink-index-${activeDate}`,
+        logicalDate: activeDate,
+        stage: "index",
+        revision: 1,
+        producer: {
+          provider: "codex",
+          model: "gpt-5.6-sol",
+          reasoningConfiguration: "ultra",
+          startedAt: `${activeDate}T19:00:00+08:00`,
+          completedAt: `${activeDate}T19:08:00+08:00`,
+          skill: {
+            packageId: "traceink",
+            version: "traceink-skill-bundle-v1",
+            skillHash: hash,
+            editorialContractHash: hash
+          },
+          scope: {
+            timeZone: "Asia/Shanghai",
+            startInclusive: `${activeDate}T00:00:00+08:00`,
+            endExclusive: "2026-08-10T00:00:00+08:00",
+            evidenceCutoff: `${activeDate}T19:00:00+08:00`
+          }
+        },
+        inputEvidenceHash: hash,
+        rawMarkdown: canonicalTraceinkMarkdown,
+        outputHash: hash,
+        coverage: scopedSessions.map((session: any) => ({
+          sourceId: sessionIdentity(session),
+          disposition: "read",
+          detail: "frozen provider session"
+        })),
+        evidence: scopedSessions.map((session: any, index: number) => ({
+          id: `session:${session.platform}:${session.id}`,
+          kind: "session",
+          provider: session.platform,
+          sessionId: session.id,
+          path: session.path,
+          locator: `bytes 0-${100 + index}`,
+          contentHash: hash
+        })),
+        navigation: [],
+        warnings: []
+      };
+      return {
+        mode: scenario === "traceink-stale" ? "stale" : "compiled",
+        activeIndex: artifact,
+        activeIndexReference: {
+          artifactId: artifact.id,
+          stage: "index",
+          revision: artifact.revision,
+          outputHash: artifact.outputHash
+        },
+        uncompiledEvidence: scenario === "traceink-stale" && scopedSessions.length > 0
+          ? [{ identity: sessionIdentity(scopedSessions[scopedSessions.length - 1]), revision: "revision:new-evidence" }]
+          : []
+      };
+    };
     const createNotebook = (activeDate: string, scopedSessions: typeof sessions, scenario: TodayScenario): any => {
       const groups = new Map<string, typeof scopedSessions>();
       for (const session of scopedSessions) {
@@ -232,8 +304,8 @@ async function installDesktopApi(page: Page): Promise<void> {
           evidenceCutoff: `${activeDate}T19:00:00+08:00`
         }
       };
-      const hasPackage = scenario !== "raw";
-      const boardMode = scenario === "duplicate" ? "compiled" : scenario;
+      const hasPackage = scenario !== "raw" && scenario !== "traceink" && scenario !== "traceink-stale";
+      const boardMode = scenario === "duplicate" ? "compiled" : scenario === "traceink" || scenario === "traceink-stale" ? "raw" : scenario;
       const pageStatus = scenario === "sealed" ? "sealed" : hasPackage ? "draft" : "unformed";
       const uncompiledEvidence = scenario === "raw"
         ? scopedSessions.map((session: any) => ({ identity: sessionIdentity(session), revision: `revision:${session.updatedAt}` }))
@@ -310,6 +382,8 @@ async function installDesktopApi(page: Page): Promise<void> {
       },
       notebook: createNotebook(activeDate, scopedSessions, scenario),
       activity: createActivity(activeDate, scopedSessions),
+      traceinkReview: createTraceinkProjection(activeDate, scopedSessions, scenario),
+      traceinkReviewError: undefined as string | undefined,
       reviewPreparation: {
         enabled: false,
         time: "18:30",
@@ -381,7 +455,7 @@ async function installDesktopApi(page: Page): Promise<void> {
       persistedSnapshot = null;
       window.name = "";
       scenario = next;
-      state = createState(state.data.settings.enabledSessionProviders, state.activeDate, scenario);
+      state = createState(state.data.settings.enabledSessionProviders, next === "traceink" || next === "traceink-stale" ? "2026-08-09" : state.activeDate, scenario);
       notifyState();
     };
     (window as unknown as { setPrepareFailure: (fail: boolean) => void }).setPrepareFailure = (fail: boolean) => { prepareShouldFail = fail; };
@@ -518,11 +592,12 @@ async function installDesktopApi(page: Page): Promise<void> {
         prepareCalls += 1;
         if (prepareShouldFail) {
           state.notebook.todayBoard.compilationError = "整理模型暂时不可用；上一版仍然可读。";
+          state.traceinkReviewError = "整理模型暂时不可用；上一版仍然可读。";
           state.reviewPreparation = { ...state.reviewPreparation, enabled: state.data.settings.dailyReviewScheduleEnabled, time: state.data.settings.dailyReviewScheduleTime, logicalDate: state.activeDate, status: "failed", message: "整理模型暂时不可用；上一版仍然可读。" };
           notifyState();
           throw new Error("整理模型暂时不可用；上一版仍然可读。");
         }
-        scenario = "compiled";
+        scenario = scenario === "traceink" || scenario === "traceink-stale" ? "traceink" : "compiled";
         state = createState(state.data.settings.enabledSessionProviders, state.activeDate, scenario);
         notifyState();
         return state.notebook;
@@ -606,7 +681,7 @@ async function installDesktopApi(page: Page): Promise<void> {
         };
       }
     };
-  }, { sessions: baseSessions });
+  }, { sessions: baseSessions, canonicalTraceinkMarkdown: traceinkMarkdown });
 }
 
 test.beforeEach(async ({ page }) => {
@@ -648,8 +723,30 @@ test("today board keeps raw Sessions as independent evidence lanes", async ({ pa
   await expect(rawTranscriptAction).toBeFocused();
 
   await board.getByRole("button", { name: "现在整理" }).click();
-  await expect(board.locator(".today-workline")).toHaveCount(2);
+  await expect(board.locator(".today-workline")).toHaveCount(0);
+  await expect(board.getByRole("list", { name: "今日会话" }).locator(".today-session-lane")).toHaveCount(4);
   expect(await page.evaluate(() => (window as unknown as { prepareCallCount(): number }).prepareCallCount())).toBe(1);
+});
+
+test("canonical Traceink index is presented whole without legacy card interpretation", async ({ page }) => {
+  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "traceink"): void }).setTodayScenario("traceink"));
+
+  const board = page.locator(".today-board");
+  const document = board.getByRole("article", { name: "Traceink 工作脉络正文" });
+  await expect(document).toBeVisible();
+  await expect(document).toContainText("从 scheduler 吞吐实验转向 Research IR 表示假设");
+  await expect(document).toContainText("0.6.0 双架构安装包的发布前边界检查");
+  await expect(document).toContainText("AI 整理，尚未采纳");
+  await expect(document).toContainText("你想先展开哪条工作线的证据档案：1 还是 2？");
+  await expect(board.getByText("gpt-5.6-sol", { exact: true })).toBeVisible();
+  await expect(board.getByText("ultra", { exact: true })).toBeVisible();
+  await expect(board.locator(".today-workline")).toHaveCount(0);
+  await expect(board.locator(".today-board-toolbar")).toHaveCount(0);
+  await expect(board.getByRole("button", { name: /今日收口|打开材料|开始思考/ })).toHaveCount(0);
+  expect(await document.locator("h1, h2, h3, p, li").allTextContents()).toEqual(expect.arrayContaining([
+    expect.stringContaining("从 scheduler 吞吐实验转向 Research IR 表示假设"),
+    expect.stringContaining("0.6.0 双架构安装包的发布前边界检查")
+  ]));
 });
 
 test("background preparation never replaces the raw work surface", async ({ page }) => {
@@ -685,94 +782,43 @@ test("Sources exposes one restrained daily preparation setting without implement
   await expect(sources.getByText("每天 19:45", { exact: true })).toBeVisible();
 });
 
-test("compiled board discloses exact source topology and opens the selected dossier", async ({ page }) => {
+test("unsealed legacy packages never replace the canonical raw or Traceink surfaces", async ({ page }) => {
   await page.evaluate(() => (window as unknown as { setTodayScenario(next: "compiled"): void }).setTodayScenario("compiled"));
   const board = page.locator(".today-board");
-  await expect(board.locator(".today-workline")).toHaveCount(2);
-  const direction = board.locator(".today-workline").filter({ hasText: "Daily Review · 产品方向" });
-  const trading = board.locator(".today-workline").filter({ hasText: "Vibe Trading · 凭证隔离" });
-  await expect(direction.getByText("AI 整理 / 可能变化", { exact: true })).toBeVisible();
-  await expect(trading.locator(".workline-change-signal")).toHaveCount(0);
-  const disclosure = direction.locator(".workline-disclosure");
-  await expect(disclosure).toHaveAttribute("aria-expanded", "false");
-  await disclosure.click();
-  await expect(disclosure).toHaveAttribute("aria-expanded", "true");
-  const sourcePanelId = await disclosure.getAttribute("aria-controls");
-  expect(sourcePanelId).toBeTruthy();
-  await expect(direction.locator(`#${sourcePanelId}`)).toBeVisible();
-  for (const sessionId of ["019f-work-continuity", "claude-map-review", "claude-finished"]) {
-    await expect(direction.getByText(sessionId, { exact: true })).toBeVisible();
-  }
-  await expect(direction.getByText("Codex", { exact: true }).first()).toBeVisible();
-  await expect(direction.getByText("Claude Code", { exact: true }).first()).toBeVisible();
-  await expect(direction.locator(".workline-sessions .session-activity-track")).toHaveCount(3);
-  await direction.getByRole("button", { name: "打开 迁移第一版视觉骨架 的会话记录" }).click();
-  await expect(page.getByRole("dialog", { name: /迁移第一版视觉骨架 会话记录/ })).toBeVisible();
-  expect(await page.evaluate(() => (window as unknown as { transcriptRequests: Array<{ packageRef?: unknown }> }).transcriptRequests.at(-1)?.packageRef)).toEqual({
-    logicalDate: "2026-07-20",
-    generationId: "generation-2026-07-20-1",
-    evidenceId: "session:codex:019f-work-continuity"
-  });
-  await page.getByRole("button", { name: "回到证据" }).click();
+  await expect(board.locator(".today-workline")).toHaveCount(0);
+  await expect(board.getByRole("list", { name: "今日会话" }).locator(".today-session-lane")).toHaveCount(4);
+  await expect(board.getByRole("button", { name: "今日收口" })).toHaveCount(0);
 
-  const filters = board.locator(".today-board-filters");
-  await filters.getByRole("button", { name: "Claude Code", exact: true }).click();
-  await expect(board.locator(".today-workline")).toHaveCount(1);
-  await filters.getByRole("button", { name: "全部来源", exact: true }).click();
-  await board.locator(".project-strip").getByRole("button", { name: /vibe-trading/ }).click();
-  await expect(board.locator(".today-workline")).toHaveCount(1);
-  await expect(board.getByText("Vibe Trading · 凭证隔离", { exact: true })).toBeVisible();
-  await board.locator(".project-strip").getByRole("button", { name: /全部项目/ }).click();
+  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "stale"): void }).setTodayScenario("stale"));
+  await expect(board.locator(".today-workline")).toHaveCount(0);
+  await expect(board.getByRole("list", { name: "今日会话" }).locator(".today-session-lane")).toHaveCount(4);
 
-  const openMaterial = direction.getByRole("button", { name: "打开材料" });
-  await openMaterial.click();
-  const dossier = page.getByRole("dialog", { name: "日终回看" });
-  await expect(dossier.getByText("从 Agent 看板转向人的日终回看工作簿", { exact: true })).toBeVisible();
-  await expect(dossier.getByText("当前文件引用（未冻结） · 旧项目文档.md", { exact: true })).toBeVisible();
-  await expect(dossier.getByRole("button", { name: /旧项目文档\.md/ })).toHaveCount(0);
-  await expect(dossier.locator(".review-workline")).toHaveCount(0);
-  await expect(dossier.getByRole("button", { name: /返回工作线/ })).toBeFocused();
-  await dossier.getByRole("button", { name: "看完了，开始思考" }).focus();
-  await page.keyboard.press("Tab");
-  expect(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))).toBe(true);
-  await page.keyboard.press("Shift+Tab");
-  expect(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))).toBe(true);
-  await dossier.getByRole("button", { name: /返回工作线/ }).click();
-  await expect(openMaterial).toBeFocused();
-
-  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "duplicate"): void }).setTodayScenario("duplicate"));
-  const duplicateDirection = board.locator(".today-workline").filter({ hasText: "Daily Review · 产品方向" });
-  if (await duplicateDirection.locator(".workline-disclosure").getAttribute("aria-expanded") === "false") {
-    await duplicateDirection.locator(".workline-disclosure").click();
-  }
-  await expect(duplicateDirection.getByRole("button", { name: "打开 迁移第一版视觉骨架 的会话记录" })).toHaveCount(1);
-  await expect(duplicateDirection.getByText("同 ID 的另一条路径", { exact: true })).toHaveCount(0);
+  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "traceink"): void }).setTodayScenario("traceink"));
+  await expect(board.getByRole("article", { name: "Traceink 工作脉络正文" })).toContainText("从 scheduler 吞吐实验转向 Research IR 表示假设");
+  await expect(board.locator(".today-workline")).toHaveCount(0);
 });
 
-test("stale board preserves the last good package across a failed refresh", async ({ page }) => {
-  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "stale"): void }).setTodayScenario("stale"));
+test("stale canonical index preserves the last good Markdown across a failed refresh", async ({ page }) => {
+  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "traceink-stale"): void }).setTodayScenario("traceink-stale"));
   const board = page.locator(".today-board");
-  await expect(board.getByText("尚未整理", { exact: true }).first()).toBeVisible();
-  await expect(board.locator(".today-uncompiled-lane")).toHaveCount(1);
-  await expect(board.locator(".today-uncompiled-lane").getByText("claude-finished", { exact: true })).toBeVisible();
-  await expect(board.locator(".today-workline")).toHaveCount(2);
+  const document = board.getByRole("article", { name: "Traceink 工作脉络正文" });
+  await expect(board.getByText("有新证据", { exact: true }).first()).toBeVisible();
+  await expect(document).toContainText("0.6.0 双架构安装包的发布前边界检查");
 
   await page.evaluate(() => (window as unknown as { setPrepareFailure(fail: boolean): void }).setPrepareFailure(true));
   await board.getByRole("button", { name: "更新工作脉络" }).click();
   await expect(board.getByRole("alert")).toContainText("上一版仍然可读");
-  await expect(board.locator(".today-workline")).toHaveCount(2);
+  await expect(document).toContainText("0.6.0 双架构安装包的发布前边界检查");
+  await expect(board.locator(".today-workline")).toHaveCount(0);
 
   await page.evaluate(() => (window as unknown as { setPrepareFailure(fail: boolean): void }).setPrepareFailure(false));
   await board.getByRole("button", { name: "更新工作脉络" }).click();
-  await expect(board.getByText("尚未整理", { exact: true })).toHaveCount(0);
-  await expect(board.locator(".today-workline")).toHaveCount(2);
+  await expect(board.getByText("有新证据", { exact: true })).toHaveCount(0);
+  await expect(document).toContainText("0.6.0 双架构安装包的发布前边界检查");
 });
 
 test("sealed board is read-only and transcript actions send the exact stored package reference", async ({ page }) => {
-  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "compiled"): void }).setTodayScenario("compiled"));
   const board = page.locator(".today-board");
-  await board.locator(".project-strip").getByRole("button", { name: /vibe-trading/ }).click();
-  await expect(board.locator(".today-workline")).toHaveCount(1);
   await page.evaluate(() => (window as unknown as { setTodayScenario(next: "sealed"): void }).setTodayScenario("sealed"));
   await page.evaluate(() => (window as unknown as { emitSmartTitle(title: string): void }).emitSmartTitle("后来快照的新标题"));
   await expect(board.getByText("已封存", { exact: true }).first()).toBeVisible();
@@ -815,15 +861,13 @@ test("legacy sealed board shows whole-page ink without requiring a package gener
 
 test("today board keeps the native shell and independently scrolling evidence regions", async ({ page }) => {
   await page.setViewportSize({ width: 1380, height: 683 });
-  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "compiled"): void }).setTodayScenario("compiled"));
   await expect(page.locator(".brand-mark")).toHaveAttribute("src", "./app-icon.png");
   const logo = await page.locator(".brand-mark").boundingBox();
   const lastNavigationItem = await page.locator(".rail-nav button").last().boundingBox();
   expect(logo?.y).toBeGreaterThanOrEqual(48);
   expect((lastNavigationItem?.y ?? 0) + (lastNavigationItem?.height ?? 0)).toBeLessThan(590);
-  await expect(page.locator(".today-workline")).toHaveCount(2);
   const selectedProject = page.locator('.today-board-toolbar .project-strip button[aria-pressed="true"]');
-  await expect(selectedProject).toContainText("02");
+  await expect(selectedProject).toBeVisible();
   const selectedProjectStyle = await selectedProject.evaluate((element) => {
     const parseColor = (value: string): [number, number, number, number] => {
       const channels = value.match(/[\d.]+/g)?.map(Number) ?? [];
@@ -858,9 +902,9 @@ test("today board keeps the native shell and independently scrolling evidence re
     color: "rgb(255, 255, 255)"
   });
   expect(selectedProjectStyle.contrast).toBeGreaterThanOrEqual(4.5);
+  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "traceink"): void }).setTodayScenario("traceink"));
   await expect(page.locator(".today-board-scroll")).toHaveCSS("overflow-y", "auto");
-  await page.locator(".today-workline").first().locator(".workline-disclosure").click();
-  await expect(page.locator(".workline-sessions")).toHaveCSS("overflow-y", "auto");
+  await expect(page.getByRole("article", { name: "Traceink 工作脉络正文" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
 });
 
@@ -870,183 +914,22 @@ test("legacy note persistence remains available without a capture entry on Today
   expect(await page.evaluate(() => typeof window.agentWhiteboard.createNotebookNote)).toBe("function");
 });
 
-test("end-of-day flow stores personal ink and seals an immutable page", async ({ page }) => {
-  await page.getByRole("button", { name: "现在整理" }).click();
-  await page.locator(".today-workline").first().getByRole("button", { name: "打开材料" }).click();
-  const ritual = page.getByRole("dialog", { name: "日终回看" });
-  await ritual.getByRole("button", { name: "看完了，开始思考" }).click();
-  await ritual.getByRole("textbox", { name: "你的原始墨迹" }).fill("今天到这里，明天继续验证闭环。");
-  await ritual.getByRole("button", { name: "收下这段思考" }).click();
-  await page.getByRole("button", { name: "今日收口" }).click();
-  await expect(ritual.locator(".seal-spine > button")).toBeFocused();
-  await ritual.getByRole("button", { name: "收笔并封存" }).focus();
-  await page.keyboard.press("Tab");
-  expect(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))).toBe(true);
-  await page.keyboard.press("Shift+Tab");
-  expect(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))).toBe(true);
-  await ritual.locator(".bookmark-choices button").first().click();
-  await ritual.getByRole("button", { name: "收笔并封存" }).click();
-  await expect(page.getByText("已封存", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("今天到这里，明天继续验证闭环。")).toBeVisible();
-  await expect(page.getByRole("button", { name: /现在整理|更新工作脉络|今日收口/ })).toHaveCount(0);
-  await expect(page.locator(".today-board")).toBeFocused();
-});
-
-test("an open reflection keeps its generation identity and rejects a save after refresh", async ({ page }) => {
-  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "compiled"): void }).setTodayScenario("compiled"));
+test("canonical index reconstructs worklines without inventing reflection controls", async ({ page }) => {
+  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "traceink"): void }).setTodayScenario("traceink"));
   const board = page.locator(".today-board");
-  await board.locator(".today-workline").first().getByRole("button", { name: "打开材料" }).click();
-  const review = page.getByRole("dialog", { name: "日终回看" });
-  await review.getByRole("button", { name: "看完了，开始思考" }).click();
-  const ink = review.getByRole("textbox", { name: "你的原始墨迹" });
-  await ink.fill("只属于打开时第一代的未存墨迹");
-
-  await page.evaluate(() => (window as unknown as { advanceTodayGeneration(): void }).advanceTodayGeneration());
-  await expect(ink).toHaveValue("只属于打开时第一代的未存墨迹");
-  await review.getByRole("button", { name: "收下这段思考" }).click();
-
-  await expect(review.locator(".review-error")).toContainText("active generation mismatch");
-  expect(await page.evaluate(() => (window as unknown as { generationCheckSnapshot(): unknown }).generationCheckSnapshot())).toEqual({
-    draft: { expected: "generation-2026-07-20-1", active: "generation-2026-07-20-2" },
-    seal: null
-  });
-  const storedPage = JSON.parse(await page.evaluate(() => (window as unknown as { sealedPageJson(): string }).sealedPageJson()));
-  expect(storedPage.status).toBe("draft");
-  expect(storedPage.worklineReflections).toEqual([]);
-});
-
-test("an open seal review keeps its generation identity and rejects sealing after refresh", async ({ page }) => {
-  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "compiled"): void }).setTodayScenario("compiled"));
-  const board = page.locator(".today-board");
-  await board.getByRole("button", { name: "今日收口" }).click();
-  const review = page.getByRole("dialog", { name: "日终回看" });
-
-  await page.evaluate(() => (window as unknown as { advanceTodayGeneration(): void }).advanceTodayGeneration());
-  await review.getByRole("button", { name: "收笔并封存" }).click();
-
-  await expect(review.locator(".review-error")).toContainText("active generation mismatch");
-  expect(await page.evaluate(() => (window as unknown as { generationCheckSnapshot(): unknown }).generationCheckSnapshot())).toEqual({
-    draft: null,
-    seal: { expected: "generation-2026-07-20-1", active: "generation-2026-07-20-2" }
-  });
-  const storedPage = JSON.parse(await page.evaluate(() => (window as unknown as { sealedPageJson(): string }).sealedPageJson()));
-  expect(storedPage.status).toBe("draft");
-  expect(storedPage.worklineReflections).toEqual([]);
-});
-
-test("generation-aware save, seal, reload, and history reopen preserve the exact sealed review", async ({ page }) => {
-  const board = page.locator(".today-board");
-  await board.getByRole("button", { name: "现在整理" }).click();
-
-  await board.locator(".today-workline").first().getByRole("button", { name: "打开材料" }).click();
-  let review = page.getByRole("dialog", { name: "日终回看" });
-  await review.getByRole("button", { name: "看完了，开始思考" }).click();
-  await review.getByRole("textbox", { name: "你的原始墨迹" }).fill("A · 第一代判断");
-  await review.getByRole("button", { name: "收下这段思考" }).click();
-  await expect(board.locator(".today-workline").first()).toContainText("A · 第一代判断");
-
-  await page.evaluate(() => (window as unknown as { advanceTodayGeneration(): void }).advanceTodayGeneration());
-  await expect(board.locator(".today-workline").first()).not.toContainText("A · 第一代判断");
-  await board.locator(".today-workline").first().getByRole("button", { name: "打开材料" }).click();
-  review = page.getByRole("dialog", { name: "日终回看" });
-  await review.getByRole("button", { name: "看完了，开始思考" }).click();
-  const activeInk = review.getByRole("textbox", { name: "你的原始墨迹" });
-  await expect(activeInk).toHaveValue("");
-  await activeInk.fill("B · 第二代判断");
-  await review.getByRole("button", { name: "收下这段思考" }).click();
-  await expect(board.locator(".today-workline").first()).toContainText("B · 第二代判断");
-  await expect(board.locator(".today-workline").first()).not.toContainText("A · 第一代判断");
-
-  await page.evaluate(() => (window as unknown as { setLegacyPageReflection(text: string): void }).setLegacyPageReflection("旧版整页反思仍可阅读。"));
-  const prepareCountBeforeSeal = await page.evaluate(() => (window as unknown as { prepareCallCount(): number }).prepareCallCount());
-  await board.getByRole("button", { name: "今日收口" }).click();
-  review = page.getByRole("dialog", { name: "日终回看" });
-  await review.locator(".bookmark-choices button").first().click();
-  await review.getByRole("button", { name: "收笔并封存" }).click();
-
-  await expect(board.getByText("已封存", { exact: true }).first()).toBeVisible();
-  await expect(board.locator(".today-workline").first()).toContainText("B · 第二代判断");
-  await expect(board.locator(".today-workline").first()).not.toContainText("A · 第一代判断");
-  await expect(board.getByRole("region", { name: "整页墨迹" })).toContainText("旧版整页反思仍可阅读。");
-  const continuation = board.getByRole("region", { name: "封存续上" });
-  await expect(continuation).toContainText("迁移第一版视觉骨架");
-  await expect(continuation).toContainText("codex resume 019f-work-continuity");
-
-  const sealedJson = await page.evaluate(() => (window as unknown as { sealedPageJson(): string }).sealedPageJson());
-  const sealedPage = JSON.parse(sealedJson);
-  expect(sealedPage.packageGenerations).toHaveLength(2);
-  expect(sealedPage.activePackageGenerationId).toBe("generation-2026-07-20-2");
-  expect(sealedPage.worklineReflections.map((item: any) => [item.packageGenerationId, item.text])).toEqual([
-    ["generation-2026-07-20-1", "A · 第一代判断"],
-    ["generation-2026-07-20-2", "B · 第二代判断"]
-  ]);
-  expect(sealedPage.bookmarks).toHaveLength(1);
-  expect(sealedPage.sealedAt).toBe("2026-07-20T22:16:00+08:00");
-
-  await board.locator(".today-workline").first().getByRole("button", { name: "打开封存材料" }).click();
-  review = page.getByRole("dialog", { name: "日终回看" });
-  await expect(review.getByText("从 Agent 看板转向人的日终回看工作簿", { exact: true })).toBeVisible();
-  await expect(review.getByText("原来的判断", { exact: true })).toBeVisible();
-  await expect(review.getByText("发生了什么", { exact: true })).toBeVisible();
-  await expect(review.getByText("未来观察", { exact: true })).toBeVisible();
-  await review.getByRole("button", { name: /返回工作线/ }).click();
-
-  await page.evaluate(() => (window as unknown as { mutateLiveInputs(): void }).mutateLiveInputs());
-  expect(await page.evaluate(() => (window as unknown as { liveInputSnapshot(): unknown }).liveInputSnapshot())).toEqual({
-    sessionTitle: "封页后的 Session 新标题",
-    promptProfile: "traceink-review-v2-after-seal"
-  });
-  expect(await page.evaluate(() => (window as unknown as { sealedPageJson(): string }).sealedPageJson())).toBe(sealedJson);
-  expect(await page.evaluate(() => (window as unknown as { prepareCallCount(): number }).prepareCallCount())).toBe(prepareCountBeforeSeal);
-
-  await page.reload();
-  await expect(page.locator(".today-board").getByText("已封存", { exact: true }).first()).toBeVisible();
-  expect(await page.evaluate(() => (window as unknown as { sealedPageJson(): string }).sealedPageJson())).toBe(sealedJson);
-  expect(await page.evaluate(() => (window as unknown as { prepareCallCount(): number }).prepareCallCount())).toBe(prepareCountBeforeSeal);
-  await expect(page.locator(".today-workline").first()).toContainText("B · 第二代判断");
-  await expect(page.locator(".today-workline").first()).not.toContainText("A · 第一代判断");
-
-  await page.getByRole("button", { name: "查看前一天" }).click();
-  await expect(page.locator(".today-board").getByRole("button", { name: "现在整理" })).toBeVisible();
-  await page.getByRole("button", { name: "查看后一天" }).click();
-  await expect(page.locator(".today-board").getByText("已封存", { exact: true }).first()).toBeVisible();
-  await expect(page.locator(".today-workline").first()).toContainText("B · 第二代判断");
-  expect(await page.evaluate(() => (window as unknown as { prepareCallCount(): number }).prepareCallCount())).toBe(prepareCountBeforeSeal);
-  expect(await page.evaluate(() => (window as unknown as { e2eSideEffectCounts(): unknown }).e2eSideEffectCounts())).toEqual({ wiki: 0, ctx: 0, background: 0 });
-});
-
-test("daily review reconstructs worklines before the user writes their own reflection", async ({ page }) => {
-  await page.getByRole("button", { name: "现在整理" }).click();
-  const board = page.locator(".today-board");
-  await expect(board.locator(".today-workline")).toHaveCount(2);
-  await expect(board.getByText("你参与", { exact: true }).first()).toBeVisible();
-  await expect(board.getByText("Agent 独立推进", { exact: true }).first()).toBeVisible();
-  await board.locator(".today-workline").first().getByRole("button", { name: "打开材料" }).click();
-  const review = page.getByRole("dialog", { name: "日终回看" });
-  await expect(review).toBeVisible();
-  await expect(review.getByText("从 Agent 看板转向人的日终回看工作簿", { exact: true })).toBeVisible();
-  await expect(review.getByText("AI 整理", { exact: true })).toBeVisible();
-  await expect(review.getByText("这套材料是否已经足以让你亲自想明白？", { exact: true })).toBeVisible();
-
-  await review.getByRole("button", { name: "看完了，开始思考" }).click();
-  const ink = review.getByRole("textbox", { name: "你的原始墨迹" });
-  await expect(ink).toHaveValue("");
-  await ink.fill("我认为先让材料真正减少 Session 翻找，才值得继续增加能力。");
-  await review.getByRole("button", { name: "收下这段思考" }).click();
-  await expect(board.locator(".today-workline").first()).toContainText("我认为先让材料真正减少 Session 翻找");
-  await board.locator(".today-workline").first().getByRole("button", { name: "打开材料" }).click();
-  await review.getByRole("button", { name: "查看我的思考" }).click();
-  await expect(ink).toHaveValue("我认为先让材料真正减少 Session 翻找，才值得继续增加能力。");
+  const document = board.getByRole("article", { name: "Traceink 工作脉络正文" });
+  await expect(document).toContainText("共同推进");
+  await expect(document).toContainText("Agent 独立推进");
+  await expect(document).toContainText("尚未采纳");
+  await expect(document).toContainText("你想先展开哪条工作线的证据档案：1 还是 2？");
+  await expect(board.getByRole("textbox", { name: "你的原始墨迹" })).toHaveCount(0);
+  await expect(board.getByRole("button", { name: /今日收口|看完了，开始思考|打开材料/ })).toHaveCount(0);
 });
 
 test("daily review remains usable without horizontal overflow in a narrow window", async ({ page }) => {
   await page.setViewportSize({ width: 720, height: 620 });
-  await page.getByRole("button", { name: "现在整理" }).click();
-  await expect(page.locator(".today-workline")).toHaveCount(2);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
-  await page.locator(".today-workline").first().getByRole("button", { name: "打开材料" }).click();
-  const review = page.getByRole("dialog", { name: "日终回看" });
-  await expect(review.getByRole("button", { name: "看完了，开始思考" })).toBeVisible();
+  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "traceink"): void }).setTodayScenario("traceink"));
+  await expect(page.getByRole("article", { name: "Traceink 工作脉络正文" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
 });
 

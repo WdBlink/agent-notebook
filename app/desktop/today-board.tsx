@@ -17,6 +17,7 @@ import type { AgentPlatform, AgentWorkSession, SessionProvider } from "../../src
 import type { TodayBoardPackageGeneration } from "../../src/today-board";
 import type { DailyReviewEvidence, DailyReviewPackage, DailyWorklineReview } from "../../src/workline-review";
 import type { DesktopNotebookState, DesktopState, SessionTranscriptRequest } from "./api";
+import { TraceinkIndexView } from "./traceink-index-view";
 
 export interface TodayTranscriptTarget {
   title: string;
@@ -73,9 +74,17 @@ export function TodayBoard({
   const [requestingPreparation, setRequestingPreparation] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const board = state.notebook.todayBoard;
+  const traceinkReview = state.traceinkReview;
+  const legacySealed = board.mode === "sealed";
+  const hasCanonicalIndex = Boolean(traceinkReview.activeIndex);
+  const surfaceMode = legacySealed
+    ? "sealed"
+    : hasCanonicalIndex
+      ? traceinkReview.mode
+      : "raw";
   const preparation = state.reviewPreparation;
   const preparing = preparation.status === "preparing" || requestingPreparation;
-  const generation = board.activeGeneration;
+  const generation = legacySealed ? board.activeGeneration : undefined;
   const review = generation?.package;
   const activeReflections = generation
     ? state.notebook.page.worklineReflections.filter((reflection) => reflection.packageGenerationId === generation.id)
@@ -105,17 +114,17 @@ export function TodayBoard({
   const visibleWorklines = useMemo(() => review?.worklines.filter((workline) => {
     const sources = worklineTopology.get(workline.id)?.sources ?? [];
     if (provider !== "all" && !sources.some((source) => source.platform === provider)) return false;
-    if (board.mode === "sealed" || selectedProjectKey === "all") return true;
+    if (surfaceMode === "sealed" || selectedProjectKey === "all") return true;
     return sources.some((source) => {
       const session = sessionByIdentity.get(sessionIdentity(source.platform, source.sessionId, source.path));
       return session ? projectKey(session) === selectedProjectKey : false;
     });
-  }) ?? [], [board.mode, provider, review, selectedProjectKey, sessionByIdentity, worklineTopology]);
+  }) ?? [], [provider, review, selectedProjectKey, sessionByIdentity, surfaceMode, worklineTopology]);
   const uncompiledSessions = board.uncompiledEvidence
     .map((revision) => sessionByIdentity.get(revision.identity))
     .filter((session): session is AgentWorkSession => Boolean(session))
     .filter((session) => matchesSessionFilters(session, selectedProjectKey, provider));
-  const displayedError = actionError ?? preparation.message ?? board.compilationError ?? error;
+  const displayedError = actionError ?? state.traceinkReviewError ?? preparation.message ?? (legacySealed ? board.compilationError : undefined) ?? error;
 
   async function prepare(mode: "compile" | "refresh"): Promise<void> {
     setRequestingPreparation(true);
@@ -138,60 +147,76 @@ export function TodayBoard({
     });
   }
 
-  if (loading && !review) return <TodayBoardSkeleton />;
-  if (error && !review && sessions.length === 0) {
+  if (loading && !review && !traceinkReview.activeIndex) return <TodayBoardSkeleton />;
+  if (error && !review && !traceinkReview.activeIndex && sessions.length === 0) {
     return <section className="today-board-state" role="alert"><Activity size={22} /><h2>本地证据暂时无法读取</h2><p>{error}</p><button type="button" onClick={onRetry}>重新扫描</button></section>;
   }
 
   return (
-    <section className={`today-board mode-${board.mode}`} aria-labelledby="today-board-title" tabIndex={-1}>
+    <section className={`today-board mode-${surfaceMode}`} aria-labelledby="today-board-title" tabIndex={-1}>
       <header className="today-board-head">
         <div className="today-date-clip" aria-hidden="true"><strong>{formatDay(state.activeDate)}</strong><span>{formatMonth(state.activeDate)}</span></div>
         <div className="today-title-block">
           <span className="today-kicker">TODAY / LOCAL EVIDENCE</span>
           <h1 id="today-board-title">今天的工作现场</h1>
-          <p>{modeDescription(board.mode, generation, preparation)}</p>
+          <p>{modeDescription(surfaceMode, generation, preparation)}</p>
         </div>
         <div className="today-board-state-line" aria-live="polite">
-          <span data-mode={board.mode}>{modeLabel(board.mode)}</span>
-          {generation ? <small>材料截止 {formatDateTime(generation.evidenceCutoff)}</small> : preparation.status === "scheduled" ? <small>{preparation.time} 自动准备</small> : <small>{sessions.length} 条独立 Session</small>}
+          <span data-mode={surfaceMode}>{modeLabel(surfaceMode)}</span>
+          {generation
+            ? <small>材料截止 {formatDateTime(generation.evidenceCutoff)}</small>
+            : traceinkReview.activeIndex
+              ? <small>材料截止 {formatDateTime(traceinkReview.activeIndex.producer.scope?.evidenceCutoff ?? traceinkReview.activeIndex.producer.completedAt)}</small>
+              : preparation.status === "scheduled"
+                ? <small>{preparation.time} 自动准备</small>
+                : <small>{sessions.length} 条独立 Session</small>}
         </div>
-        {board.mode === "raw" ? (
+        {surfaceMode === "raw" ? (
           <button type="button" className="today-primary-action" disabled={preparing || sessions.length === 0} onClick={() => void prepare("compile")}>
             <Sparkles size={16} />{preparing ? "正在准备工作脉络…" : preparation.status === "failed" ? "重新整理" : "现在整理"}
           </button>
-        ) : board.mode === "stale" ? (
+        ) : surfaceMode === "sealed" ? (
+          <div className="today-seal-mark" aria-label="本日已封存"><LockKeyhole size={15} />封</div>
+        ) : hasCanonicalIndex ? null : surfaceMode === "stale" ? (
           <button type="button" className="today-primary-action" disabled={preparing} onClick={() => void prepare("refresh")}>
             <RefreshCw size={16} />{preparing ? "正在更新工作脉络…" : "更新工作脉络"}
           </button>
-        ) : board.mode === "compiled" ? (
+        ) : (
           <button type="button" className="today-primary-action" onClick={(event) => onOpenReview({ stage: "seal" }, event.currentTarget)}>
             今日收口
           </button>
-        ) : (
-          <div className="today-seal-mark" aria-label="本日已封存"><LockKeyhole size={15} />封</div>
         )}
       </header>
 
-      {board.mode === "sealed" ? null : <ActivitySummary activity={state.activity} />}
+      {surfaceMode === "sealed" ? null : <ActivitySummary activity={state.activity} />}
 
-      <div className="today-board-toolbar">
-        {board.mode === "sealed" ? null : <ProjectFilters projects={projects} selected={selectedProjectKey} onProject={onProject} />}
-        <div className="today-board-filters" aria-label="来源筛选">
-          <Filter size={14} aria-hidden="true" />
-          {(["all", "codex", "claude"] as ProviderFilter[]).map((value) => (
-            <button key={value} type="button" aria-pressed={provider === value} onClick={() => setProvider(value)}>
-              {value === "all" ? "全部来源" : platformLabel(value)}
-            </button>
-          ))}
+      {hasCanonicalIndex && !legacySealed ? null : (
+        <div className="today-board-toolbar">
+          {surfaceMode === "sealed" ? null : <ProjectFilters projects={projects} selected={selectedProjectKey} onProject={onProject} />}
+          <div className="today-board-filters" aria-label="来源筛选">
+            <Filter size={14} aria-hidden="true" />
+            {(["all", "codex", "claude"] as ProviderFilter[]).map((value) => (
+              <button key={value} type="button" aria-pressed={provider === value} onClick={() => setProvider(value)}>
+                {value === "all" ? "全部来源" : platformLabel(value)}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
-      {displayedError ? <div className="today-board-alert" role="alert"><strong>{generation ? "整理没有替换现有材料" : "没有生成工作脉络"}</strong><span>{displayedError}</span></div> : null}
+      {displayedError && !hasCanonicalIndex ? <div className="today-board-alert" role="alert"><strong>{generation ? "整理没有替换现有材料" : "没有生成工作脉络"}</strong><span>{displayedError}</span></div> : null}
 
       <div className="today-board-scroll">
-        {board.mode === "sealed" ? <SealedPageDetails notebook={state.notebook} /> : null}
-        {board.mode === "raw" ? (
+        {surfaceMode === "sealed" ? <SealedPageDetails notebook={state.notebook} /> : null}
+        {hasCanonicalIndex && !legacySealed ? (
+          <TraceinkIndexView
+            projection={traceinkReview}
+            preparation={preparation}
+            error={displayedError}
+            onCompile={() => prepare("compile")}
+            onRefresh={() => prepare("refresh")}
+          />
+        ) : surfaceMode === "raw" ? (
           <SessionLaneList
             sessions={rawSessions}
             laneByIdentity={laneByIdentity}
@@ -208,9 +233,9 @@ export function TodayBoard({
                   sources={worklineTopology.get(workline.id)?.sources ?? []}
                   ambiguousSessionKeys={worklineTopology.get(workline.id)?.ambiguousSessionKeys ?? []}
                   generation={generation}
-                  laneByIdentity={board.mode === "sealed" ? new Map() : laneByIdentity}
+                  laneByIdentity={surfaceMode === "sealed" ? new Map() : laneByIdentity}
                   expanded={expandedWorklines.has(workline.id)}
-                  sealed={board.mode === "sealed"}
+                  sealed={surfaceMode === "sealed"}
                   reflections={activeReflections}
                   onToggle={() => toggleWorkline(workline.id)}
                   onReview={(returnFocus) => onOpenReview({ stage: "dossier", worklineId: workline.id }, returnFocus)}
@@ -219,7 +244,7 @@ export function TodayBoard({
               ))}
               {visibleWorklines.length === 0 ? <CompactEmpty text="当前筛选没有匹配的工作脉络。" /> : null}
             </section>
-            {board.mode === "stale" ? (
+            {surfaceMode === "stale" ? (
               <section className="today-uncompiled" aria-labelledby="uncompiled-title">
                 <header><div><span>NEW EVIDENCE</span><h2 id="uncompiled-title">尚未整理</h2></div><p>这些活动晚于上方材料截止点；上一版没有被改写。</p></header>
                 <SessionLaneList
