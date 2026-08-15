@@ -740,6 +740,12 @@ test("canonical Traceink index is presented whole without legacy card interpreta
   await expect(document).toContainText("你想先展开哪条工作线的证据档案：1 还是 2？");
   await expect(board.getByText("gpt-5.6-sol", { exact: true })).toBeVisible();
   await expect(board.getByText("ultra", { exact: true })).toBeVisible();
+  await expect(board.getByRole("heading", { name: "工作活动与参与" })).toBeVisible();
+  await expect(board.getByText("注意力负荷线索", { exact: true })).toBeVisible();
+  await board.getByText("尚未归入工作线", { exact: true }).click();
+  await expect(board.locator(".traceink-activity-map .today-session-lane")).toHaveCount(4);
+  await expect(board.locator(".traceink-activity-map").getByText("你参与", { exact: true }).first()).toBeVisible();
+  await expect(board.locator(".traceink-activity-map").getByText("Agent 独立推进", { exact: true }).first()).toBeVisible();
   await expect(board.locator(".today-workline")).toHaveCount(0);
   await expect(board.locator(".today-board-toolbar")).toHaveCount(0);
   await expect(board.getByRole("button", { name: /今日收口|打开材料|开始思考/ })).toHaveCount(0);

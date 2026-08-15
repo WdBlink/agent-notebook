@@ -209,13 +209,22 @@ export function TodayBoard({
       <div className="today-board-scroll">
         {surfaceMode === "sealed" ? <SealedPageDetails notebook={state.notebook} /> : null}
         {hasCanonicalIndex && !legacySealed ? (
-          <TraceinkIndexView
-            projection={traceinkReview}
-            preparation={preparation}
-            error={displayedError}
-            onCompile={() => prepare("compile")}
-            onRefresh={() => prepare("refresh")}
-          />
+          <>
+            <CanonicalActivityMap
+              rawMarkdown={traceinkReview.activeIndex!.rawMarkdown}
+              worklines={traceinkReview.worklines ?? []}
+              sessions={sessions}
+              laneByIdentity={laneByIdentity}
+              onTranscript={onTranscript}
+            />
+            <TraceinkIndexView
+              projection={traceinkReview}
+              preparation={preparation}
+              error={displayedError}
+              onCompile={() => prepare("compile")}
+              onRefresh={() => prepare("refresh")}
+            />
+          </>
         ) : surfaceMode === "raw" ? (
           <SessionLaneList
             sessions={rawSessions}
@@ -259,6 +268,69 @@ export function TodayBoard({
             ) : null}
           </>
         ) : <CompactEmpty text="这一天还没有可读取的工作材料。" />}
+      </div>
+    </section>
+  );
+}
+
+interface CanonicalActivityGroup {
+  id: string;
+  title: string;
+  participation: string[];
+  sessions: AgentWorkSession[];
+}
+
+export function canonicalActivityGroups(
+  rawMarkdown: string,
+  worklines: NonNullable<DesktopState["traceinkReview"]["worklines"]>,
+  sessions: AgentWorkSession[]
+): { groups: CanonicalActivityGroup[]; ungrouped: AgentWorkSession[] } {
+  const claimed = new Set<string>();
+  const groups = worklines.map((workline, index): CanonicalActivityGroup => {
+    const start = rawMarkdown.indexOf(workline.selection.title);
+    const nextTitle = worklines[index + 1]?.selection.title;
+    const end = start >= 0 && nextTitle ? rawMarkdown.indexOf(nextTitle, start + workline.selection.title.length) : -1;
+    const section = start >= 0 ? rawMarkdown.slice(start, end >= 0 ? end : undefined) : "";
+    const matched = sessions.filter((session) => section.includes(session.id));
+    matched.forEach((session) => claimed.add(sessionIdentity(session.platform, session.id, session.path)));
+    const participation = ["你参与", "Agent 独立推进", "共同推进", "无法确定"].filter((label) => section.includes(label));
+    return {
+      id: workline.selection.worklineId,
+      title: workline.selection.title,
+      participation: participation.length ? participation : ["无法确定"],
+      sessions: matched
+    };
+  });
+  return {
+    groups,
+    ungrouped: sessions.filter((session) => !claimed.has(sessionIdentity(session.platform, session.id, session.path)))
+  };
+}
+
+function CanonicalActivityMap({ rawMarkdown, worklines, sessions, laneByIdentity, onTranscript }: {
+  rawMarkdown: string;
+  worklines: NonNullable<DesktopState["traceinkReview"]["worklines"]>;
+  sessions: AgentWorkSession[];
+  laneByIdentity: Map<string, SessionActivityLane>;
+  onTranscript(target: TodayTranscriptTarget, returnFocus: HTMLElement): void;
+}): ReactElement {
+  const projection = useMemo(() => canonicalActivityGroups(rawMarkdown, worklines, sessions), [rawMarkdown, sessions, worklines]);
+  return (
+    <section className="traceink-activity-map" aria-labelledby="traceink-activity-title">
+      <header><div><span>ACTIVITY / PARTICIPATION</span><h2 id="traceink-activity-title">工作活动与参与</h2></div><p>语义归组来自 Traceink；时间轨迹来自本地消息时间戳。两者不会互相冒充。</p></header>
+      <div className="traceink-activity-groups">
+        {projection.groups.map((group) => (
+          <details key={group.id} open>
+            <summary><span><strong>{group.title}</strong><small>{group.sessions.length} 个 Session</small></span><em>{group.participation.join(" · ")}</em></summary>
+            <SessionLaneList sessions={group.sessions} laneByIdentity={laneByIdentity} label={`${group.title} 的活动会话`} laneClassName="traceink-grouped-lane" onTranscript={onTranscript} />
+          </details>
+        ))}
+        {projection.ungrouped.length ? (
+          <details>
+            <summary><span><strong>尚未归入工作线</strong><small>{projection.ungrouped.length} 个 Session</small></span><em>展开会话轨迹</em></summary>
+            <SessionLaneList sessions={projection.ungrouped} laneByIdentity={laneByIdentity} label="尚未归组的活动会话" laneClassName="traceink-grouped-lane" onTranscript={onTranscript} />
+          </details>
+        ) : null}
       </div>
     </section>
   );

@@ -1404,6 +1404,21 @@ code, kbd { font-family: var(--mono); }
   .traceink-index-action { transition: none; }
 }
 /* Canonical Traceink workline dossier */
+.traceink-activity-map { margin: 18px 18px 0; border: 1px solid var(--line); border-radius: 16px; background: rgba(247,245,238,.8); overflow: hidden; }
+.traceink-activity-map > header { display: flex; justify-content: space-between; gap: 24px; padding: 20px 24px; border-bottom: 1px solid var(--line); }
+.traceink-activity-map > header span { color: #a06f39; font: 700 10px/1.2 ui-monospace, monospace; letter-spacing: .16em; }
+.traceink-activity-map > header h2 { margin: 5px 0 0; font-size: 22px; }
+.traceink-activity-map > header p { max-width: 430px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.traceink-activity-groups details + details { border-top: 1px solid var(--line); }
+.traceink-activity-groups summary { display: flex; justify-content: space-between; gap: 20px; align-items: center; padding: 15px 24px; cursor: pointer; list-style: none; }
+.traceink-activity-groups summary::-webkit-details-marker { display: none; }
+.traceink-activity-groups summary span { display: grid; gap: 3px; }
+.traceink-activity-groups summary small, .traceink-activity-groups summary em { color: var(--muted); font-size: 12px; font-style: normal; }
+.traceink-activity-groups summary em { padding: 5px 9px; border: 1px solid var(--line); border-radius: 999px; }
+.traceink-activity-groups .today-session-lanes { border-top: 1px solid var(--line); }
+.traceink-activity-groups .traceink-grouped-lane { min-height: 92px; background: rgba(255,255,255,.46); }
+.traceink-activity-groups .traceink-grouped-lane .session-lane-copy h2 { font-size: 15px; }
+.traceink-activity-groups .traceink-grouped-lane .session-lane-copy small { max-width: 38vw; }
 .traceink-workline-actions { display: grid; gap: 8px; }
 .traceink-workline-actions > button { display: grid; grid-template-columns: 26px 1fr; gap: 2px 8px; width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.52); text-align: left; color: inherit; }
 .traceink-workline-actions > button:hover { border-color: #a8804f; background: #fff; }
@@ -1425,4 +1440,10 @@ code, kbd { font-family: var(--mono); }
 .traceink-reflection-actions small { color: var(--muted); }
 .traceink-reflection-actions button { padding: 10px 16px; border: 0; border-radius: 9px; background: #24241f; color: white; font-weight: 700; }
 .traceink-reflection-actions button:disabled { opacity: .45; }
-@media (max-width: 720px) { .traceink-dossier-reader { width: 100vw; padding-inline: 20px; } }
+@media (max-width: 720px) {
+  .traceink-activity-map { margin-inline: 10px; }
+  .traceink-activity-map > header, .traceink-activity-groups summary { align-items: flex-start; flex-direction: column; }
+  .traceink-activity-groups summary { gap: 8px; }
+  .traceink-activity-groups .traceink-grouped-lane .session-lane-copy small { max-width: 100%; }
+  .traceink-dossier-reader { width: 100vw; padding-inline: 20px; }
+}
