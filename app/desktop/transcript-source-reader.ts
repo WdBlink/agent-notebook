@@ -7,7 +7,7 @@ import type { AgentTranscriptCapture } from "../../src/types";
 const MAX_TRANSCRIPT_BYTES = 24 * 1024 * 1024;
 const TRANSCRIPT_HEAD_BYTES = 8 * 1024 * 1024;
 
-export type TranscriptSourceOrigin = "current-snapshot" | "sealed-package";
+export type TranscriptSourceOrigin = "current-snapshot" | "sealed-package" | "traceink-asset";
 
 export interface TranscriptSourceReadOptions {
   origin: TranscriptSourceOrigin;
@@ -19,17 +19,17 @@ export async function readBoundedTranscriptSource(
   filePath: string,
   options: TranscriptSourceReadOptions
 ): Promise<{ content: string; truncated: boolean }> {
-  if (options.origin === "sealed-package") {
+  if (options.origin !== "current-snapshot") {
     const linkStat = await fs.lstat(filePath);
     if (linkStat.isSymbolicLink()) throw new Error("封存会话原文路径的最终文件是符号链接，拒绝读取。");
   }
 
   let handle: FileHandle;
   try {
-    const noFollow = options.origin === "sealed-package" ? constants.O_NOFOLLOW : 0;
+    const noFollow = options.origin !== "current-snapshot" ? constants.O_NOFOLLOW : 0;
     handle = await fs.open(filePath, constants.O_RDONLY | noFollow);
   } catch (error) {
-    if (options.origin === "sealed-package" && isNoFollowError(error)) {
+    if (options.origin !== "current-snapshot" && isNoFollowError(error)) {
       throw new Error("封存会话原文路径的最终文件是符号链接，拒绝读取。");
     }
     throw error;
@@ -41,7 +41,7 @@ export async function readBoundedTranscriptSource(
     if (options.transcriptCapture) {
       return await readCapturedTranscriptPrefix(handle, stat.size, filePath, options.transcriptCapture);
     }
-    if (options.origin === "sealed-package" && options.expectedModifiedAt) {
+    if (options.origin !== "current-snapshot" && options.expectedModifiedAt) {
       if (stat.mtime.toISOString() !== options.expectedModifiedAt) {
         throw new Error("封存会话原文的修改标识已经变化，拒绝读取被替换的文件。");
       }

@@ -1074,7 +1074,12 @@ async function loadProjectContext(input: string): Promise<ProjectContextState> {
 
 async function loadSessionTranscript(request: SessionTranscriptRequest): Promise<SessionTranscriptState> {
   const current = await ensureLoaded();
-  const target = authorizeSessionTranscriptRequest(request, current.workSessionSnapshot.sessions, notebook);
+  const target = authorizeSessionTranscriptRequest(
+    request,
+    current.workSessionSnapshot.sessions,
+    notebook,
+    requireTraceinkAssetRepository().snapshot()
+  );
   let source: { content: string; truncated: boolean };
   try {
     source = await readBoundedTranscriptSource(target.readPath, {
@@ -1085,6 +1090,9 @@ async function loadSessionTranscript(request: SessionTranscriptRequest): Promise
     });
   } catch (error) {
     if (isMissingFileError(error)) {
+      if (target.origin === "traceink-asset") {
+        throw new Error("Traceink 证据所引用的会话原文已不存在；资产引用仍保留，但当前无法重开原文。");
+      }
       if (target.origin === "sealed-package") {
         throw new Error("会话原文文件已不存在；封存证据仍保留引用，但当前无法读取原文。");
       }

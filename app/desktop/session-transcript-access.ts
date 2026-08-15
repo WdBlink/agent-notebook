@@ -1,5 +1,7 @@
+import path from "node:path";
 import type { SessionTranscriptRequest } from "./api";
 import type { NotebookDocument } from "./notebook-store";
+import { findTraceinkArtifact, type TraceinkAssetStoreDocumentV1 } from "./traceink-asset-store";
 import type { AgentPlatform, AgentTranscriptCapture, AgentWorkSession } from "../../src/types";
 import type { DailyReviewEvidence } from "../../src/workline-review";
 
@@ -9,7 +11,7 @@ export interface AuthorizedSessionTranscriptReference {
   path: string;
   readPath: string;
   title: string;
-  origin: "current-snapshot" | "sealed-package";
+  origin: "current-snapshot" | "sealed-package" | "traceink-asset";
   evidenceUpdatedAt?: string;
   transcriptCapture?: AgentTranscriptCapture;
 }
@@ -17,8 +19,13 @@ export interface AuthorizedSessionTranscriptReference {
 export function authorizeSessionTranscriptRequest(
   request: SessionTranscriptRequest,
   currentSessions: AgentWorkSession[],
-  document: NotebookDocument
+  document: NotebookDocument,
+  traceinkAssets?: TraceinkAssetStoreDocumentV1
 ): AuthorizedSessionTranscriptReference {
+  if (request?.packageRef && request?.traceinkRef) {
+    throw new Error("一次会话读取不能同时使用旧证据包和 Traceink 证据授权。");
+  }
+  if (request?.traceinkRef) return authorizeTraceinkTranscript(request, traceinkAssets);
   const packageRef = request?.packageRef;
   if (!packageRef) {
     const current = currentSessions.find((session) =>
@@ -52,6 +59,57 @@ export function authorizeSessionTranscriptRequest(
     return pickReference(current);
   }
   return pickPackageReference(evidence);
+}
+
+function authorizeTraceinkTranscript(
+  request: SessionTranscriptRequest,
+  document: TraceinkAssetStoreDocumentV1 | undefined
+): AuthorizedSessionTranscriptReference {
+  const traceinkRef = request.traceinkRef;
+  if (!traceinkRef || !document) throw new Error("Traceink 证据资产尚未加载，拒绝读取。");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(traceinkRef.logicalDate)) {
+    throw new Error("Traceink 证据日期无效，拒绝读取。");
+  }
+  const artifact = findTraceinkArtifact(document, traceinkRef);
+  if (!artifact || artifact.logicalDate !== traceinkRef.logicalDate) {
+    throw new Error("找不到请求所指向的精确 Traceink 资产版本，拒绝读取。");
+  }
+  const evidence = artifact.evidence.find((candidate) => candidate.id === traceinkRef.evidenceId);
+  if (!evidence) throw new Error("Traceink 资产中找不到指定证据，拒绝读取。");
+  if (evidence.kind !== "session") throw new Error("只有 Traceink Session 证据可以在会话阅读器中重开。");
+  if (
+    evidence.sessionId !== request.id ||
+    evidence.provider !== request.platform ||
+    evidence.path !== request.path
+  ) {
+    throw new Error("请求的会话元组与 Traceink 证据不匹配，拒绝读取。");
+  }
+  if (!path.isAbsolute(evidence.path) || evidence.path.includes("\0")) {
+    throw new Error("Traceink 会话证据路径无效，拒绝读取。");
+  }
+  const match = /^bytes 0-(\d+)$/.exec(evidence.locator);
+  const byteLength = match ? Number(match[1]) : Number.NaN;
+  if (!Number.isSafeInteger(byteLength) || byteLength < 0) {
+    throw new Error("Traceink 会话证据的冻结范围无效，拒绝读取。");
+  }
+  if (!evidence.contentHash || !/^[a-f0-9]{64}$/.test(evidence.contentHash)) {
+    throw new Error("Traceink 会话证据缺少有效的 SHA-256，拒绝读取。");
+  }
+  const transcriptCapture: AgentTranscriptCapture = {
+    canonicalPath: evidence.path,
+    sha256: evidence.contentHash,
+    byteLength,
+    coverage: { startByte: 0, endByte: byteLength }
+  };
+  return {
+    id: evidence.sessionId,
+    platform: evidence.provider,
+    path: evidence.path,
+    readPath: evidence.path,
+    title: evidence.sessionId,
+    origin: "traceink-asset",
+    transcriptCapture
+  };
 }
 
 function pickPackageReference(evidence: DailyReviewEvidence): AuthorizedSessionTranscriptReference {

@@ -178,6 +178,10 @@ export interface SessionTranscriptRequest {
     generationId: string;
     evidenceId: string;
   };
+  traceinkRef?: TraceinkArtifactReferenceV1 & {
+    logicalDate: string;
+    evidenceId: string;
+  };
 }
 
 export interface SessionTranscriptMessage {
