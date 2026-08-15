@@ -2,8 +2,108 @@ import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { traceinkIndexPresentation } from "../../src/traceink-index-presentation";
+import type { TraceinkEvidenceRefV1, TraceinkIndexArtifactV1 } from "../../src/traceink-review-assets";
 
 const desktopUrl = pathToFileURL(path.resolve("dist/desktop/index.html")).toString();
+const TRACEINK_HASH = "a".repeat(64);
+
+const goldenTodaySessions = [
+  {
+    id: "019fe682-2ae8-75c0-970c-a3438bd51db1",
+    platform: "codex",
+    title: "Traceink 核心界面",
+    summary: "把 Traceink 的真实产物变成 Work Continuity 的核心界面。",
+    path: "/tmp/traceink-golden-work-continuity.jsonl",
+    startedAt: "2026-08-15T09:22:00+08:00",
+    updatedAt: "2026-08-15T14:28:00+08:00",
+    projectPath: "/workspace/work-continuity",
+    resumable: true,
+    summarySource: "codex",
+    artifacts: [],
+    status: "active"
+  },
+  {
+    id: "019ff55d-2782-77a0-abb8-f2b11dcd01f2",
+    platform: "codex",
+    title: "中金式 AI Loop 审计",
+    summary: "补齐自动因子发现引擎的垂直证据链。",
+    path: "/tmp/traceink-golden-ai-loop.jsonl",
+    startedAt: "2026-08-15T09:16:00+08:00",
+    updatedAt: "2026-08-15T14:25:00+08:00",
+    projectPath: "/workspace/vibe-trading",
+    resumable: true,
+    summarySource: "codex",
+    artifacts: [],
+    status: "active"
+  },
+  {
+    id: "01a003a2-f248-7000-9000-000000000003",
+    platform: "codex",
+    title: "首个因子 Campaign 封存",
+    summary: "Campaign 已封存，没有可推广 Alpha。",
+    path: "/tmp/traceink-golden-campaign.jsonl",
+    startedAt: "2026-08-15T12:16:00+08:00",
+    updatedAt: "2026-08-15T14:28:00+08:00",
+    projectPath: "/workspace/vibe-trading",
+    resumable: false,
+    summarySource: "codex",
+    artifacts: [],
+    status: "completed"
+  },
+  {
+    id: "019fd9f8-48e6-77a2-9775-6f392b570065",
+    platform: "codex",
+    title: "Autoresearch 权限边界",
+    summary: "Adapter 与 Evaluator 已停在外部证据边界。",
+    path: "/tmp/traceink-golden-autoresearch.jsonl",
+    startedAt: "2026-08-15T09:19:00+08:00",
+    updatedAt: "2026-08-15T13:08:00+08:00",
+    projectPath: "/workspace/optimatchlocator",
+    resumable: true,
+    summarySource: "codex",
+    artifacts: [],
+    status: "blocked"
+  },
+  {
+    id: "019fd2c1-b372-7000-9000-000000000005",
+    platform: "codex",
+    title: "FOLO RSS 证据质量门",
+    summary: "从静态相关性评分转向有界原始来源核验。",
+    path: "/tmp/traceink-golden-folo-rss.jsonl",
+    startedAt: "2026-08-15T08:38:00+08:00",
+    updatedAt: "2026-08-15T14:23:00+08:00",
+    projectPath: "/workspace/llm-wiki",
+    resumable: true,
+    summarySource: "codex",
+    artifacts: [],
+    status: "completed"
+  },
+  {
+    id: "01a00303-child-not-explicitly-indexed",
+    platform: "codex",
+    title: "未在索引中逐项列出的 Traceink 子会话",
+    summary: "这条冻结 Session 没有足够的显式引用，不能被 UI 猜进任一工作线。",
+    path: "/tmp/traceink-golden-unresolved-child.jsonl",
+    startedAt: "2026-08-15T11:42:00+08:00",
+    updatedAt: "2026-08-15T12:03:00+08:00",
+    projectPath: "/workspace/work-continuity",
+    resumable: false,
+    summarySource: "codex",
+    artifacts: [],
+    status: "completed"
+  }
+];
+
+const goldenTodayEvidence: TraceinkEvidenceRefV1[] = goldenTodaySessions.map((session, index) => ({
+  id: `golden-session-${index + 1}`,
+  kind: "session",
+  provider: "codex",
+  sessionId: session.id,
+  path: session.path,
+  locator: `bytes 0-${400 + index}`,
+  contentHash: TRACEINK_HASH
+}));
 
 const baseSessions = [
   {
@@ -66,7 +166,42 @@ const baseSessions = [
 
 async function installDesktopApi(page: Page): Promise<void> {
   const traceinkMarkdown = await readFile(path.resolve("tests/skill-fixtures/traceink-golden/full-day-index.md"), "utf8");
-  await page.addInitScript(({ sessions, canonicalTraceinkMarkdown }) => {
+  const goldenTodayMarkdown = await readFile(path.resolve("tests/skill-fixtures/traceink-golden/today-2026-08-15-index.md"), "utf8");
+  const goldenTodayIndex: TraceinkIndexArtifactV1 = {
+    schemaVersion: 1,
+    id: "traceink-index-2026-08-15",
+    logicalDate: "2026-08-15",
+    stage: "index",
+    revision: 1,
+    producer: {
+      provider: "codex",
+      model: "gpt-5.6-sol",
+      reasoningConfiguration: "ultra",
+      startedAt: "2026-08-15T14:28:00+08:00",
+      completedAt: "2026-08-15T14:36:00+08:00",
+      skill: {
+        packageId: "traceink",
+        version: "traceink-skill-bundle-v1",
+        skillHash: TRACEINK_HASH,
+        editorialContractHash: TRACEINK_HASH
+      },
+      scope: {
+        timeZone: "Asia/Shanghai",
+        startInclusive: "2026-08-15T00:00:00+08:00",
+        endExclusive: "2026-08-16T00:00:00+08:00",
+        evidenceCutoff: "2026-08-15T14:28:00+08:00"
+      }
+    },
+    inputEvidenceHash: TRACEINK_HASH,
+    rawMarkdown: goldenTodayMarkdown,
+    outputHash: TRACEINK_HASH,
+    coverage: goldenTodayEvidence.map((item) => ({ sourceId: item.id, disposition: "read", detail: "frozen provider session" })),
+    evidence: goldenTodayEvidence,
+    navigation: [],
+    warnings: []
+  };
+  const goldenTodayPresentation = traceinkIndexPresentation(goldenTodayIndex);
+  await page.addInitScript(({ sessions, canonicalTraceinkMarkdown, todaySessions, todayIndex, todayPresentation }) => {
     const storedPackageSessions = sessions.map((session: any) => ({ ...session }));
     let reviewPromptProfile = "traceink-review-v1";
     const createReviewPackage = (activeDate: string, includeDuplicate = false): any => ({
@@ -147,7 +282,7 @@ async function installDesktopApi(page: Page): Promise<void> {
       warnings: [],
       rawOutput: { worklines: [{ id: "daily-review-direction" }, { id: "trading-credentials" }] }
     });
-    type TodayScenario = "raw" | "compiled" | "stale" | "sealed" | "duplicate" | "traceink" | "traceink-stale";
+    type TodayScenario = "raw" | "compiled" | "stale" | "sealed" | "duplicate" | "traceink" | "traceink-stale" | "traceink-golden";
     const sessionIdentity = (session: any): string => `${session.platform}:${session.id}:${session.path}`;
     const createActivity = (activeDate: string, scopedSessions: typeof sessions): any => ({
       logicalDate: activeDate,
@@ -157,19 +292,23 @@ async function installDesktopApi(page: Page): Promise<void> {
         platform: session.platform,
         path: session.path,
         operationalState: session.status === "active" ? "running" : "not-running",
-        confidence: index === 2 ? "uncertain" : "observed",
+        confidence: activeDate === "2026-08-15" ? (index < 5 ? "observed" : "uncertain") : index === 2 ? "uncertain" : "observed",
         timeRange: { start: session.startedAt, end: session.updatedAt },
-        userInterventions: index === 0
+        userInterventions: activeDate === "2026-08-15"
+          ? ([0, 1, 4].includes(index) ? [{ id: `golden-user-${index}`, timestamp: session.startedAt }] : [])
+          : index === 0
           ? [{ id: "user-1", timestamp: `${activeDate}T09:18:00+08:00` }, { id: "user-2", timestamp: `${activeDate}T14:30:00+08:00` }]
           : index === 1
             ? [{ id: "user-3", timestamp: `${activeDate}T10:02:00+08:00` }]
             : [],
-        agentActivityWindows: index === 0
+        agentActivityWindows: activeDate === "2026-08-15"
+          ? (index < 5 ? [{ start: session.startedAt, end: session.updatedAt, durationMs: 900000, basis: "timestamped-user-to-assistant", coverage: "observed" }] : [])
+          : index === 0
           ? [{ start: `${activeDate}T14:30:00+08:00`, end: `${activeDate}T14:36:00+08:00`, durationMs: 360000, basis: "timestamped-user-to-assistant", coverage: "observed" }]
           : index === 1
             ? [{ start: `${activeDate}T10:02:00+08:00`, end: `${activeDate}T10:18:00+08:00`, durationMs: 960000, basis: "timestamped-user-to-assistant", coverage: "observed" }]
             : [],
-        warnings: index === 2 ? ["部分消息缺少时间戳，无法推断持续时间。"] : []
+        warnings: activeDate === "2026-08-15" ? (index === 5 ? ["索引没有提供足以归入工作线的显式引用。"] : []) : index === 2 ? ["部分消息缺少时间戳，无法推断持续时间。"] : []
       })),
       facts: {
         userInterventionCount: 3,
@@ -187,6 +326,25 @@ async function installDesktopApi(page: Page): Promise<void> {
       }
     });
     const createTraceinkProjection = (activeDate: string, scopedSessions: typeof sessions, scenario: TodayScenario): any => {
+      if (scenario === "traceink-golden") {
+        const artifact = structuredClone(todayIndex);
+        return {
+          mode: "compiled",
+          activeIndex: artifact,
+          activeIndexReference: {
+            artifactId: artifact.id,
+            stage: "index",
+            revision: artifact.revision,
+            outputHash: artifact.outputHash
+          },
+          uncompiledEvidence: [],
+          worklines: todayPresentation.map((presentation: any) => ({
+            selection: structuredClone(presentation.selection),
+            presentation: structuredClone(presentation),
+            proposalItems: []
+          }))
+        };
+      }
       if (scenario !== "traceink" && scenario !== "traceink-stale") {
         return {
           mode: "raw",
@@ -304,8 +462,8 @@ async function installDesktopApi(page: Page): Promise<void> {
           evidenceCutoff: `${activeDate}T19:00:00+08:00`
         }
       };
-      const hasPackage = scenario !== "raw" && scenario !== "traceink" && scenario !== "traceink-stale";
-      const boardMode = scenario === "duplicate" ? "compiled" : scenario === "traceink" || scenario === "traceink-stale" ? "raw" : scenario;
+      const hasPackage = scenario !== "raw" && scenario !== "traceink" && scenario !== "traceink-stale" && scenario !== "traceink-golden";
+      const boardMode = scenario === "duplicate" ? "compiled" : scenario === "traceink" || scenario === "traceink-stale" || scenario === "traceink-golden" ? "raw" : scenario;
       const pageStatus = scenario === "sealed" ? "sealed" : hasPackage ? "draft" : "unformed";
       const uncompiledEvidence = scenario === "raw"
         ? scopedSessions.map((session: any) => ({ identity: sessionIdentity(session), revision: `revision:${session.updatedAt}` }))
@@ -348,7 +506,8 @@ async function installDesktopApi(page: Page): Promise<void> {
       };
     };
     const createState = (enabledProviders: string[] = ["codex", "claude"], activeDate = "2026-07-20", scenario: TodayScenario = "raw") => {
-      const scopedSessions = sessions.filter((session: { platform: string }) => enabledProviders.includes(session.platform));
+      const sourceSessions = scenario === "traceink-golden" ? todaySessions : sessions;
+      const scopedSessions = sourceSessions.filter((session: { platform: string }) => enabledProviders.includes(session.platform));
       return ({
       activeDate,
       activityDates: ["2026-07-20", "2026-07-19", "2026-07-18"],
@@ -426,6 +585,77 @@ async function installDesktopApi(page: Page): Promise<void> {
     let state = persistedSnapshot ? restorePersistedState(persistedSnapshot) : createState(undefined, undefined, scenario);
     const stateListeners: Array<(next: ReturnType<typeof createState>) => void> = [];
     const notifyState = (): void => { for (const listener of stateListeners) listener(state); };
+    const goldenWorkline = (worklineId: string): any => state.traceinkReview.worklines?.find((item: any) => item.selection.worklineId === worklineId);
+    const goldenDossier = (workline: any): any => {
+      const evidence = state.traceinkReview.activeIndex.evidence.filter((item: any) => workline.presentation?.evidenceIds.includes(item.id));
+      const selectedEvidence = evidence[0] ?? state.traceinkReview.activeIndex.evidence[0];
+      return {
+        ...structuredClone(state.traceinkReview.activeIndex),
+        id: `traceink-dossier-${workline.selection.worklineId}`,
+        stage: "dossier",
+        worklineId: workline.selection.worklineId,
+        rawMarkdown: [
+          `# ${workline.selection.title} · 证据档案`,
+          "",
+          "## 原来的判断或背景",
+          "这条工作线从当天冻结的 Session 证据重建，不把 AI 的候选解释冒充成你的判断。",
+          "",
+          "## 发生了什么",
+          workline.presentation.currentStopMarkdown,
+          "",
+          "## 支持、反对与适用边界",
+          `- [E1] Codex Session \`${selectedEvidence.sessionId}\` · ${selectedEvidence.path}`,
+          "- 当前证据完整度沿用索引，不扩大到未读取材料。",
+          "",
+          "## 仍需你判断",
+          "这条证据是否足以改变你下一步的投入？"
+        ].join("\n"),
+        outputHash: "b".repeat(64),
+        evidence: [structuredClone(selectedEvidence)],
+        navigation: [{ id: "dossier-evidence", markdownAnchor: "支持、反对与适用边界", evidenceIds: [selectedEvidence.id] }],
+        warnings: []
+      };
+    };
+    const goldenProposalItems = (reflectionText: string): any[] => [
+      { proposalId: "J1", category: "judgment", proposalText: "确认 Traceink 原文应继续作为产品语义权威。", sourceQuote: reflectionText, evidenceIds: ["golden-session-1"] },
+      { proposalId: "T1", category: "tomorrow", proposalText: "明天在重新构建的客户端中实测五条工作线。", sourceQuote: reflectionText, evidenceIds: ["golden-session-1"] },
+      { proposalId: "C1", category: "ctx", proposalText: "把已确认的产品方向保留为 CTX 候选。", sourceQuote: reflectionText, evidenceIds: ["golden-session-1"] },
+      { proposalId: "B1", category: "background", proposalText: "可在明确授权后准备只读回归材料。", sourceQuote: reflectionText, evidenceIds: ["golden-session-1"] },
+      { proposalId: "D1", category: "today-only", proposalText: "保留今天对客户端真实性的质疑。", sourceQuote: reflectionText, evidenceIds: ["golden-session-1"] }
+    ];
+    const goldenProposals = (workline: any): any => {
+      const items = goldenProposalItems(workline.reflection.text);
+      return {
+        ...structuredClone(workline.dossier),
+        id: `traceink-proposals-${workline.selection.worklineId}`,
+        stage: "proposals",
+        sourceReflection: {
+          reflectionId: workline.reflection.id,
+          revision: workline.reflection.revision,
+          contentHash: workline.reflection.contentHash
+        },
+        rawMarkdown: [
+          "### 你的原文 · 保持原样",
+          "",
+          `> ${workline.reflection.text}`,
+          "",
+          "### 待确认的整理提案",
+          "",
+          ...items.map((item) => `- **[${item.proposalId}]** ${item.proposalText}\n  原文依据：“${item.sourceQuote}”`),
+          "",
+          "接受只记录选择，不触发写入、后台授权或封页。"
+        ].join("\n"),
+        outputHash: "d".repeat(64),
+        navigation: items.map((item) => ({
+          id: item.proposalId,
+          markdownAnchor: item.proposalId,
+          evidenceIds: item.evidenceIds,
+          category: item.category,
+          proposalText: item.proposalText,
+          sourceQuote: item.sourceQuote
+        }))
+      };
+    };
     const persistSealedState = (): void => {
       persistedSnapshot = {
         marker: "traceink-e2e-sealed-v1",
@@ -451,11 +681,19 @@ async function installDesktopApi(page: Page): Promise<void> {
     (window as unknown as { transcriptRequests: unknown[] }).transcriptRequests = [];
     (window as unknown as { copiedTexts: string[] }).copiedTexts = [];
     (window as unknown as { settingsPatches: unknown[] }).settingsPatches = [];
+    (window as unknown as { traceinkDossierRequests: unknown[] }).traceinkDossierRequests = [];
+    (window as unknown as { traceinkReflectionInputs: string[] }).traceinkReflectionInputs = [];
+    (window as unknown as { traceinkProposalRequests: unknown[] }).traceinkProposalRequests = [];
+    (window as unknown as { traceinkProposalDispositions: unknown[] }).traceinkProposalDispositions = [];
     (window as unknown as { setTodayScenario: (next: TodayScenario) => void }).setTodayScenario = (next: TodayScenario) => {
       persistedSnapshot = null;
       window.name = "";
       scenario = next;
-      state = createState(state.data.settings.enabledSessionProviders, next === "traceink" || next === "traceink-stale" ? "2026-08-09" : state.activeDate, scenario);
+      state = createState(
+        state.data.settings.enabledSessionProviders,
+        next === "traceink-golden" ? "2026-08-15" : next === "traceink" || next === "traceink-stale" ? "2026-08-09" : state.activeDate,
+        scenario
+      );
       notifyState();
     };
     (window as unknown as { setPrepareFailure: (fail: boolean) => void }).setPrepareFailure = (fail: boolean) => { prepareShouldFail = fail; };
@@ -514,6 +752,14 @@ async function installDesktopApi(page: Page): Promise<void> {
         bookmarks: state.notebook.continuationCandidates.slice(0, 1)
       };
       state.notebook.todayBoard = { mode: "sealed", uncompiledEvidence: [] };
+      state = structuredClone(state);
+      notifyState();
+    };
+    (window as unknown as { coexistLegacySealWithCanonicalIndex: () => void }).coexistLegacySealWithCanonicalIndex = () => {
+      if (!state.traceinkReview.activeIndex) throw new Error("canonical Traceink index missing");
+      state.notebook.page.status = "sealed";
+      state.notebook.page.sealedAt = `${state.activeDate}T22:16:00+08:00`;
+      state.notebook.todayBoard.mode = "sealed";
       state = structuredClone(state);
       notifyState();
     };
@@ -602,6 +848,68 @@ async function installDesktopApi(page: Page): Promise<void> {
         notifyState();
         return state.notebook;
       },
+      prepareTraceinkDossier: async (date: string, selection: { worklineId: string }) => {
+        (window as unknown as { traceinkDossierRequests: unknown[] }).traceinkDossierRequests.push({ date, selection: structuredClone(selection) });
+        const workline = goldenWorkline(selection.worklineId);
+        if (!workline) throw new Error("golden workline missing");
+        workline.dossier = goldenDossier(workline);
+        state = structuredClone(state);
+        return state;
+      },
+      saveTraceinkReflection: async (date: string, dossier: { artifactId: string; stage: string; revision: number; outputHash: string }, text: string) => {
+        (window as unknown as { traceinkReflectionInputs: string[] }).traceinkReflectionInputs.push(text);
+        const workline = state.traceinkReview.worklines?.find((item: any) => item.dossier?.id === dossier.artifactId);
+        if (!workline || date !== state.activeDate) throw new Error("golden dossier missing");
+        workline.reflection = {
+          schemaVersion: 1,
+          id: `traceink-reflection-${workline.selection.worklineId}`,
+          logicalDate: date,
+          worklineId: workline.selection.worklineId,
+          dossier: structuredClone(dossier),
+          revision: (workline.reflection?.revision ?? 0) + 1,
+          text,
+          createdAt: `${date}T14:40:00+08:00`,
+          savedAt: `${date}T14:40:00+08:00`,
+          contentHash: "c".repeat(64)
+        };
+        state = structuredClone(state);
+        return state;
+      },
+      prepareTraceinkProposals: async (date: string, reflection: { reflectionId: string; revision: number; contentHash: string }) => {
+        (window as unknown as { traceinkProposalRequests: unknown[] }).traceinkProposalRequests.push({ date, reflection: structuredClone(reflection) });
+        const workline = state.traceinkReview.worklines?.find((item: any) => item.reflection?.id === reflection.reflectionId);
+        if (!workline || date !== state.activeDate) throw new Error("golden reflection missing");
+        workline.proposals = goldenProposals(workline);
+        workline.proposalItems = goldenProposalItems(workline.reflection.text);
+        state = structuredClone(state);
+        return state;
+      },
+      disposeTraceinkProposal: async (
+        date: string,
+        proposals: { artifactId: string; stage: string; revision: number; outputHash: string },
+        proposalId: string,
+        input: { action: "accept" | "dismiss" | "defer" | "rewrite"; rewriteText?: string }
+      ) => {
+        (window as unknown as { traceinkProposalDispositions: unknown[] }).traceinkProposalDispositions.push({ date, proposals: structuredClone(proposals), proposalId, input: structuredClone(input) });
+        const workline = state.traceinkReview.worklines?.find((item: any) => item.proposals?.id === proposals.artifactId);
+        const proposal = workline?.proposalItems.find((item: any) => item.proposalId === proposalId);
+        if (!workline || !proposal || date !== state.activeDate) throw new Error("golden proposal missing");
+        proposal.latestDisposition = {
+          schemaVersion: 1,
+          id: `traceink-disposition-${proposalId}-${input.action}`,
+          logicalDate: date,
+          worklineId: workline.selection.worklineId,
+          proposalArtifact: structuredClone(proposals),
+          proposalId,
+          category: proposal.category,
+          revision: (proposal.latestDisposition?.revision ?? 0) + 1,
+          action: input.action,
+          ...(input.rewriteText ? { rewriteText: input.rewriteText } : {}),
+          decidedAt: `${date}T14:45:00+08:00`
+        };
+        state = structuredClone(state);
+        return state;
+      },
       composeDailyPage: async () => {
         scenario = "compiled";
         state = createState(state.data.settings.enabledSessionProviders, state.activeDate, scenario);
@@ -681,7 +989,13 @@ async function installDesktopApi(page: Page): Promise<void> {
         };
       }
     };
-  }, { sessions: baseSessions, canonicalTraceinkMarkdown: traceinkMarkdown });
+  }, {
+    sessions: baseSessions,
+    canonicalTraceinkMarkdown: traceinkMarkdown,
+    todaySessions: goldenTodaySessions,
+    todayIndex: goldenTodayIndex,
+    todayPresentation: goldenTodayPresentation
+  });
 }
 
 test.beforeEach(async ({ page }) => {
@@ -742,7 +1056,7 @@ test("canonical Traceink index is presented whole without legacy card interpreta
   await expect(board.getByText("ultra", { exact: true })).toBeVisible();
   await expect(board.getByRole("heading", { name: "工作活动与参与" })).toBeVisible();
   await expect(board.getByText("注意力负荷线索", { exact: true })).toBeVisible();
-  await board.getByText("尚未归入工作线", { exact: true }).click();
+  await board.getByText("Traceink 未明确归属", { exact: true }).click();
   await expect(board.locator(".traceink-activity-map .today-session-lane")).toHaveCount(4);
   await expect(board.locator(".traceink-activity-map").getByText("你参与", { exact: true }).first()).toBeVisible();
   await expect(board.locator(".traceink-activity-map").getByText("Agent 独立推进", { exact: true }).first()).toBeVisible();
@@ -753,6 +1067,110 @@ test("canonical Traceink index is presented whole without legacy card interpreta
     expect.stringContaining("从 scheduler 吞吐实验转向 Research IR 表示假设"),
     expect.stringContaining("0.6.0 双架构安装包的发布前边界检查")
   ]));
+});
+
+test("today's proven Traceink result stays complete through activity, evidence, reflection, and proposal choices", async ({ page }) => {
+  await page.evaluate(() => (window as unknown as { setTodayScenario(next: "traceink-golden"): void }).setTodayScenario("traceink-golden"));
+  await page.evaluate(() => (window as unknown as { coexistLegacySealWithCanonicalIndex(): void }).coexistLegacySealWithCanonicalIndex());
+
+  const board = page.locator(".today-board");
+  const canonicalDocument = board.getByRole("article", { name: "Traceink 工作脉络正文" });
+  const titles = [
+    "把 Traceink 的真实产物变成 Work Continuity 的核心界面",
+    "让自动因子发现引擎真正达到“中金式 AI Loop”标准",
+    "有界因子发现实跑：首个 campaign 已封存但没有 Alpha",
+    "Autoresearch Adapter ↔ Evaluator 自动往返与权限边界",
+    "FOLO RSS → LLM-Wiki：从相关性筛选升级为证据质量门"
+  ];
+  await expect(canonicalDocument).toBeVisible();
+  await expect(board.locator(".today-seal-mark")).toHaveCount(0);
+  await expect(board.getByText("注意力负荷线索", { exact: true })).toBeVisible();
+  for (const title of titles) await expect(canonicalDocument.getByRole("heading", { name: new RegExp(title) })).toBeVisible();
+  await expect(board.locator(".traceink-workline-actions button")).toHaveCount(5);
+
+  const activity = board.getByRole("region", { name: "工作活动与参与" });
+  const groups = activity.locator(".traceink-activity-groups > details");
+  await expect(groups).toHaveCount(6);
+  await expect(groups.first()).not.toHaveAttribute("open", "");
+  const ungrouped = groups.filter({ has: page.getByText("Traceink 未明确归属", { exact: true }) });
+  await expect(ungrouped).toContainText("1 个 Session");
+  await ungrouped.getByText("Traceink 未明确归属", { exact: true }).click();
+  await expect(ungrouped.getByText("未在索引中逐项列出的 Traceink 子会话", { exact: true })).toBeVisible();
+  await expect(ungrouped.getByText("无法确定", { exact: true })).toBeVisible();
+  const expectedSignals = [
+    { title: titles[0]!, time: "09:22–14:28", status: "正在推进", participation: "共同推进", stop: "code-mode host is disabled", change: "数据库只负责保存原文", evidence: "部分" },
+    { title: titles[1]!, time: "09:16–14:25", status: "正在审计并补齐垂直证据链", participation: "共同推进", stop: "父本/参数动量", change: "历史经验必须真实改变下一轮候选分布", evidence: "长期真实 campaign 证据仍不足" },
+    { title: titles[2]!, time: "12:16–14:28", status: "COMPLETED", participation: "Agent 独立推进", stop: "Campaign 已关闭", change: "49 个 seal candidate", evidence: "高" },
+    { title: titles[3]!, time: "09:19–13:08", status: "AWAITING_HUMAN", participation: "Agent 独立推进", stop: "SSH 可达性与认证证据", change: "等待外部前置证据", evidence: "高" },
+    { title: titles[4]!, time: "08:38–14:23", status: "今日运行完成", participation: "共同推进", stop: "本地先按", change: "有界原始来源核验", evidence: "高" }
+  ];
+  for (const signal of expectedSignals) {
+    const group = groups.filter({ has: page.getByText(signal.title, { exact: true }) });
+    await expect(group).toHaveCount(1);
+    await expect(group.locator("summary")).toContainText(signal.time);
+    await expect(group.locator("summary")).toContainText(signal.status);
+    await expect(group.locator("summary")).toContainText(signal.participation);
+    await group.locator("summary").click();
+    const activityTrack = group.locator(".session-activity-track");
+    await expect(activityTrack).toHaveCount(1);
+    await expect(activityTrack.getByText("Agent 独立推进", { exact: true })).toBeVisible();
+    if (signal.participation === "共同推进") await expect(activityTrack.getByText("你参与", { exact: true })).toBeVisible();
+    await expect(group.getByText("当前停点", { exact: true })).toBeVisible();
+    await expect(group).toContainText(signal.stop);
+    await expect(group.locator(".traceink-activity-context span").filter({ hasText: /可能变化|结果/ })).toBeVisible();
+    await expect(group).toContainText(signal.change);
+    await expect(group.getByText("证据", { exact: true })).toBeVisible();
+    await expect(group).toContainText(signal.evidence);
+  }
+
+  await board.getByRole("button", { name: new RegExp(titles[0]!) }).click();
+  const dossier = page.getByRole("dialog", { name: titles[0]! });
+  await expect(dossier).toBeVisible();
+  await expect(dossier).toContainText("不把 AI 的候选解释冒充成你的判断");
+  await expect(dossier.getByRole("region", { name: "可重开证据" })).toBeVisible();
+
+  await dossier.locator(".traceink-evidence-register button").first().click();
+  await expect(page.getByRole("dialog", { name: /会话记录/ })).toBeVisible();
+  const selectedWorklineId = await page.evaluate(() => (window as unknown as {
+    traceinkDossierRequests: Array<{ selection: { worklineId: string } }>;
+  }).traceinkDossierRequests.at(-1)?.selection.worklineId);
+  expect(await page.evaluate(() => (window as unknown as { transcriptRequests: Array<{ traceinkRef?: unknown }> }).transcriptRequests.at(-1)?.traceinkRef)).toEqual({
+    logicalDate: "2026-08-15",
+    artifactId: `traceink-dossier-${selectedWorklineId}`,
+    stage: "dossier",
+    revision: 1,
+    outputHash: "b".repeat(64),
+    evidenceId: "golden-session-1"
+  });
+  await page.getByRole("button", { name: "回到证据" }).click();
+
+  const originalReflection = "我确认 Traceink 原文应该继续作为语义权威，但明天必须在重新构建的客户端里验证五条线和原始证据都能重开。";
+  await dossier.getByPlaceholder("写下你的理解、保留意见或下一步判断…").fill(originalReflection);
+  await dossier.getByRole("button", { name: "保存我的回顾" }).click();
+  await expect(dossier.getByText("已保存版本 1", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { traceinkReflectionInputs: string[] }).traceinkReflectionInputs)).toEqual([originalReflection]);
+
+  await dossier.getByRole("button", { name: "整理我的文字" }).click();
+  const categories = ["形成的判断", "明日候选", "CTX 候选", "后台候选", "只留在今天"];
+  for (const category of categories) await expect(dossier.getByRole("region", { name: category })).toBeVisible();
+  await expect(dossier.getByText(originalReflection, { exact: true }).first()).toBeVisible();
+
+  const judgment = dossier.getByRole("region", { name: "形成的判断" });
+  await judgment.getByRole("button", { name: "接受" }).click();
+  await expect(judgment.getByText("当前选择：接受", { exact: true })).toBeVisible();
+
+  const tomorrow = dossier.getByRole("region", { name: "明日候选" });
+  await tomorrow.getByRole("button", { name: "改写" }).click();
+  const rewrittenTomorrow = "明天先用这五条黄金样本做一次真实客户端回归。";
+  await tomorrow.getByRole("textbox", { name: "改写 T1" }).fill(rewrittenTomorrow);
+  await tomorrow.getByRole("button", { name: "保存改写" }).click();
+  await expect(tomorrow.getByText(`当前选择：改写 · ${rewrittenTomorrow}`, { exact: true })).toBeVisible();
+
+  expect(await page.evaluate(() => (window as unknown as { traceinkProposalDispositions: unknown[] }).traceinkProposalDispositions)).toMatchObject([
+    { proposalId: "J1", input: { action: "accept" } },
+    { proposalId: "T1", input: { action: "rewrite", rewriteText: rewrittenTomorrow } }
+  ]);
+  expect(await page.evaluate(() => (window as unknown as { e2eSideEffectCounts(): unknown }).e2eSideEffectCounts())).toEqual({ wiki: 0, ctx: 0, background: 0 });
 });
 
 test("background preparation never replaces the raw work surface", async ({ page }) => {
