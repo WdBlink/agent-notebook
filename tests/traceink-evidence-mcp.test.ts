@@ -65,6 +65,16 @@ test("the generated stdio MCP exposes only bounded catalog, literal-search, and 
         listed.result?.tools?.map((tool: { name: string }) => tool.name),
         ["list_evidence", "search_evidence", "read_evidence"]
       );
+      for (const tool of listed.result?.tools ?? []) {
+        assert.deepEqual(tool.annotations, {
+          title: tool.annotations.title,
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false
+        });
+        assert.equal(typeof tool.annotations.title, "string");
+      }
 
       const catalog = toolPayload(await client.call("list_evidence", {}));
       assert.equal(catalog.evidence[0].evidenceId, "session:codex:one");

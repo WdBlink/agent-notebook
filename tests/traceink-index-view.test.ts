@@ -74,6 +74,16 @@ function render(projection: TraceinkReviewProjection, status: DailyReviewPrepara
   }));
 }
 
+function renderWithEvidenceHandler(projection: TraceinkReviewProjection): string {
+  return renderToStaticMarkup(createElement(TraceinkIndexView, {
+    projection,
+    preparation: preparation("ready"),
+    onCompile() {},
+    onRefresh() {},
+    onEvidence() {}
+  }));
+}
+
 test("renders the canonical Markdown exactly once and makes every generated resource inert", () => {
   const rawMarkdown = [
     "# 唯一脉络标题",
@@ -110,6 +120,28 @@ test("renders the canonical Markdown exactly once and makes every generated reso
   assert.doesNotMatch(html, /今日收口|开始思考|打开材料/);
   assert.match(html, /gpt-5\.6-sol/);
   assert.match(html, /1 条整理说明/);
+});
+
+test("only exact frozen Session evidence becomes interactive; mutable file paths remain visibly inert", () => {
+  const index = artifact([
+    "# 证据边界",
+    "",
+    "[冻结 Session](file:///Users/wdblink/session.jsonl)",
+    "",
+    "[当前文件](file:///Users/wdblink/current-report.md)"
+  ].join("\n"));
+  index.evidence.push({
+    id: "document-1",
+    kind: "document",
+    path: "/Users/wdblink/current-report.md",
+    locator: "bytes 0-120",
+    contentHash: HASH
+  });
+
+  const html = renderWithEvidenceHandler({ mode: "compiled", activeIndex: index, uncompiledEvidence: [] });
+
+  assert.equal(html.split("traceink-evidence-inline").length - 1, 1);
+  assert.match(html, /data-traceink-inert-link="true"[^>]*>.*当前文件/s);
 });
 
 test("keeps the current document readable while marking later evidence stale", () => {

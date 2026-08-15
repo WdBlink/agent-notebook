@@ -34,6 +34,22 @@ test("Traceink full-day golden never hides the independent release workline", as
   assert.match(markdown, /你想先展开哪条工作线的证据档案：1 还是 2/);
 });
 
+test("today's direct Traceink result remains the five-workline product oracle", async () => {
+  const markdown = await readFile(new URL("today-2026-08-15-index.md", ROOT), "utf8");
+
+  assert.equal((markdown.match(/^## \d+[.、] /gm) ?? []).length, 5);
+  for (const signal of ["**时间：**", "**状态：**", "**参与：**", "**当前停点：**", "**证据完整度：**"]) {
+    assert.ok(markdown.includes(signal), signal);
+  }
+  for (const title of [
+    "Work Continuity",
+    "中金式 AI Loop",
+    "没有 Alpha",
+    "Autoresearch Adapter ↔ Evaluator",
+    "FOLO RSS → LLM-Wiki"
+  ]) assert.match(markdown, new RegExp(title));
+});
+
 test("Traceink golden dossier preserves the evidence-led reading contract", async () => {
   const markdown = await readFile(new URL("dossier.md", ROOT), "utf8");
   const headings = [

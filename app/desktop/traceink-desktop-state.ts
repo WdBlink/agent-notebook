@@ -22,7 +22,11 @@ export function effectiveTraceinkReviewState(
   const projection = projectTraceinkReview(store, logicalDate, sessions);
   return {
     projection,
-    boardMode: legacyBoardMode === "sealed" ? "sealed" : projection.mode
+    boardMode: projection.activeIndex
+      ? projection.mode
+      : legacyBoardMode === "sealed"
+        ? "sealed"
+        : projection.mode
   };
 }
 

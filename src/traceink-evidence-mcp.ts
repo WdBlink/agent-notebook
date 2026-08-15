@@ -189,6 +189,13 @@ const tools = Object.freeze([
   {
     name: "list_evidence",
     description: "List the frozen evidence catalog. This returns metadata only and grants no path-based access.",
+    annotations: {
+      title: "List frozen Traceink evidence",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    },
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -201,6 +208,13 @@ const tools = Object.freeze([
   {
     name: "search_evidence",
     description: "Search for one literal UTF-8 byte sequence inside one admitted evidence item, over a bounded byte window.",
+    annotations: {
+      title: "Search frozen Traceink evidence",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    },
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -217,6 +231,13 @@ const tools = Object.freeze([
   {
     name: "read_evidence",
     description: "Read one bounded byte chunk from one admitted evidence item by evidence ID. No filesystem path is accepted.",
+    annotations: {
+      title: "Read frozen Traceink evidence",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    },
     inputSchema: {
       type: "object",
       additionalProperties: false,

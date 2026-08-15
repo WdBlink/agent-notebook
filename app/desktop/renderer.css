@@ -1415,6 +1415,32 @@ code, kbd { font-family: var(--mono); }
 .traceink-activity-groups summary span { display: grid; gap: 3px; }
 .traceink-activity-groups summary small, .traceink-activity-groups summary em { color: var(--muted); font-size: 12px; font-style: normal; }
 .traceink-activity-groups summary em { padding: 5px 9px; border: 1px solid var(--line); border-radius: 999px; }
+.traceink-activity-context {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0 24px 14px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--line);
+}
+.traceink-activity-context p {
+  min-width: 0;
+  margin: 0;
+  padding: 11px 12px;
+  color: #555a53;
+  background: rgba(255,255,255,.62);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.traceink-activity-context span {
+  display: block;
+  margin-bottom: 4px;
+  color: #9a6139;
+  font: 700 9px/1.2 var(--mono);
+  letter-spacing: .06em;
+}
 .traceink-activity-groups .today-session-lanes { border-top: 1px solid var(--line); }
 .traceink-activity-groups .traceink-grouped-lane { min-height: 92px; background: rgba(255,255,255,.46); }
 .traceink-activity-groups .traceink-grouped-lane .session-lane-copy h2 { font-size: 15px; }
@@ -1430,8 +1456,37 @@ code, kbd { font-family: var(--mono); }
 .traceink-dossier-reader > header { position: sticky; top: -28px; z-index: 2; display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; padding: 28px 0 20px; background: linear-gradient(#f7f5ee 82%, transparent); }
 .traceink-dossier-reader > header h2 { margin: 6px 0 0; font-size: clamp(24px, 3vw, 36px); }
 .traceink-dossier-reader > header button { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 8px 14px; }
+.traceink-dossier-error { max-width: 700px; display: grid; gap: 4px; margin: 18px auto 0; padding: 12px 14px; border: 1px solid #d9ae9a; border-radius: 9px; color: #7d3e2b; background: #fff2ec; font-size: 12px; }
+.traceink-dossier-error strong { font-size: 11px; }
 .traceink-dossier-loading { margin-top: 20vh; padding: 30px; border-block: 1px solid var(--line); text-align: center; color: var(--muted); }
 .traceink-dossier-document { max-width: 700px; margin: 0 auto; }
+.traceink-evidence-inline {
+  display: inline;
+  margin: 0 1px;
+  padding: 1px 5px;
+  border: 1px solid #bdad92;
+  border-radius: 999px;
+  color: #754d31;
+  background: #f7efe1;
+  font: 700 .78em var(--mono);
+  cursor: pointer;
+}
+.traceink-evidence-register { max-width: 700px; margin: 30px auto 0; padding: 18px 0; border-block: 1px solid var(--line); }
+.traceink-evidence-register > header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 2px 18px; }
+.traceink-evidence-register > header .traceink-margin-label { grid-column: 1 / -1; margin-bottom: 4px; }
+.traceink-evidence-register h3 { margin: 0; font-size: 17px; }
+.traceink-evidence-register > header p { margin: 0; color: var(--muted); font-size: 10px; }
+.traceink-evidence-register > div { display: grid; gap: 6px; margin-top: 13px; }
+.traceink-evidence-register > div > button,
+.traceink-evidence-path-reference { min-width: 0; display: grid; grid-template-columns: 104px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 11px; border: 1px solid #d0cbbd; border-radius: 8px; background: rgba(255,255,255,.58); color: inherit; text-align: left; }
+.traceink-evidence-register > div > button { cursor: pointer; }
+.traceink-evidence-path-reference { opacity: .72; }
+.traceink-evidence-register > div > button > span,
+.traceink-evidence-path-reference > span { color: #995f39; font: 700 8px var(--mono); letter-spacing: .08em; }
+.traceink-evidence-register > div > button > strong,
+.traceink-evidence-path-reference > strong { min-width: 0; overflow: hidden; font: 600 10px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.traceink-evidence-register > div > button > small,
+.traceink-evidence-path-reference > small { color: var(--muted); font: 500 8px var(--mono); }
 .traceink-reflection-editor { max-width: 700px; margin: 48px auto 0; padding-top: 30px; border-top: 2px solid #272720; }
 .traceink-reflection-editor h3 { margin: 7px 0; font-size: 24px; }
 .traceink-reflection-editor p { color: var(--muted); }
@@ -1440,10 +1495,49 @@ code, kbd { font-family: var(--mono); }
 .traceink-reflection-actions small { color: var(--muted); }
 .traceink-reflection-actions button { padding: 10px 16px; border: 0; border-radius: 9px; background: #24241f; color: white; font-weight: 700; }
 .traceink-reflection-actions button:disabled { opacity: .45; }
+.traceink-proposal-workspace { max-width: 700px; margin: 42px auto 0; padding-top: 28px; border-top: 1px solid #aaa596; }
+.traceink-proposal-workspace.is-empty { display: flex; justify-content: space-between; gap: 24px; align-items: end; }
+.traceink-proposal-workspace h3 { margin: 6px 0 8px; font-size: 23px; }
+.traceink-proposal-workspace > header { display: flex; justify-content: space-between; gap: 28px; align-items: end; }
+.traceink-proposal-workspace > header p,
+.traceink-proposal-workspace.is-empty p { max-width: 430px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.traceink-proposal-workspace.is-empty > button,
+.traceink-proposal-actions button,
+.traceink-proposal-rewrite button { min-height: 34px; padding: 0 11px; border: 1px solid #aaa596; border-radius: 8px; background: #fffdf7; color: #3d403b; font-size: 11px; font-weight: 650; cursor: pointer; }
+.traceink-proposal-workspace.is-empty > button { flex: 0 0 auto; min-height: 40px; padding-inline: 15px; border-color: #272720; background: #272720; color: white; }
+.traceink-proposal-source { margin-top: 22px; border-block: 1px solid var(--line); }
+.traceink-proposal-source summary { padding: 11px 0; color: var(--muted); font-size: 11px; cursor: pointer; }
+.traceink-proposal-source .traceink-index-document { padding: 24px 0 36px; border: 0; background: transparent; font-size: 12px; }
+.traceink-proposal-groups { display: grid; gap: 30px; margin-top: 28px; }
+.traceink-proposal-groups > section > h4 { margin: 0 0 9px; color: #8c603f; font: 700 10px/1.2 var(--mono); letter-spacing: .08em; }
+.traceink-proposal-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: start; padding: 16px 0; border-top: 1px solid var(--line); }
+.traceink-proposal-copy > span { color: #9b6843; font: 700 9px var(--mono); }
+.traceink-proposal-copy > p { margin: 5px 0 8px; color: #292b27; font-size: 13px; line-height: 1.6; }
+.traceink-proposal-copy blockquote { margin: 0 0 7px; padding-left: 10px; border-left: 2px solid #d0c4ae; color: #77766f; font-size: 11px; line-height: 1.55; }
+.traceink-proposal-copy small { color: #777d74; font: 600 9px/1.4 var(--mono); }
+.traceink-proposal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.traceink-proposal-actions button:first-child { border-color: #5f7465; color: #435648; background: #edf2ed; }
+.traceink-proposal-rewrite { display: grid; gap: 8px; }
+.traceink-proposal-rewrite textarea { box-sizing: border-box; width: min(280px, 38vw); min-height: 92px; padding: 10px; resize: vertical; border: 1px solid #aaa596; border-radius: 8px; background: white; font: inherit; }
+.traceink-proposal-rewrite > div { display: flex; justify-content: flex-end; gap: 6px; }
+.traceink-proposal-actions button:disabled,
+.traceink-proposal-rewrite button:disabled,
+.traceink-proposal-workspace.is-empty > button:disabled { opacity: .45; cursor: default; }
 @media (max-width: 720px) {
   .traceink-activity-map { margin-inline: 10px; }
   .traceink-activity-map > header, .traceink-activity-groups summary { align-items: flex-start; flex-direction: column; }
   .traceink-activity-groups summary { gap: 8px; }
+  .traceink-activity-context { grid-template-columns: 1fr; margin-inline: 12px; }
   .traceink-activity-groups .traceink-grouped-lane .session-lane-copy small { max-width: 100%; }
   .traceink-dossier-reader { width: 100vw; padding-inline: 20px; }
+  .traceink-evidence-register > header { grid-template-columns: 1fr; }
+  .traceink-evidence-register > div > button,
+  .traceink-evidence-path-reference { grid-template-columns: 94px minmax(0, 1fr); }
+  .traceink-evidence-register > div > button > small,
+  .traceink-evidence-path-reference > small { grid-column: 2; }
+  .traceink-proposal-workspace.is-empty,
+  .traceink-proposal-workspace > header,
+  .traceink-proposal-item { align-items: stretch; grid-template-columns: 1fr; flex-direction: column; }
+  .traceink-proposal-actions { justify-content: flex-start; }
+  .traceink-proposal-rewrite textarea { width: 100%; }
 }

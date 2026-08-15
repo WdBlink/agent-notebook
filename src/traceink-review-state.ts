@@ -20,6 +20,7 @@ import {
   type UserReflectionAssetV1
 } from "./traceink-review-assets";
 import { traceinkWorklineSelections } from "./traceink-index-navigation";
+import { traceinkIndexPresentation, type TraceinkWorklinePresentationV1 } from "./traceink-index-presentation";
 import type { TodayBoardEvidenceRevision } from "./today-board";
 import type { AgentWorkSession } from "./types";
 
@@ -36,6 +37,7 @@ export interface TraceinkReviewProjection {
 
 export interface TraceinkWorklineReviewState {
   selection: TraceinkWorklineSelectionV1;
+  presentation?: TraceinkWorklinePresentationV1;
   dossier?: TraceinkDossierArtifactV1;
   reflection?: UserReflectionAssetV1;
   proposals?: TraceinkProposalsArtifactV1;
@@ -104,6 +106,9 @@ export function projectTraceinkReview(
   }
 
   const stored = storedSessionManifest(resolved.artifact);
+  const presentationByWorklineId = new Map(
+    traceinkIndexPresentation(resolved.artifact).map((item) => [item.selection.worklineId, item])
+  );
   const uncompiledEvidence = current.all.filter((entry) => {
     if (current.incompleteIdentities.has(entry.identity) || current.conflictingIdentities.has(entry.identity)) {
       return true;
@@ -124,6 +129,7 @@ export function projectTraceinkReview(
     activeIndexReference: resolved.reference,
     uncompiledEvidence,
     worklines: traceinkWorklineSelections(resolved.artifact).map((selection) => {
+      const presentation = presentationByWorklineId.get(selection.worklineId);
       const dossier = latestTraceinkDossier(store, resolved.reference, selection.worklineId);
       const reflection = dossier ? latestTraceinkReflection(store, dossier) : undefined;
       const proposals = reflection ? latestTraceinkProposals(store, reflection) : undefined;
@@ -143,6 +149,7 @@ export function projectTraceinkReview(
       }) ?? [];
       return {
         selection,
+        ...(presentation ? { presentation } : {}),
         ...(dossier ? { dossier } : {}),
         ...(reflection ? { reflection } : {}),
         ...(proposals ? { proposals } : {}),

@@ -126,15 +126,17 @@ test("canonical index run embeds the complete Skill, returns exact Markdown, and
   assert.deepEqual(featureRequests[0]?.args, ["features", "list"]);
   assert.equal(featureRequests[0]?.stdoutMode, "buffered");
   assert.equal(requests[0]?.command, settings.codexCliPath.replace("~", os.homedir()));
-  assert.deepEqual(requests[0]?.args.slice(0, 4), [
+  assert.deepEqual(requests[0]?.args.slice(0, 6), [
     "exec",
     "--ignore-user-config",
     "--ignore-rules",
-    "--strict-config"
+    "--strict-config",
+    "-c",
+    'approval_policy="never"'
   ]);
   assert.equal(hasDisabledFeature(requests[0]!.args, "shell_tool"), true);
   assert.equal(hasDisabledFeature(requests[0]!.args, "unified_exec"), true);
-  assert.equal(hasDisabledFeature(requests[0]!.args, "code_mode_host"), true);
+  assert.equal(hasDisabledFeature(requests[0]!.args, "code_mode_host"), false);
   assert.equal(hasDisabledFeature(requests[0]!.args, "workspace_dependencies"), true);
   assert.equal(hasDisabledFeature(requests[0]!.args, "apps"), true);
   assert.equal(hasDisabledFeature(requests[0]!.args, "plugins"), true);

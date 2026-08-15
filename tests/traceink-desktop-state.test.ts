@@ -18,7 +18,7 @@ import type { AgentWorkSession } from "../src/types";
 
 const hash = (value: string): string => createHash("sha256").update(value, "utf8").digest("hex");
 
-test("canonical projection owns effective mode unless the legacy page is sealed", () => {
+test("a valid canonical index owns effective mode even when a legacy page was sealed", () => {
   const sessions = [session()];
   const store = appendTraceinkIndexRevision(createEmptyTraceinkAssetStore(), indexDraft("2026-08-15", sessions));
 
@@ -29,7 +29,13 @@ test("canonical projection owns effective mode unless the legacy page is sealed"
 
   const sealed = effectiveTraceinkReviewState(store, "2026-08-15", sessions, "sealed");
   assert.equal(sealed.projection.mode, "compiled");
-  assert.equal(sealed.boardMode, "sealed");
+  assert.equal(sealed.boardMode, "compiled");
+});
+
+test("legacy seal remains a fallback only when no canonical index exists", () => {
+  const state = effectiveTraceinkReviewState(createEmptyTraceinkAssetStore(), "2026-08-15", [session()], "sealed");
+  assert.equal(state.projection.activeIndex, undefined);
+  assert.equal(state.boardMode, "sealed");
 });
 
 test("canonical activity dates include active, historical artifact, and reflection dates", () => {

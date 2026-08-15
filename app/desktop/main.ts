@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCliSessionSummarizer } from "../../src/agent-summary";
 import { compileTraceinkDossier, compileTraceinkIndex, compileTraceinkProposals } from "../../src/traceink-review";
-import type { TraceinkArtifactReferenceV1, TraceinkIndexArtifactV1, TraceinkWorklineSelectionV1, UserReflectionAssetReferenceV1 } from "../../src/traceink-review-assets";
+import type { TraceinkArtifactReferenceV1, TraceinkArtifactV1, TraceinkIndexArtifactV1, TraceinkWorklineSelectionV1, UserReflectionAssetReferenceV1 } from "../../src/traceink-review-assets";
 import { loadAgentWorkSnapshot, mergeSessionSummaries, type RuntimeFileStat, type RuntimeFileSystem } from "../../src/agent-sessions";
 import { DEFAULT_SESSION_SCAN_ROOTS, MAX_WORK_SESSION_SNAPSHOT_SESSIONS } from "../../src/constants";
 import { createEmptyData, localDateString, normalizeData, setWorkSessionSnapshot } from "../../src/state";
@@ -55,7 +55,9 @@ import {
   findTraceinkArtifact,
   findTraceinkReflection,
   latestTraceinkDossier,
-  latestTraceinkProposals
+  latestTraceinkProposals,
+  traceinkDossierArtifactId,
+  type TraceinkAssetStoreDocumentV1
 } from "./traceink-asset-store";
 import { runTraceinkReviewPreparation } from "./traceink-review-preparation";
 import {
@@ -297,7 +299,9 @@ ipcMain.handle("desktop:save-traceink-reflection", async (_event, date: string, 
   const repository = requireTraceinkAssetRepository();
   await repository.mutate((document) => {
     const artifact = document.artifacts.find((item) => item.id === dossier?.artifactId && item.stage === "dossier" && item.revision === dossier?.revision && item.outputHash === dossier?.outputHash);
-    if (!artifact || artifact.logicalDate !== logicalDate) throw new Error("证据档案已经变化，请重新打开后再保存。");
+    if (!artifact || artifact.logicalDate !== logicalDate || !belongsToActiveTraceinkIndex(document, logicalDate, artifact)) {
+      throw new Error("证据档案已经变化，请重新打开后再保存。");
+    }
     return appendTraceinkReflectionRevision(document, dossier, String(text ?? ""), new Date().toISOString());
   });
   return buildState();
@@ -313,7 +317,7 @@ ipcMain.handle("desktop:prepare-traceink-proposals", async (_event, date: string
   }
   if (latestTraceinkProposals(startingDocument, reflection)) return buildState();
   const dossier = findTraceinkArtifact(startingDocument, reflection.dossier);
-  if (!dossier || dossier.stage !== "dossier" || !dossier.worklineId) {
+  if (!dossier || dossier.stage !== "dossier" || !dossier.worklineId || !belongsToActiveTraceinkIndex(startingDocument, logicalDate, dossier)) {
     throw new Error("回顾引用的证据档案已经不可用。");
   }
   const current = await ensureLoaded();
@@ -326,12 +330,19 @@ ipcMain.handle("desktop:prepare-traceink-proposals", async (_event, date: string
     runner: desktopCliRunner,
     timeoutMs: 30 * 60 * 1_000
   });
-  await repository.mutate((document) => appendTraceinkProposalsRevision(
-    document,
-    draft,
-    reflectionReference,
-    null
-  ));
+  await repository.mutate((document) => {
+    const currentReflection = findTraceinkReflection(document, reflectionReference);
+    const currentDossier = currentReflection ? findTraceinkArtifact(document, currentReflection.dossier) : undefined;
+    if (!currentDossier || !belongsToActiveTraceinkIndex(document, logicalDate, currentDossier)) {
+      throw new Error("工作脉络已经更新，请从当前版本重新整理提案。");
+    }
+    return appendTraceinkProposalsRevision(
+      document,
+      draft,
+      reflectionReference,
+      null
+    );
+  });
   return buildState();
 });
 
@@ -349,6 +360,11 @@ ipcMain.handle("desktop:dispose-traceink-proposal", async (
     if (!artifact || artifact.stage !== "proposals" || artifact.logicalDate !== logicalDate) {
       throw new Error("回顾提案已经变化，请重新打开后再处理。");
     }
+    const reflection = artifact.sourceReflection ? findTraceinkReflection(document, artifact.sourceReflection) : undefined;
+    const dossier = reflection ? findTraceinkArtifact(document, reflection.dossier) : undefined;
+    if (!dossier || !belongsToActiveTraceinkIndex(document, logicalDate, dossier)) {
+      throw new Error("工作脉络已经更新，请从当前版本重新处理提案。");
+    }
     return appendTraceinkProposalDisposition(document, proposals, String(proposalId ?? ""), {
       action: input?.action,
       ...(input?.rewriteText !== undefined ? { rewriteText: input.rewriteText } : {}),
@@ -357,6 +373,16 @@ ipcMain.handle("desktop:dispose-traceink-proposal", async (
   });
   return buildState();
 });
+
+function belongsToActiveTraceinkIndex(
+  document: TraceinkAssetStoreDocumentV1,
+  logicalDate: string,
+  artifact: TraceinkArtifactV1
+): boolean {
+  if (artifact.stage !== "dossier" || !artifact.worklineId || artifact.logicalDate !== logicalDate) return false;
+  const active = activeIndexReferenceForDate(document, logicalDate);
+  return Boolean(active && artifact.id === traceinkDossierArtifactId(active, artifact.worklineId));
+}
 
 ipcMain.handle("desktop:compose-daily-page", async (_event, date: string) => {
   return startDailyReviewForDate(date, undefined, "manual");
@@ -428,7 +454,14 @@ async function startDailyReviewForDate(
   const activeRun = dailyReviewCoordinator.activeRun;
   if (activeRun && activeRun.logicalDate !== logicalDate) throw new Error("另一天的工作脉络正在准备，请稍后再试。");
   const existingBoard = notebookView(logicalDate).todayBoard;
-  if (existingBoard.mode === "sealed") throw new Error("这一天已经封页，不能重新整理。");
+  const current = await ensureLoaded();
+  const effective = effectiveTraceinkReviewState(
+    requireTraceinkAssetRepository().snapshot(),
+    logicalDate,
+    current.workSessionSnapshot.sessions,
+    existingBoard.mode
+  );
+  if (effective.boardMode === "sealed") throw new Error("这一天已经封页，不能重新整理。");
   if (!activeRun) traceinkReviewErrors.delete(logicalDate);
   dailyReviewCoordinator.start({
     logicalDate,
@@ -455,7 +488,6 @@ async function performDailyReviewForDate(
     const capturedSessions = structuredClone(snapshot.sessions);
     const scope = traceinkScopeFromSnapshot(snapshot, logicalDate);
     const legacyBoard = notebookStateForDate(notebook, logicalDate, capturedSessions).todayBoard;
-    if (legacyBoard.mode === "sealed") throw new Error("这一天已经封页，不能重新整理。");
     const repository = requireTraceinkAssetRepository();
     const canonical = effectiveTraceinkReviewState(
       repository.snapshot(),
@@ -463,6 +495,7 @@ async function performDailyReviewForDate(
       capturedSessions,
       legacyBoard.mode
     );
+    if (canonical.boardMode === "sealed") throw new Error("这一天已经封页，不能重新整理。");
     await runTraceinkReviewPreparation({
       logicalDate,
       mode: canonical.projection.mode,
