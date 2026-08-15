@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCliSessionSummarizer } from "../../src/agent-summary";
 import { compileTraceinkDossier, compileTraceinkIndex, compileTraceinkProposals } from "../../src/traceink-review";
-import type { TraceinkArtifactReferenceV1, TraceinkArtifactV1, TraceinkIndexArtifactV1, TraceinkWorklineSelectionV1, UserReflectionAssetReferenceV1 } from "../../src/traceink-review-assets";
+import { traceinkArtifactReference, userReflectionAssetReference, type TraceinkArtifactReferenceV1, type TraceinkIndexArtifactV1, type TraceinkWorklineSelectionV1, type UserReflectionAssetReferenceV1 } from "../../src/traceink-review-assets";
 import { loadAgentWorkSnapshot, mergeSessionSummaries, type RuntimeFileStat, type RuntimeFileSystem } from "../../src/agent-sessions";
 import { DEFAULT_SESSION_SCAN_ROOTS, MAX_WORK_SESSION_SNAPSHOT_SESSIONS } from "../../src/constants";
 import { createEmptyData, localDateString, normalizeData, setWorkSessionSnapshot } from "../../src/state";
@@ -52,12 +52,12 @@ import {
   appendTraceinkProposalDisposition,
   appendTraceinkProposalsRevision,
   appendTraceinkReflectionRevision,
+  currentTraceinkWorklineLineage,
   findTraceinkArtifact,
   findTraceinkReflection,
   latestTraceinkDossier,
-  latestTraceinkProposals,
-  traceinkDossierArtifactId,
-  type TraceinkAssetStoreDocumentV1
+  sameTraceinkArtifactReference,
+  sameTraceinkReflectionReference
 } from "./traceink-asset-store";
 import { runTraceinkReviewPreparation } from "./traceink-review-preparation";
 import {
@@ -299,7 +299,13 @@ ipcMain.handle("desktop:save-traceink-reflection", async (_event, date: string, 
   const repository = requireTraceinkAssetRepository();
   await repository.mutate((document) => {
     const artifact = document.artifacts.find((item) => item.id === dossier?.artifactId && item.stage === "dossier" && item.revision === dossier?.revision && item.outputHash === dossier?.outputHash);
-    if (!artifact || artifact.logicalDate !== logicalDate || !belongsToActiveTraceinkIndex(document, logicalDate, artifact)) {
+    const lineage = artifact?.stage === "dossier" && artifact.worklineId
+      ? currentTraceinkWorklineLineage(document, logicalDate, artifact.worklineId)
+      : undefined;
+    if (!artifact || artifact.logicalDate !== logicalDate || !lineage?.dossier || !sameTraceinkArtifactReference(
+      traceinkArtifactReference(lineage.dossier),
+      dossier
+    )) {
       throw new Error("证据档案已经变化，请重新打开后再保存。");
     }
     return appendTraceinkReflectionRevision(document, dossier, String(text ?? ""), new Date().toISOString());
@@ -315,11 +321,15 @@ ipcMain.handle("desktop:prepare-traceink-proposals", async (_event, date: string
   if (!reflection || reflection.logicalDate !== logicalDate) {
     throw new Error("保存的回顾已经变化，请重新打开后再整理提案。");
   }
-  if (latestTraceinkProposals(startingDocument, reflection)) return buildState();
-  const dossier = findTraceinkArtifact(startingDocument, reflection.dossier);
-  if (!dossier || dossier.stage !== "dossier" || !dossier.worklineId || !belongsToActiveTraceinkIndex(startingDocument, logicalDate, dossier)) {
+  const lineage = currentTraceinkWorklineLineage(startingDocument, logicalDate, reflection.worklineId);
+  if (!lineage?.dossier || !lineage.reflection || !sameTraceinkReflectionReference(
+    userReflectionAssetReference(lineage.reflection),
+    reflectionReference
+  )) {
     throw new Error("回顾引用的证据档案已经不可用。");
   }
+  if (lineage.proposals) return buildState();
+  const dossier = lineage.dossier;
   const current = await ensureLoaded();
   const { sourceReflection: _sourceReflection, ...dossierFields } = dossier;
   const draft = await compileTraceinkProposals(current.settings, {
@@ -332,8 +342,13 @@ ipcMain.handle("desktop:prepare-traceink-proposals", async (_event, date: string
   });
   await repository.mutate((document) => {
     const currentReflection = findTraceinkReflection(document, reflectionReference);
-    const currentDossier = currentReflection ? findTraceinkArtifact(document, currentReflection.dossier) : undefined;
-    if (!currentDossier || !belongsToActiveTraceinkIndex(document, logicalDate, currentDossier)) {
+    const currentLineage = currentReflection
+      ? currentTraceinkWorklineLineage(document, logicalDate, currentReflection.worklineId)
+      : undefined;
+    if (!currentLineage?.dossier || !currentLineage.reflection || !sameTraceinkReflectionReference(
+      userReflectionAssetReference(currentLineage.reflection),
+      reflectionReference
+    )) {
       throw new Error("工作脉络已经更新，请从当前版本重新整理提案。");
     }
     return appendTraceinkProposalsRevision(
@@ -360,9 +375,13 @@ ipcMain.handle("desktop:dispose-traceink-proposal", async (
     if (!artifact || artifact.stage !== "proposals" || artifact.logicalDate !== logicalDate) {
       throw new Error("回顾提案已经变化，请重新打开后再处理。");
     }
-    const reflection = artifact.sourceReflection ? findTraceinkReflection(document, artifact.sourceReflection) : undefined;
-    const dossier = reflection ? findTraceinkArtifact(document, reflection.dossier) : undefined;
-    if (!dossier || !belongsToActiveTraceinkIndex(document, logicalDate, dossier)) {
+    const lineage = artifact.worklineId
+      ? currentTraceinkWorklineLineage(document, logicalDate, artifact.worklineId)
+      : undefined;
+    if (!lineage?.proposals || !sameTraceinkArtifactReference(
+      traceinkArtifactReference(lineage.proposals),
+      proposals
+    )) {
       throw new Error("工作脉络已经更新，请从当前版本重新处理提案。");
     }
     return appendTraceinkProposalDisposition(document, proposals, String(proposalId ?? ""), {
@@ -373,16 +392,6 @@ ipcMain.handle("desktop:dispose-traceink-proposal", async (
   });
   return buildState();
 });
-
-function belongsToActiveTraceinkIndex(
-  document: TraceinkAssetStoreDocumentV1,
-  logicalDate: string,
-  artifact: TraceinkArtifactV1
-): boolean {
-  if (artifact.stage !== "dossier" || !artifact.worklineId || artifact.logicalDate !== logicalDate) return false;
-  const active = activeIndexReferenceForDate(document, logicalDate);
-  return Boolean(active && artifact.id === traceinkDossierArtifactId(active, artifact.worklineId));
-}
 
 ipcMain.handle("desktop:compose-daily-page", async (_event, date: string) => {
   return startDailyReviewForDate(date, undefined, "manual");

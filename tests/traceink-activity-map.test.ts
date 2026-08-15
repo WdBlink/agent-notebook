@@ -68,6 +68,10 @@ test("today's proven Traceink index becomes five visual activity groups with the
   assert.match(projected.groups[4]?.changeSignal ?? "", /有界原始来源核验/);
   assert.equal(projected.groups[4]?.evidenceReadiness, "高。");
   assert.deepEqual(projected.groups.map((group) => group.sessions.length), [1, 1, 1, 1, 1]);
+  assert.deepEqual(
+    projected.groups.map((group) => [...group.evidenceBySessionIdentity.values()].map((item) => item.id)),
+    [["e-work-continuity"], ["e-loop"], ["e-campaign"], ["e-adapter"], ["e-folo"]]
+  );
   assert.deepEqual(projected.ungrouped, []);
 });
 

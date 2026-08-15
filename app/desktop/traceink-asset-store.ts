@@ -36,6 +36,18 @@ export interface TraceinkAssetStoreDocumentV1 {
 
 export type TraceinkAssetStoreDocument = TraceinkAssetStoreDocumentV1;
 
+/**
+ * The only Today lineage that may authorize an interaction for one workline.
+ * Historical revisions remain immutable in the store, but they are not part of
+ * this current chain and therefore cannot authorize writes or evidence reads.
+ */
+export interface CurrentTraceinkWorklineLineageV1 {
+  activeIndex: TraceinkIndexArtifactReferenceV1;
+  dossier?: TraceinkDossierArtifactV1;
+  reflection?: UserReflectionAssetV1;
+  proposals?: TraceinkProposalsArtifactV1;
+}
+
 export function createEmptyTraceinkAssetStore(): TraceinkAssetStoreDocumentV1 {
   return { schemaVersion: 1, artifacts: [], reflections: [], proposalDispositions: [], activeIndexByDate: {} };
 }
@@ -236,6 +248,13 @@ export function appendTraceinkReflectionRevision(
   if (!dossier || dossier.stage !== "dossier" || !dossier.worklineId || typeof text !== "string" || !text.trim()) {
     throw new Error("Traceink reflection must belong to an exact dossier and contain the user's text.");
   }
+  const lineage = currentTraceinkWorklineLineage(current, dossier.logicalDate, dossier.worklineId);
+  if (!lineage?.dossier || !sameArtifactReference(
+    traceinkArtifactReference(lineage.dossier),
+    dossierReference
+  )) {
+    throw new Error("Traceink dossier changed before the reflection could be saved.");
+  }
   if (!Number.isFinite(Date.parse(savedAt))) throw new Error("Traceink reflection save time is invalid.");
   const id = `traceink-reflection-${sha256TraceinkText(`${dossier.id}\0${dossier.revision}\0${dossier.outputHash}`).slice(0, 24)}`;
   const previous = current.reflections.filter((reflection) => reflection.id === id);
@@ -269,6 +288,27 @@ export function latestTraceinkReflection(
     .sort((left, right) => right.revision - left.revision)[0];
 }
 
+export function currentTraceinkWorklineLineage(
+  document: TraceinkAssetStoreDocumentV1,
+  logicalDate: string,
+  worklineId: string
+): CurrentTraceinkWorklineLineageV1 | undefined {
+  if (!isTraceinkLogicalDate(logicalDate) || typeof worklineId !== "string" || !worklineId.trim()) return undefined;
+  const activeIndex = activeIndexReferenceForDate(document, logicalDate);
+  if (!activeIndex) return undefined;
+  const dossier = latestTraceinkDossier(document, activeIndex, worklineId);
+  if (!dossier) return { activeIndex };
+  const reflection = latestTraceinkReflection(document, dossier);
+  if (!reflection) return { activeIndex, dossier };
+  const proposals = latestTraceinkProposals(document, reflection);
+  return {
+    activeIndex,
+    dossier,
+    reflection,
+    ...(proposals ? { proposals } : {})
+  };
+}
+
 export function appendTraceinkProposalsRevision(
   document: TraceinkAssetStoreDocumentV1,
   draft: TraceinkProposalsArtifactDraftV1,
@@ -278,21 +318,14 @@ export function appendTraceinkProposalsRevision(
   const current = canonicalStore(document);
   const reflection = reflectionForReference(current, expectedReflection);
   if (!reflection) throw new Error("Traceink saved reflection changed before proposals could be appended.");
-  const dossier = findTraceinkArtifact(current, reflection.dossier);
-  let latestReflection: UserReflectionAssetV1 | undefined;
-  if (dossier?.stage === "dossier" && dossier.worklineId) {
-    const { sourceReflection: _sourceReflection, ...dossierFields } = dossier;
-    latestReflection = latestTraceinkReflection(current, {
-      ...dossierFields,
-      stage: "dossier",
-      worklineId: dossier.worklineId
-    });
-  }
-  if (!latestReflection || !sameReflectionReference(
-    userReflectionAssetReference(latestReflection),
-    expectedReflection
-  )) throw new Error("Traceink saved reflection changed before proposals could be appended.");
-  const activeProposals = latestTraceinkProposals(current, reflection);
+  const lineage = currentTraceinkWorklineLineage(current, reflection.logicalDate, reflection.worklineId);
+  if (!lineage?.dossier || !lineage.reflection ||
+    !sameArtifactReference(traceinkArtifactReference(lineage.dossier), reflection.dossier) ||
+    !sameReflectionReference(
+      userReflectionAssetReference(lineage.reflection),
+      expectedReflection
+    )) throw new Error("Traceink saved reflection changed before proposals could be appended.");
+  const activeProposals = lineage.proposals;
   if (
     expectedProposals !== undefined &&
     !sameOptionalArtifactReference(
@@ -367,6 +400,13 @@ export function appendTraceinkProposalDisposition(
   const current = canonicalStore(document);
   const artifact = asProposalsArtifact(findTraceinkArtifact(current, proposalReference));
   if (!artifact) throw new Error("Traceink proposal artifact changed before disposition could be recorded.");
+  const lineage = currentTraceinkWorklineLineage(current, artifact.logicalDate, artifact.worklineId);
+  if (!lineage?.proposals || !sameArtifactReference(
+    traceinkArtifactReference(lineage.proposals),
+    proposalReference
+  )) {
+    throw new Error("Traceink proposal artifact changed before disposition could be recorded.");
+  }
   const proposal = artifact.navigation.find((item) => item.id === proposalId);
   if (!proposal) throw new Error("Traceink proposal item does not belong to this proposal artifact.");
   if (!Number.isFinite(Date.parse(input.decidedAt))) throw new Error("Traceink proposal disposition time is invalid.");
@@ -728,6 +768,27 @@ function sameReflectionReference(
   right: ReturnType<typeof userReflectionAssetReference>
 ): boolean {
   return reflectionReferenceKey(left) === reflectionReferenceKey(right);
+}
+
+export function sameTraceinkArtifactReference(
+  left: TraceinkArtifactReferenceV1,
+  right: TraceinkArtifactReferenceV1
+): boolean {
+  return sameArtifactReference(left, right);
+}
+
+export function sameTraceinkReflectionReference(
+  left: ReturnType<typeof userReflectionAssetReference>,
+  right: ReturnType<typeof userReflectionAssetReference>
+): boolean {
+  return sameReflectionReference(left, right);
+}
+
+function sameArtifactReference(
+  left: TraceinkArtifactReferenceV1,
+  right: TraceinkArtifactReferenceV1
+): boolean {
+  return referenceKey(left) === referenceKey(right);
 }
 
 function traceinkProposalDispositionId(

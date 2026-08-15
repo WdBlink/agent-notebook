@@ -1180,6 +1180,37 @@ test("today's proven Traceink result stays complete through activity, evidence, 
     await expect(group).toContainText(signal.evidence);
   }
 
+  const firstActivityGroup = groups.filter({ has: page.getByText(titles[0]!, { exact: true }) });
+  await firstActivityGroup.getByRole("button", { name: "打开 Traceink 核心界面 的会话记录" }).click();
+  await expect(page.getByRole("dialog", { name: /Traceink 核心界面 会话记录/ })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as {
+    transcriptRequests: Array<{ path: string; packageRef?: unknown; traceinkRef?: unknown }>;
+  }).transcriptRequests.at(-1))).toMatchObject({
+    path: "/tmp/traceink-golden-work-continuity.jsonl",
+    traceinkRef: {
+      logicalDate: "2026-08-15",
+      artifactId: "traceink-index-2026-08-15",
+      stage: "index",
+      revision: 1,
+      outputHash: "a".repeat(64),
+      evidenceId: "golden-session-1"
+    }
+  });
+  expect(await page.evaluate(() => (window as unknown as {
+    transcriptRequests: Array<{ packageRef?: unknown }>;
+  }).transcriptRequests.at(-1)?.packageRef)).toBeUndefined();
+  await page.getByRole("button", { name: "回到证据" }).click();
+
+  await ungrouped.getByRole("button", { name: "打开 未在索引中逐项列出的 Traceink 子会话 的会话记录" }).click();
+  expect(await page.evaluate(() => (window as unknown as {
+    transcriptRequests: Array<{ path: string; traceinkRef?: unknown }>;
+  }).transcriptRequests.at(-1))).toEqual({
+    id: "01a00303-child-not-explicitly-indexed",
+    platform: "codex",
+    path: "/tmp/traceink-golden-unresolved-child.jsonl"
+  });
+  await page.getByRole("button", { name: "回到证据" }).click();
+
   await board.getByRole("button", { name: new RegExp(titles[0]!) }).click();
   const dossier = page.getByRole("dialog", { name: titles[0]! });
   await expect(dossier).toBeVisible();

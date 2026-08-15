@@ -14,7 +14,7 @@ import type { ReactElement } from "react";
 import type { DailySessionActivity, SessionActivityLane } from "../../src/session-activity";
 import type { DailyReviewPreparationState } from "../../src/daily-review-schedule";
 import type { AgentPlatform, AgentWorkSession, SessionProvider } from "../../src/types";
-import type { TraceinkEvidenceRefV1 } from "../../src/traceink-review-assets";
+import type { TraceinkEvidenceRefV1, TraceinkIndexArtifactV1 } from "../../src/traceink-review-assets";
 import type { TodayBoardPackageGeneration } from "../../src/today-board";
 import type { DailyReviewEvidence, DailyReviewPackage, DailyWorklineReview } from "../../src/workline-review";
 import type { DesktopNotebookState, DesktopState, SessionTranscriptRequest } from "./api";
@@ -212,9 +212,8 @@ export function TodayBoard({
         {hasCanonicalIndex && !legacySealed ? (
           <>
             <CanonicalActivityMap
-              rawMarkdown={traceinkReview.activeIndex!.rawMarkdown}
+              activeIndex={traceinkReview.activeIndex!}
               worklines={traceinkReview.worklines ?? []}
-              evidence={traceinkReview.activeIndex!.evidence}
               sessions={sessions}
               laneByIdentity={laneByIdentity}
               onTranscript={onTranscript}
@@ -281,6 +280,7 @@ interface CanonicalActivityGroup {
   title: string;
   participation: string[];
   sessions: AgentWorkSession[];
+  evidenceBySessionIdentity: Map<string, TraceinkEvidenceRefV1>;
   timeText?: string;
   statusText?: string;
   currentStop?: string;
@@ -304,7 +304,7 @@ export function canonicalActivityGroups(
     const section = presentation?.rawMarkdown ?? (start >= 0 ? rawMarkdown.slice(start, end >= 0 ? end : undefined) : "");
     const referencedEvidence = new Set(presentation?.evidenceIds ?? []);
     const matched = sessions.filter((session) => {
-      if (section.includes(session.id)) return true;
+      if (sectionReferencesSession(section, session.id)) return true;
       const canonicalPath = session.transcriptCapture?.canonicalPath ?? session.path;
       return evidence.some((item) =>
         referencedEvidence.has(item.id) &&
@@ -314,6 +314,20 @@ export function canonicalActivityGroups(
         item.path === canonicalPath
       );
     });
+    const evidenceBySessionIdentity = new Map<string, TraceinkEvidenceRefV1>();
+    for (const session of matched) {
+      const canonicalPath = session.transcriptCapture?.canonicalPath ?? session.path;
+      const candidates = evidence.filter((item) =>
+        item.kind === "session" &&
+        item.provider === session.platform &&
+        item.sessionId === session.id &&
+        item.path === canonicalPath &&
+        (sectionReferencesSession(section, session.id) || referencedEvidence.has(item.id))
+      );
+      if (candidates.length === 1) {
+        evidenceBySessionIdentity.set(sessionIdentity(session.platform, session.id, session.path), candidates[0]!);
+      }
+    }
     matched.forEach((session) => claimed.add(sessionIdentity(session.platform, session.id, session.path)));
     const participationSource = presentation?.participationText ?? section;
     const participation = ["你参与", "Agent 独立推进", "共同推进", "无法确定"].filter((label) => participationSource.includes(label));
@@ -322,6 +336,7 @@ export function canonicalActivityGroups(
       title: workline.selection.title,
       participation: participation.length ? participation : ["无法确定"],
       sessions: matched,
+      evidenceBySessionIdentity,
       ...optionalActivityField("timeText", presentation?.timeText),
       ...optionalActivityField("statusText", presentation?.statusText),
       ...optionalActivityField("currentStop", presentation?.currentStopMarkdown),
@@ -336,17 +351,23 @@ export function canonicalActivityGroups(
   };
 }
 
-function CanonicalActivityMap({ rawMarkdown, worklines, evidence, sessions, laneByIdentity, onTranscript }: {
-  rawMarkdown: string;
+function sectionReferencesSession(section: string, sessionId: string): boolean {
+  if (!sessionId) return false;
+  if (section.includes(`\`${sessionId}\``)) return true;
+  const escaped = sessionId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|[\\s,，、;；:：()（）])${escaped}(?=$|[\\s,，、;；:：()（）])`, "m").test(section);
+}
+
+function CanonicalActivityMap({ activeIndex, worklines, sessions, laneByIdentity, onTranscript }: {
+  activeIndex: TraceinkIndexArtifactV1;
   worklines: NonNullable<DesktopState["traceinkReview"]["worklines"]>;
-  evidence: TraceinkEvidenceRefV1[];
   sessions: AgentWorkSession[];
   laneByIdentity: Map<string, SessionActivityLane>;
   onTranscript(target: TodayTranscriptTarget, returnFocus: HTMLElement): void;
 }): ReactElement {
   const projection = useMemo(
-    () => canonicalActivityGroups(rawMarkdown, worklines, sessions, evidence),
-    [evidence, rawMarkdown, sessions, worklines]
+    () => canonicalActivityGroups(activeIndex.rawMarkdown, worklines, sessions, activeIndex.evidence),
+    [activeIndex.evidence, activeIndex.rawMarkdown, sessions, worklines]
   );
   return (
     <section className="traceink-activity-map" aria-labelledby="traceink-activity-title">
@@ -369,7 +390,14 @@ function CanonicalActivityMap({ rawMarkdown, worklines, evidence, sessions, lane
                 {group.evidenceReadiness ? <p><span>证据</span>{traceinkFieldExcerpt(group.evidenceReadiness)}</p> : null}
               </div>
             ) : null}
-            <SessionLaneList sessions={group.sessions} laneByIdentity={laneByIdentity} label={`${group.title} 的活动会话`} laneClassName="traceink-grouped-lane" onTranscript={onTranscript} />
+            <SessionLaneList
+              sessions={group.sessions}
+              laneByIdentity={laneByIdentity}
+              label={`${group.title} 的活动会话`}
+              laneClassName="traceink-grouped-lane"
+              transcriptTarget={(session) => canonicalTraceinkTranscriptTarget(session, group.evidenceBySessionIdentity, activeIndex)}
+              onTranscript={onTranscript}
+            />
           </details>
         ))}
         {projection.ungrouped.length ? (
@@ -416,34 +444,38 @@ function ProjectFilters({ projects, selected, onProject }: { projects: TodayBoar
   );
 }
 
-function SessionLaneList({ sessions, laneByIdentity, label, className = "", laneClassName = "", onTranscript }: {
+function SessionLaneList({ sessions, laneByIdentity, label, className = "", laneClassName = "", transcriptTarget, onTranscript }: {
   sessions: AgentWorkSession[];
   laneByIdentity: Map<string, SessionActivityLane>;
   label: string;
   className?: string;
   laneClassName?: string;
+  transcriptTarget?: (session: AgentWorkSession) => TodayTranscriptTarget | undefined;
   onTranscript(target: TodayTranscriptTarget, returnFocus: HTMLElement): void;
 }): ReactElement {
   return (
     <div className={`today-session-lanes ${className}`.trim()} role="list" aria-label={label}>
-      {sessions.map((session) => (
-        <SessionLane
+      {sessions.map((session) => {
+        const target = transcriptTarget?.(session);
+        return <SessionLane
           key={sessionIdentity(session.platform, session.id, session.path)}
           session={session}
           lane={laneByIdentity.get(sessionIdentity(session.platform, session.id, session.path))}
           className={laneClassName}
+          {...(target ? { transcriptTarget: target } : {})}
           onTranscript={onTranscript}
-        />
-      ))}
+        />;
+      })}
       {sessions.length === 0 ? <CompactEmpty text="当前筛选没有匹配的 Session。" /> : null}
     </div>
   );
 }
 
-function SessionLane({ session, lane, className, onTranscript }: {
+function SessionLane({ session, lane, className, transcriptTarget, onTranscript }: {
   session: AgentWorkSession;
   lane?: SessionActivityLane | undefined;
   className: string;
+  transcriptTarget?: TodayTranscriptTarget;
   onTranscript(target: TodayTranscriptTarget, returnFocus: HTMLElement): void;
 }): ReactElement {
   return (
@@ -451,13 +483,39 @@ function SessionLane({ session, lane, className, onTranscript }: {
       <div className="session-lane-time"><time>{formatTime(lane?.timeRange?.start ?? session.startedAt)}</time><i /><time>{formatTime(lane?.timeRange?.end ?? session.updatedAt)}</time></div>
       <div className="session-lane-copy"><span>{platformLabel(session.platform)} · {statusLabel(session.status)}</span><h2>{session.title}</h2><code>{session.id}</code><small>{session.projectPath ?? session.worktreePath ?? session.path}</small></div>
       <SessionActivityTrack lane={lane} />
-      <button type="button" className="session-transcript-action" aria-label={`打开 ${session.title} 的会话记录`} onClick={(event) => onTranscript({
+      <button type="button" className="session-transcript-action" aria-label={`打开 ${session.title} 的会话记录`} onClick={(event) => onTranscript(transcriptTarget ?? {
         title: session.title,
         platform: session.platform,
         request: { id: session.id, platform: session.platform, path: session.path }
       }, event.currentTarget)}><FileText size={14} />打开记录</button>
     </article>
   );
+}
+
+function canonicalTraceinkTranscriptTarget(
+  session: AgentWorkSession,
+  evidenceBySessionIdentity: ReadonlyMap<string, TraceinkEvidenceRefV1>,
+  activeIndex: TraceinkIndexArtifactV1
+): TodayTranscriptTarget | undefined {
+  const evidence = evidenceBySessionIdentity.get(sessionIdentity(session.platform, session.id, session.path));
+  if (!evidence || evidence.kind !== "session" || !evidence.provider || !evidence.sessionId) return undefined;
+  return {
+    title: session.title,
+    platform: evidence.provider,
+    request: {
+      id: evidence.sessionId,
+      platform: evidence.provider,
+      path: evidence.path,
+      traceinkRef: {
+        logicalDate: activeIndex.logicalDate,
+        artifactId: activeIndex.id,
+        stage: "index",
+        revision: activeIndex.revision,
+        outputHash: activeIndex.outputHash,
+        evidenceId: evidence.id
+      }
+    }
+  };
 }
 
 function SessionActivityTrack({ lane }: { lane?: SessionActivityLane | undefined }): ReactElement {

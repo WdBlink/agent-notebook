@@ -1,7 +1,14 @@
 import path from "node:path";
 import type { SessionTranscriptRequest } from "./api";
 import type { NotebookDocument } from "./notebook-store";
-import { findTraceinkArtifact, type TraceinkAssetStoreDocumentV1 } from "./traceink-asset-store";
+import {
+  activeIndexReferenceForDate,
+  currentTraceinkWorklineLineage,
+  findTraceinkArtifact,
+  sameTraceinkArtifactReference,
+  type TraceinkAssetStoreDocumentV1
+} from "./traceink-asset-store";
+import type { TraceinkArtifactReferenceV1, TraceinkArtifactV1 } from "../../src/traceink-review-assets";
 import type { AgentPlatform, AgentTranscriptCapture, AgentWorkSession } from "../../src/types";
 import type { DailyReviewEvidence } from "../../src/workline-review";
 
@@ -74,6 +81,9 @@ function authorizeTraceinkTranscript(
   if (!artifact || artifact.logicalDate !== traceinkRef.logicalDate) {
     throw new Error("找不到请求所指向的精确 Traceink 资产版本，拒绝读取。");
   }
+  if (!belongsToCurrentTodayTraceinkLineage(document, traceinkRef.logicalDate, artifact, traceinkRef)) {
+    throw new Error("这条 Traceink 证据不属于该日期当前工作脉络，拒绝从 Today 重开。");
+  }
   const evidence = artifact.evidence.find((candidate) => candidate.id === traceinkRef.evidenceId);
   if (!evidence) throw new Error("Traceink 资产中找不到指定证据，拒绝读取。");
   if (evidence.kind !== "session") throw new Error("只有 Traceink Session 证据可以在会话阅读器中重开。");
@@ -109,6 +119,38 @@ function authorizeTraceinkTranscript(
     title: evidence.sessionId,
     origin: "traceink-asset",
     transcriptCapture
+  };
+}
+
+function belongsToCurrentTodayTraceinkLineage(
+  document: TraceinkAssetStoreDocumentV1,
+  logicalDate: string,
+  artifact: TraceinkArtifactV1,
+  requested: TraceinkArtifactReferenceV1
+): boolean {
+  const active = activeIndexReferenceForDate(document, logicalDate);
+  if (!active || artifact.logicalDate !== logicalDate) return false;
+  if (artifact.stage === "index") return sameTraceinkArtifactReference(active, requested);
+  if (!artifact.worklineId) return false;
+  const lineage = currentTraceinkWorklineLineage(document, logicalDate, artifact.worklineId);
+  if (artifact.stage === "dossier") {
+    return Boolean(lineage?.dossier && sameTraceinkArtifactReference(
+      traceinkArtifactReference(lineage.dossier),
+      requested
+    ));
+  }
+  return Boolean(lineage?.proposals && sameTraceinkArtifactReference(
+    traceinkArtifactReference(lineage.proposals),
+    requested
+  ));
+}
+
+function traceinkArtifactReference(artifact: TraceinkArtifactV1): TraceinkArtifactReferenceV1 {
+  return {
+    artifactId: artifact.id,
+    stage: artifact.stage,
+    revision: artifact.revision,
+    outputHash: artifact.outputHash
   };
 }
 

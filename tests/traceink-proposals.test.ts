@@ -24,6 +24,8 @@ import {
   appendTraceinkIndexRevision,
   appendTraceinkReflectionRevision,
   createEmptyTraceinkAssetStore,
+  currentTraceinkWorklineLineage,
+  latestTraceinkDossier,
   latestTraceinkProposalDispositions,
   latestTraceinkProposals,
   normalizeTraceinkAssetStore
@@ -112,15 +114,10 @@ test("proposal compilation rejects missing categories, invented source quotes, a
 });
 
 test("proposal dispositions are immutable per-item records and never mutate proposal text", () => {
-  const dossier = dossierArtifact();
-  const reflection = reflectionAsset(dossier);
+  const lineage = canonicalStoreWithReflection();
+  const { dossier, reflection } = lineage;
   const draft = proposalDraft(dossier, reflection);
-  const withInputs = {
-    ...createEmptyTraceinkAssetStore(),
-    artifacts: [dossier],
-    reflections: [reflection]
-  };
-  const withProposals = appendTraceinkProposalsRevision(withInputs, draft, userReflectionAssetReference(reflection));
+  const withProposals = appendTraceinkProposalsRevision(lineage.store, draft, userReflectionAssetReference(reflection));
   const proposal = latestTraceinkProposals(withProposals, reflection)!;
   const proposalReference = { ...traceinkArtifactReference(proposal), stage: "proposals" as const };
   const originalMarkdown = proposal.rawMarkdown;
@@ -185,15 +182,8 @@ test("proposal dispositions are immutable per-item records and never mutate prop
 });
 
 test("proposal append rejects a stale reflection and a competing proposal generation", () => {
-  const dossier = dossierArtifact();
-  const base = appendTraceinkReflectionRevision({
-    ...createEmptyTraceinkAssetStore(),
-    artifacts: [dossier]
-  }, {
-    ...traceinkArtifactReference(dossier),
-    stage: "dossier"
-  }, reflectionText, "2026-08-15T12:00:00.000Z");
-  const reflection = base.reflections[0]!;
+  const lineage = canonicalStoreWithReflection();
+  const { dossier, reflection, store: base } = lineage;
   const changedReflectionStore = appendTraceinkReflectionRevision(
     base,
     { ...traceinkArtifactReference(dossier), stage: "dossier" },
@@ -227,21 +217,126 @@ test("proposal append rejects a stale reflection and a competing proposal genera
   );
 });
 
+test("Today mutations accept only active index → latest dossier → latest reflection → latest proposals", () => {
+  const initial = canonicalStoreWithReflection();
+  const { dossier: dossierV1, reflection: reflectionV1 } = initial;
+  let withProposalsV1 = appendTraceinkProposalsRevision(
+    initial.store,
+    proposalDraft(dossierV1, reflectionV1),
+    userReflectionAssetReference(reflectionV1),
+    null
+  );
+  const proposalsV1 = latestTraceinkProposals(withProposalsV1, reflectionV1)!;
+  const proposalsV1Reference = { ...traceinkArtifactReference(proposalsV1), stage: "proposals" as const };
+
+  const active = activeIndexReferenceForDate(withProposalsV1, logicalDate)!;
+  const seed = dossierArtifact();
+  const { id: _id, revision: _revision, outputHash: _outputHash, ...dossierDraft } = seed;
+  const withDossierV2 = appendTraceinkDossierRevision(withProposalsV1, dossierDraft, active);
+  const currentAfterDossier = currentTraceinkWorklineLineage(withDossierV2, logicalDate, dossierV1.worklineId);
+  assert.equal(currentAfterDossier?.dossier?.revision, 2);
+  assert.equal(currentAfterDossier?.reflection, undefined);
+  assert.equal(currentAfterDossier?.proposals, undefined);
+  assert.throws(
+    () => appendTraceinkReflectionRevision(
+      withDossierV2,
+      { ...traceinkArtifactReference(dossierV1), stage: "dossier" },
+      "不能保存到旧 dossier",
+      "2026-08-15T12:10:00.000Z"
+    ),
+    /dossier changed/i
+  );
+  assert.throws(
+    () => appendTraceinkProposalsRevision(
+      withDossierV2,
+      proposalDraft(dossierV1, reflectionV1),
+      userReflectionAssetReference(reflectionV1),
+      proposalsV1Reference
+    ),
+    /saved reflection changed/i
+  );
+  assert.throws(
+    () => appendTraceinkProposalDisposition(withDossierV2, proposalsV1Reference, "J1", {
+      action: "accept",
+      decidedAt: "2026-08-15T12:11:00.000Z"
+    }),
+    /proposal artifact changed/i
+  );
+
+  const withReflectionV2 = appendTraceinkReflectionRevision(
+    withProposalsV1,
+    { ...traceinkArtifactReference(dossierV1), stage: "dossier" },
+    "第二版回顾：明天再判断。",
+    "2026-08-15T12:12:00.000Z"
+  );
+  const reflectionV2 = withReflectionV2.reflections.at(-1)!;
+  const currentAfterReflection = currentTraceinkWorklineLineage(withReflectionV2, logicalDate, dossierV1.worklineId);
+  assert.equal(currentAfterReflection?.reflection?.revision, 2);
+  assert.equal(currentAfterReflection?.proposals, undefined);
+  assert.throws(
+    () => appendTraceinkProposalsRevision(
+      withReflectionV2,
+      proposalDraft(dossierV1, reflectionV1),
+      userReflectionAssetReference(reflectionV1),
+      proposalsV1Reference
+    ),
+    /saved reflection changed/i
+  );
+  assert.throws(
+    () => appendTraceinkProposalDisposition(withReflectionV2, proposalsV1Reference, "J1", {
+      action: "accept",
+      decidedAt: "2026-08-15T12:13:00.000Z"
+    }),
+    /proposal artifact changed/i
+  );
+  assert.deepEqual(
+    currentTraceinkWorklineLineage(withReflectionV2, logicalDate, dossierV1.worklineId)?.reflection,
+    reflectionV2
+  );
+
+  const proposalsV2Draft = proposalDraft(dossierV1, reflectionV1);
+  proposalsV2Draft.rawMarkdown += "\n\n重新整理于第二次请求。";
+  const withProposalsV2 = appendTraceinkProposalsRevision(
+    withProposalsV1,
+    proposalsV2Draft,
+    userReflectionAssetReference(reflectionV1),
+    proposalsV1Reference
+  );
+  const proposalsV2 = latestTraceinkProposals(withProposalsV2, reflectionV1)!;
+  assert.equal(proposalsV2.revision, 2);
+  assert.throws(
+    () => appendTraceinkProposalDisposition(withProposalsV2, proposalsV1Reference, "J1", {
+      action: "accept",
+      decidedAt: "2026-08-15T12:14:00.000Z"
+    }),
+    /proposal artifact changed/i
+  );
+  withProposalsV1 = appendTraceinkProposalDisposition(
+    withProposalsV2,
+    { ...traceinkArtifactReference(proposalsV2), stage: "proposals" },
+    "J1",
+    { action: "accept", decidedAt: "2026-08-15T12:15:00.000Z" }
+  );
+  assert.equal(withProposalsV1.proposalDispositions?.at(-1)?.proposalArtifact.revision, 2);
+});
+
 test("legacy proposal sidecars stay readable but do not block a compatible interactive revision", () => {
-  const dossier = dossierArtifact();
-  const reflection = reflectionAsset(dossier);
-  const current = appendTraceinkProposalsRevision({
-    ...createEmptyTraceinkAssetStore(),
-    artifacts: [dossier],
-    reflections: [reflection]
-  }, proposalDraft(dossier, reflection), userReflectionAssetReference(reflection));
+  const lineage = canonicalStoreWithReflection();
+  const { dossier, reflection } = lineage;
+  const current = appendTraceinkProposalsRevision(
+    lineage.store,
+    proposalDraft(dossier, reflection),
+    userReflectionAssetReference(reflection)
+  );
   const proposal = latestTraceinkProposals(current, reflection)!;
   const legacy = normalizeTraceinkAssetStore({
     ...current,
-    artifacts: [dossier, {
-      ...proposal,
-      navigation: proposal.navigation.map(({ proposalText: _proposalText, ...item }) => item)
-    }]
+    artifacts: current.artifacts.map((artifact) => artifact.id === proposal.id
+      ? {
+          ...proposal,
+          navigation: proposal.navigation.map(({ proposalText: _proposalText, ...item }) => item)
+        }
+      : artifact)
   });
 
   assert.equal(legacy.artifacts.find((item) => item.stage === "proposals")?.rawMarkdown, proposal.rawMarkdown);
@@ -256,13 +351,13 @@ test("legacy proposal sidecars stay readable but do not block a compatible inter
 });
 
 test("a stored disposition must use the deterministic receipt lineage for its exact proposal item", () => {
-  const dossier = dossierArtifact();
-  const reflection = reflectionAsset(dossier);
-  let store = appendTraceinkProposalsRevision({
-    ...createEmptyTraceinkAssetStore(),
-    artifacts: [dossier],
-    reflections: [reflection]
-  }, proposalDraft(dossier, reflection), userReflectionAssetReference(reflection));
+  const lineage = canonicalStoreWithReflection();
+  const { dossier, reflection } = lineage;
+  let store = appendTraceinkProposalsRevision(
+    lineage.store,
+    proposalDraft(dossier, reflection),
+    userReflectionAssetReference(reflection)
+  );
   const proposals = latestTraceinkProposals(store, reflection)!;
   const proposalReference = { ...traceinkArtifactReference(proposals), stage: "proposals" as const };
   store = appendTraceinkProposalDisposition(store, proposalReference, "J1", {
@@ -396,6 +491,37 @@ function dossierArtifact(): TraceinkDossierArtifactV1 {
     navigation: [],
     warnings: []
   };
+}
+
+function canonicalStoreWithReflection(): {
+  store: ReturnType<typeof createEmptyTraceinkAssetStore>;
+  dossier: TraceinkDossierArtifactV1;
+  reflection: UserReflectionAssetV1;
+} {
+  let store = appendTraceinkIndexRevision(createEmptyTraceinkAssetStore(), {
+    schemaVersion: 1,
+    logicalDate,
+    stage: "index",
+    producer: producer(),
+    inputEvidenceHash: sha256TraceinkText("index input"),
+    rawMarkdown: "1. **产品方向**\n",
+    coverage: [],
+    evidence: [],
+    navigation: [],
+    warnings: []
+  });
+  const active = activeIndexReferenceForDate(store, logicalDate)!;
+  const seed = dossierArtifact();
+  const { id: _id, revision: _revision, outputHash: _outputHash, ...draft } = seed;
+  store = appendTraceinkDossierRevision(store, draft, active);
+  const dossier = latestTraceinkDossier(store, active, seed.worklineId)!;
+  store = appendTraceinkReflectionRevision(
+    store,
+    { ...traceinkArtifactReference(dossier), stage: "dossier" },
+    reflectionText,
+    "2026-08-15T12:00:00.000Z"
+  );
+  return { store, dossier, reflection: store.reflections.at(-1)! };
 }
 
 function latestTraceinkDossierForState(

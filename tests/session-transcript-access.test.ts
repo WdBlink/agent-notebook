@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +10,25 @@ import { composeDailyPage, createEmptyNotebookDocument, sealDailyPage } from "..
 import type { SessionTranscriptRequest } from "../app/desktop/api";
 import type { AgentWorkSession } from "../src/types";
 import type { DailyReviewPackage } from "../src/workline-review";
+import {
+  activeIndexReferenceForDate,
+  appendTraceinkDossierRevision,
+  appendTraceinkIndexRevision,
+  appendTraceinkProposalsRevision,
+  appendTraceinkReflectionRevision,
+  createEmptyTraceinkAssetStore,
+  type TraceinkAssetStoreDocumentV1
+} from "../app/desktop/traceink-asset-store";
+import {
+  traceinkArtifactReference,
+  userReflectionAssetReference,
+  type TraceinkArtifactV1,
+  type TraceinkDossierArtifactDraftV1,
+  type TraceinkEvidenceRefV1,
+  type TraceinkIndexArtifactDraftV1,
+  type TraceinkProposalCategoryV1,
+  type TraceinkProposalsArtifactV1
+} from "../src/traceink-review-assets";
 
 const logicalDate = "2026-08-09";
 const historical: AgentWorkSession = {
@@ -54,6 +74,107 @@ test("current snapshot authorization carries the scanner capture into the bounde
 
   assert.deepEqual(authorized.transcriptCapture, transcriptCapture);
   assert.equal(authorized.readPath, transcriptCapture.canonicalPath);
+});
+
+test("Today Traceink references reject old index, dossier, and proposals after active index rotation", () => {
+  const evidence = traceinkSessionEvidence();
+  const lineage = traceinkStoreWithFullLineage(evidence);
+  const beforeRotation = lineage.store;
+  const activeBefore = activeIndexReferenceForDate(beforeRotation, "2026-08-15");
+  assert.ok(activeBefore);
+  const index = beforeRotation.artifacts.find((artifact) => artifact.stage === "index");
+  const dossier = beforeRotation.artifacts.find((artifact) => artifact.stage === "dossier");
+  const proposals = beforeRotation.artifacts.find((artifact) => artifact.stage === "proposals");
+  assert.ok(index && dossier && proposals);
+
+  for (const artifact of [index, dossier, proposals]) {
+    const authorized = authorizeSessionTranscriptRequest(
+      traceinkEvidenceRequest(artifact, evidence),
+      [],
+      createEmptyNotebookDocument(),
+      beforeRotation
+    );
+    assert.equal(authorized.origin, "traceink-asset");
+  }
+
+  const withNewerDossierRevision = appendTraceinkDossierRevision(
+    beforeRotation,
+    traceinkDossierDraft(evidence),
+    activeBefore
+  );
+  for (const artifact of [dossier, proposals]) {
+    assert.throws(
+      () => authorizeSessionTranscriptRequest(
+        traceinkEvidenceRequest(artifact, evidence),
+        [],
+        createEmptyNotebookDocument(),
+        withNewerDossierRevision
+      ),
+      /当前|Traceink|工作脉络|旧|拒绝/
+    );
+  }
+
+  const withNewerReflection = appendTraceinkReflectionRevision(
+    beforeRotation,
+    { ...traceinkArtifactReference(dossier), stage: "dossier" },
+    "我的第二版回顾",
+    "2026-08-15T10:20:00.000Z"
+  );
+  assert.throws(
+    () => authorizeSessionTranscriptRequest(
+      traceinkEvidenceRequest(proposals, evidence),
+      [],
+      createEmptyNotebookDocument(),
+      withNewerReflection
+    ),
+    /当前|Traceink|工作脉络|旧|拒绝/
+  );
+
+  const reflection = beforeRotation.reflections[0]!;
+  const proposalsV1 = proposals as TraceinkProposalsArtifactV1;
+  const { id: _proposalId, revision: _proposalRevision, outputHash: _proposalHash, ...proposalsV2Draft } = proposalsV1;
+  proposalsV2Draft.rawMarkdown += "\nproposal revision two";
+  const withNewerProposals = appendTraceinkProposalsRevision(
+    beforeRotation,
+    proposalsV2Draft,
+    userReflectionAssetReference(reflection),
+    { ...traceinkArtifactReference(proposalsV1), stage: "proposals" }
+  );
+  const proposalsV2 = withNewerProposals.artifacts
+    .filter((artifact) => artifact.id === proposalsV1.id && artifact.stage === "proposals")
+    .sort((left, right) => right.revision - left.revision)[0]!;
+  assert.throws(
+    () => authorizeSessionTranscriptRequest(
+      traceinkEvidenceRequest(proposalsV1, evidence),
+      [],
+      createEmptyNotebookDocument(),
+      withNewerProposals
+    ),
+    /当前|Traceink|工作脉络|旧|拒绝/
+  );
+  assert.equal(authorizeSessionTranscriptRequest(
+    traceinkEvidenceRequest(proposalsV2, evidence),
+    [],
+    createEmptyNotebookDocument(),
+    withNewerProposals
+  ).origin, "traceink-asset");
+
+  const rotated = appendTraceinkIndexRevision(
+    beforeRotation,
+    traceinkIndexDraft(evidence, "# current index revision 2\n"),
+    activeBefore
+  );
+  for (const artifact of [index, dossier, proposals]) {
+    assert.throws(
+      () => authorizeSessionTranscriptRequest(
+        traceinkEvidenceRequest(artifact, evidence),
+        [],
+        createEmptyNotebookDocument(),
+        rotated
+      ),
+      /当前|Traceink|工作脉络|旧|拒绝/
+    );
+  }
 });
 
 test("captured evidence authorizes sealed replay through its canonical read path and byte range", () => {
@@ -378,5 +499,122 @@ function reviewPackage(): DailyReviewPackage {
     }],
     warnings: [],
     rawOutput: { worklines: [{ id: "historical-workline" }] }
+  };
+}
+
+const traceinkHash = (value: string): string => createHash("sha256").update(value, "utf8").digest("hex");
+
+function traceinkSessionEvidence(): TraceinkEvidenceRefV1 {
+  const content = "frozen current Traceink evidence\n";
+  return {
+    id: "current-session-evidence",
+    kind: "session",
+    provider: "codex",
+    sessionId: "traceink-session",
+    path: "/tmp/traceink-current-session.jsonl",
+    locator: `bytes 0-${Buffer.byteLength(content)}`,
+    contentHash: traceinkHash(content)
+  };
+}
+
+function traceinkIndexDraft(evidence: TraceinkEvidenceRefV1, rawMarkdown = "# index revision 1\n"): TraceinkIndexArtifactDraftV1 {
+  return {
+    schemaVersion: 1,
+    logicalDate: "2026-08-15",
+    stage: "index",
+    producer: {
+      provider: "codex",
+      model: "gpt-5.6-sol",
+      startedAt: "2026-08-15T10:00:00.000Z",
+      completedAt: "2026-08-15T10:05:00.000Z",
+      skill: {
+        packageId: "traceink",
+        version: "traceink-skill-bundle-v1",
+        skillHash: traceinkHash("skill"),
+        editorialContractHash: traceinkHash("contract")
+      }
+    },
+    inputEvidenceHash: traceinkHash("input"),
+    rawMarkdown,
+    coverage: [{ sourceId: evidence.id, disposition: "read", detail: "frozen" }],
+    evidence: [evidence],
+    navigation: [{ id: "workline-one", markdownAnchor: "workline-one", evidenceIds: [evidence.id] }],
+    warnings: []
+  };
+}
+
+function traceinkStoreWithFullLineage(evidence: TraceinkEvidenceRefV1): { store: TraceinkAssetStoreDocumentV1 } {
+  let store = appendTraceinkIndexRevision(createEmptyTraceinkAssetStore(), traceinkIndexDraft(evidence));
+  const active = activeIndexReferenceForDate(store, "2026-08-15");
+  assert.ok(active);
+  store = appendTraceinkDossierRevision(store, traceinkDossierDraft(evidence), active);
+  const dossier = store.artifacts.find((artifact) => artifact.stage === "dossier");
+  assert.ok(dossier);
+  store = appendTraceinkReflectionRevision(
+    store,
+    { ...traceinkArtifactReference(dossier), stage: "dossier" },
+    "我的原始回顾",
+    "2026-08-15T10:10:00.000Z"
+  );
+  const reflection = store.reflections[0];
+  assert.ok(reflection);
+  const proposalDefinitions: Array<{ id: string; category: TraceinkProposalCategoryV1; text: string }> = [
+    { id: "J1", category: "judgment", text: "形成判断候选" },
+    { id: "T1", category: "tomorrow", text: "明日候选" },
+    { id: "C1", category: "ctx", text: "CTX 候选" },
+    { id: "B1", category: "background", text: "后台候选" },
+    { id: "D1", category: "today-only", text: "只留今天" }
+  ];
+  const proposalsMarkdown = ["# proposals", reflection.text, ...proposalDefinitions.map((item) => item.text)].join("\n");
+  store = appendTraceinkProposalsRevision(store, {
+    schemaVersion: 1,
+    logicalDate: "2026-08-15",
+    stage: "proposals",
+    worklineId: "workline-one",
+    sourceReflection: userReflectionAssetReference(reflection),
+    producer: { ...traceinkIndexDraft(evidence).producer },
+    inputEvidenceHash: traceinkHash("proposal-input"),
+    rawMarkdown: proposalsMarkdown,
+    coverage: [{ sourceId: evidence.id, disposition: "read", detail: "frozen" }],
+    evidence: [evidence],
+    navigation: proposalDefinitions.map((item) => ({
+      id: item.id,
+      markdownAnchor: item.id,
+      evidenceIds: [evidence.id],
+      category: item.category,
+      proposalText: item.text,
+      sourceQuote: reflection.text
+    })),
+    warnings: []
+  }, userReflectionAssetReference(reflection), null);
+  return { store };
+}
+
+function traceinkDossierDraft(evidence: TraceinkEvidenceRefV1): TraceinkDossierArtifactDraftV1 {
+  return {
+    schemaVersion: 1 as const,
+    logicalDate: "2026-08-15",
+    stage: "dossier" as const,
+    worklineId: "workline-one",
+    producer: { ...traceinkIndexDraft(evidence).producer },
+    inputEvidenceHash: traceinkHash("dossier-input"),
+    rawMarkdown: "# dossier\n",
+    coverage: [{ sourceId: evidence.id, disposition: "read", detail: "frozen" }],
+    evidence: [evidence],
+    navigation: [{ id: "E1", markdownAnchor: "evidence", evidenceIds: [evidence.id] }],
+    warnings: []
+  };
+}
+
+function traceinkEvidenceRequest(artifact: TraceinkArtifactV1, evidence: TraceinkEvidenceRefV1): SessionTranscriptRequest {
+  return {
+    id: evidence.sessionId!,
+    platform: evidence.provider!,
+    path: evidence.path,
+    traceinkRef: {
+      logicalDate: artifact.logicalDate,
+      ...traceinkArtifactReference(artifact),
+      evidenceId: evidence.id
+    }
   };
 }
