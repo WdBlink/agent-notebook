@@ -3,6 +3,7 @@ import type { DailySessionActivity } from "../../src/session-activity";
 import type { DailyReviewPackage } from "../../src/workline-review";
 import type { TodayBoardPackageGeneration, TodayBoardProjection } from "../../src/today-board";
 import type { DailyReviewPreparationState } from "../../src/daily-review-schedule";
+import type { TraceinkReviewProjection } from "../../src/traceink-review-state";
 
 export type DailyReviewPreparationMode = "compile" | "refresh";
 
@@ -16,6 +17,8 @@ export interface DesktopState {
   activity: DailySessionActivity;
   summaryJob?: DesktopSummaryJob;
   reviewPreparation: DailyReviewPreparationState;
+  traceinkReview: TraceinkReviewProjection;
+  traceinkReviewError?: string;
 }
 
 export type NotebookNoteKind = "thought" | "web" | "note";

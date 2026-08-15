@@ -4,18 +4,16 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCliSessionSummarizer } from "../../src/agent-summary";
-import { compileDailyWorklineReview } from "../../src/workline-review";
+import { compileTraceinkIndex } from "../../src/traceink-review";
 import { loadAgentWorkSnapshot, mergeSessionSummaries, type RuntimeFileStat, type RuntimeFileSystem } from "../../src/agent-sessions";
-import { DEFAULT_SESSION_SCAN_ROOTS } from "../../src/constants";
+import { DEFAULT_SESSION_SCAN_ROOTS, MAX_WORK_SESSION_SNAPSHOT_SESSIONS } from "../../src/constants";
 import { createEmptyData, localDateString, normalizeData, setWorkSessionSnapshot } from "../../src/state";
 import { deriveDailyReviewPreparationState, normalizeDailyReviewScheduleTime, shouldScheduleSessionSummaries, shouldStartAutomaticDailyReview, type DailyReviewPreparationTrigger } from "../../src/daily-review-schedule";
 import type { AgentWorkSnapshot, CockpitData, SessionProvider } from "../../src/types";
 import type { DailyDraftInput, DailyReviewPreparationMode, DailySealInput, DesktopNotebookState, DesktopSettingsPatch, DesktopState, DesktopSummaryJob, NotebookNote, NotebookNoteInput, ProjectContextDocument, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState } from "./api";
-import { runDailyReviewPreparation } from "./daily-review-preparation";
 import { DailyReviewBackgroundCoordinator } from "./daily-review-background";
 import { desktopCliRunner } from "./cli-runner";
 import {
-  appendDailyReviewGeneration,
   createEmptyNotebookDocument,
   createNotebookNote,
   deleteNotebookNote,
@@ -23,7 +21,6 @@ import {
   markNotebookDelivery,
   normalizeNotebookDocument,
   notebookStateForDate,
-  recordDailyCompilationFailure,
   saveDailyDraft,
   sealDailyPage,
   setKnowledgeRoot,
@@ -43,6 +40,20 @@ import {
 } from "./session-summary-cache";
 import { parseSessionTranscript } from "./transcript-reader";
 import { createSessionActivityCache } from "./session-activity-cache";
+import {
+  createTraceinkAssetRepository,
+  traceinkAssetStorePath,
+  type TraceinkAssetRepository
+} from "./traceink-asset-repository";
+import { runTraceinkReviewPreparation } from "./traceink-review-preparation";
+import {
+  automaticTraceinkEligibilityMode,
+  boundedTraceinkError,
+  effectiveTraceinkReviewState,
+  exposeTraceinkFailure,
+  traceinkActivityDates,
+  traceinkScopeFromSnapshot
+} from "./traceink-desktop-state";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.AGENT_WHITEBOARD_DEV === "1";
@@ -61,6 +72,8 @@ let activeDate = localDateString();
 let summaryCache = createEmptySessionSummaryCache();
 let summaryRunId = 0;
 let summaryJob: DesktopSummaryJob = { status: "idle", total: 0, completed: 0, models: summaryModels };
+let traceinkAssetRepository: TraceinkAssetRepository | undefined;
+const traceinkReviewErrors = new Map<string, string>();
 const sessionActivityCache = createSessionActivityCache({
   async readTranscript(session) {
     const source = await readBoundedTranscriptSource(session.path, {
@@ -102,8 +115,15 @@ const runtimeFs: RuntimeFileSystem = {
 app.setName("Work Continuity");
 
 void app.whenReady().then(async () => {
+  traceinkAssetRepository = createTraceinkAssetRepository({
+    filePath: traceinkAssetStorePath(app.getPath("userData")),
+    onPublish() { void broadcastState(); }
+  });
   [data, notebook] = await Promise.all([loadStore(), loadNotebook()]);
-  summaryCache = await loadSummaryCache();
+  [summaryCache] = await Promise.all([
+    loadSummaryCache(),
+    traceinkAssetRepository.load()
+  ]);
   await refreshSnapshot(activeDate);
   if (process.platform === "darwin") app.dock?.setIcon(path.join(__dirname, "app-icon.png"));
   createWindow();
@@ -296,7 +316,7 @@ ipcMain.handle("desktop:open-path", async (_event, target: string, reveal?: bool
 
 async function startDailyReviewForDate(
   requestedDate: string,
-  requestedMode: DailyReviewPreparationMode | undefined,
+  _requestedMode: DailyReviewPreparationMode | undefined,
   trigger: DailyReviewPreparationTrigger,
   prefetchedSnapshot?: AgentWorkSnapshot
 ): Promise<DesktopNotebookState> {
@@ -306,11 +326,11 @@ async function startDailyReviewForDate(
   if (activeRun && activeRun.logicalDate !== logicalDate) throw new Error("另一天的工作脉络正在准备，请稍后再试。");
   const existingBoard = notebookView(logicalDate).todayBoard;
   if (existingBoard.mode === "sealed") throw new Error("这一天已经封页，不能重新整理。");
-  const mode = requestedMode ?? (existingBoard.mode === "raw" ? "compile" : "refresh");
+  if (!activeRun) traceinkReviewErrors.delete(logicalDate);
   dailyReviewCoordinator.start({
     logicalDate,
     trigger,
-    run: () => performDailyReviewForDate(logicalDate, mode, prefetchedSnapshot),
+    run: () => performDailyReviewForDate(logicalDate, prefetchedSnapshot),
     onStateChange: broadcastState
   });
   return notebookView(logicalDate);
@@ -318,52 +338,50 @@ async function startDailyReviewForDate(
 
 async function performDailyReviewForDate(
   logicalDate: string,
-  requestedMode: DailyReviewPreparationMode,
   prefetchedSnapshot?: AgentWorkSnapshot
 ): Promise<void> {
-  const snapshot = prefetchedSnapshot ?? await refreshSnapshot(logicalDate, {
-    scheduleSummaries: false,
-    publish: logicalDate === activeDate
-  });
-  const current = await ensureLoaded();
-  const capturedSessions = structuredClone(snapshot.sessions);
-  const board = notebookStateForDate(notebook, logicalDate, capturedSessions).todayBoard;
-  await runDailyReviewPreparation({
-    logicalDate,
-    mode: requestedMode,
-    snapshotDate: snapshot.date,
-    evidenceCutoff: snapshot.generatedAt,
-    sessions: capturedSessions,
-    board
-  }, {
-    compile({ logicalDate: date, evidenceCutoff, capturedSessions: sessions }) {
-      return compileDailyWorklineReview(current.settings, date, sessions, {
-        runner: desktopCliRunner,
-        evidenceCutoff,
-        timeoutMs: 30 * 60 * 1_000,
-        allowProviderFallback: false
-      });
-    },
-    commitSuccess({ reviewPackage, capturedSessions: sessions, expectedActiveGenerationId }) {
-      return mutateNotebook(logicalDate, (document) => appendDailyReviewGeneration(
-        document,
-        logicalDate,
-        sessions,
-        new Date(reviewPackage.generatedAt),
-        reviewPackage,
-        expectedActiveGenerationId
-      ), sessions);
-    },
-    recordFailure({ message, expectedActiveGenerationId }) {
-      return mutateNotebook(logicalDate, (document) => recordDailyCompilationFailure(
-        document,
-        logicalDate,
-        message,
-        new Date(),
-        expectedActiveGenerationId
-      ), capturedSessions).then(() => undefined);
-    }
-  });
+  try {
+    const snapshot = prefetchedSnapshot?.date === logicalDate
+      ? prefetchedSnapshot
+      : await refreshSnapshot(logicalDate, {
+          scheduleSummaries: false,
+          publish: logicalDate === activeDate
+        });
+    if (snapshot.date !== logicalDate) throw new Error("工作脉络的 Session 快照日期不匹配。");
+    const current = await ensureLoaded();
+    const capturedSessions = structuredClone(snapshot.sessions);
+    const scope = traceinkScopeFromSnapshot(snapshot, logicalDate);
+    const legacyBoard = notebookStateForDate(notebook, logicalDate, capturedSessions).todayBoard;
+    if (legacyBoard.mode === "sealed") throw new Error("这一天已经封页，不能重新整理。");
+    const repository = requireTraceinkAssetRepository();
+    const canonical = effectiveTraceinkReviewState(
+      repository.snapshot(),
+      logicalDate,
+      capturedSessions,
+      legacyBoard.mode
+    );
+    await runTraceinkReviewPreparation({
+      logicalDate,
+      mode: canonical.projection.mode,
+      snapshotDate: snapshot.date,
+      evidenceCutoff: scope.evidenceCutoff,
+      sessions: capturedSessions
+    }, {
+      repository,
+      compile({ logicalDate: date, evidenceCutoff, capturedSessions: sessions }) {
+        return compileTraceinkIndex(current.settings, date, sessions, {
+          runner: desktopCliRunner,
+          scope,
+          coverage: structuredClone(snapshot.evidenceCoverage ?? []),
+          timeoutMs: 30 * 60 * 1_000
+        });
+      }
+    });
+    traceinkReviewErrors.delete(logicalDate);
+  } catch (error) {
+    traceinkReviewErrors.set(logicalDate, boundedTraceinkError(error));
+    throw error;
+  }
 }
 
 function createWindow(): void {
@@ -488,18 +506,29 @@ async function refreshSnapshot(
     fs: runtimeFs,
     homeDir: os.homedir(),
     maxFiles: 180,
-    maxSessions: 48,
+    maxSessions: MAX_WORK_SESSION_SNAPSHOT_SESSIONS,
     maxDepth: 5,
     maxEntries: 2400
   });
   const cached = readCachedSessionSummaries(summaryCache, date, snapshot.sessions, summaryModels);
   const cachedSnapshot = { ...snapshot, sessions: mergeSessionSummaries(snapshot.sessions, cached.summaries) };
-  const reviewMode = notebookStateForDate(notebook, date, cachedSnapshot.sessions).todayBoard.mode;
+  const legacyBoardMode = notebookStateForDate(notebook, date, cachedSnapshot.sessions).todayBoard.mode;
+  const reviewMode = effectiveTraceinkReviewState(
+    requireTraceinkAssetRepository().snapshot(),
+    date,
+    cachedSnapshot.sessions,
+    legacyBoardMode
+  ).boardMode;
   if (options.publish !== false) {
     data = normalizeData(setWorkSessionSnapshot(current, cachedSnapshot));
     await persistStore(data);
   }
-  if (options.scheduleSummaries !== false && options.publish !== false && shouldScheduleSessionSummaries(reviewMode)) {
+  if (
+    options.scheduleSummaries !== false &&
+    options.publish !== false &&
+    !dailyReviewCoordinator.activeRun &&
+    shouldScheduleSessionSummaries(reviewMode)
+  ) {
     scheduleSessionSummaries(runId, date, snapshot.sessions, cached.misses, current.settings);
   } else if (options.publish !== false && !shouldScheduleSessionSummaries(reviewMode)) {
     summaryJob = {
@@ -618,9 +647,27 @@ async function buildState(): Promise<DesktopState> {
   const activityDates = Array.from(new Set([
     ...providerActivityDates,
     ...notebook.notes.map((note) => note.logicalDate),
-    ...Object.keys(notebook.pages)
+    ...Object.keys(notebook.pages),
+    ...traceinkActivityDates(requireTraceinkAssetRepository().snapshot())
   ])).sort((a, b) => b.localeCompare(a)).slice(0, 70);
   const notebookState = notebookStateForDate(notebook, requestDate, current.workSessionSnapshot.sessions);
+  const traceinkState = effectiveTraceinkReviewState(
+    requireTraceinkAssetRepository().snapshot(),
+    requestDate,
+    current.workSessionSnapshot.sessions,
+    notebookState.todayBoard.mode
+  );
+  const traceinkReviewError = traceinkReviewErrors.get(requestDate);
+  const reviewPreparation = exposeTraceinkFailure(deriveDailyReviewPreparationState({
+    enabled: current.settings.dailyReviewScheduleEnabled,
+    time: current.settings.dailyReviewScheduleTime,
+    logicalDate: requestDate,
+    today: localDateString(),
+    boardMode: traceinkState.boardMode,
+    sessionCount: current.workSessionSnapshot.sessions.length,
+    ...(traceinkReviewError ? { compilationError: traceinkReviewError } : {}),
+    ...(dailyReviewCoordinator.activeRun ? { activeRun: dailyReviewCoordinator.activeRun } : {})
+  }), traceinkReviewError, traceinkState.boardMode);
   return {
     data: current,
     activeDate: requestDate,
@@ -630,16 +677,9 @@ async function buildState(): Promise<DesktopState> {
     notebook: notebookState,
     activity,
     summaryJob,
-    reviewPreparation: deriveDailyReviewPreparationState({
-      enabled: current.settings.dailyReviewScheduleEnabled,
-      time: current.settings.dailyReviewScheduleTime,
-      logicalDate: requestDate,
-      today: localDateString(),
-      boardMode: notebookState.todayBoard.mode,
-      sessionCount: current.workSessionSnapshot.sessions.length,
-      ...(notebookState.page.lastCompilationError ? { compilationError: notebookState.page.lastCompilationError } : {}),
-      ...(dailyReviewCoordinator.activeRun ? { activeRun: dailyReviewCoordinator.activeRun } : {})
-    })
+    traceinkReview: traceinkState.projection,
+    ...(traceinkReviewError ? { traceinkReviewError } : {}),
+    reviewPreparation
   };
 }
 
@@ -665,24 +705,35 @@ async function evaluateAutomaticDailyReview(now = new Date()): Promise<void> {
       scheduleSummaries: false,
       publish: activeDate === logicalDate
     });
-    const board = notebookStateForDate(notebook, logicalDate, snapshot.sessions).todayBoard;
+    const legacyBoard = notebookStateForDate(notebook, logicalDate, snapshot.sessions).todayBoard;
+    const reviewState = effectiveTraceinkReviewState(
+      requireTraceinkAssetRepository().snapshot(),
+      logicalDate,
+      snapshot.sessions,
+      legacyBoard.mode
+    );
     if (!shouldStartAutomaticDailyReview({
       enabled: current.settings.dailyReviewScheduleEnabled,
       time: current.settings.dailyReviewScheduleTime,
       logicalDate,
       now,
       sessionCount: snapshot.sessions.length,
-      boardMode: board.mode,
-      hasFailure: Boolean(board.compilationError),
+      boardMode: automaticTraceinkEligibilityMode(reviewState.boardMode),
+      hasFailure: Boolean(traceinkReviewErrors.get(logicalDate)),
       inFlight: Boolean(dailyReviewCoordinator.activeRun),
       attempted: dailyReviewCoordinator.hasScheduledAttempt(logicalDate)
     })) return;
-    await startDailyReviewForDate(logicalDate, board.mode === "raw" ? "compile" : "refresh", "scheduled", snapshot);
+    await startDailyReviewForDate(logicalDate, reviewState.boardMode === "raw" ? "compile" : "refresh", "scheduled", snapshot);
   } catch {
     // A local scan failure leaves Today usable and will be retried at the next scheduler tick.
   } finally {
     dailyReviewScheduleEvaluationRunning = false;
   }
+}
+
+function requireTraceinkAssetRepository(): TraceinkAssetRepository {
+  if (!traceinkAssetRepository) throw new Error("Traceink 资产仓库尚未加载。");
+  return traceinkAssetRepository;
 }
 
 async function findActivityDates(roots: string[], providers: SessionProvider[]): Promise<string[]> {
