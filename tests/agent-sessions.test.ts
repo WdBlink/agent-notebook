@@ -288,6 +288,107 @@ test("scanner reports a discovered transcript that cannot be captured instead of
     assert.deepEqual(snapshot.sessions.map((item) => item.id), ["good"]);
     assert.match(snapshot.warnings.join(" "), /bad-2026-07-02\.jsonl/);
     assert.match(snapshot.warnings.join(" "), /permission denied/);
+    assert.ok(snapshot.evidenceCoverage?.some((entry) =>
+      entry.sourceId.endsWith("bad-2026-07-02.jsonl") &&
+      entry.disposition === "failed" &&
+      entry.detail.includes("permission denied")
+    ));
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("scanner records read, skipped, deduplicated, and truncated evidence dispositions", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "work-continuity-evidence-coverage-"));
+  const root = path.join(temp, ".codex", "sessions");
+  const targetTime = new Date("2026-07-02T10:00:00.000Z");
+  const event = (id: string, timestamp = "2026-07-02T09:00:00.000Z") => [
+    JSON.stringify({ timestamp, type: "session_meta", payload: { id } }),
+    JSON.stringify({ timestamp, type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: id }] } })
+  ].join("\n");
+
+  try {
+    await mkdir(root, { recursive: true });
+    const files = [
+      ["01-good.jsonl", event("shared-id")],
+      ["02-duplicate.jsonl", event("shared-id")],
+      ["03-outside.jsonl", event("outside", "2026-07-01T09:00:00.000Z")],
+      ["04-over-limit.jsonl", event("over-limit")],
+      ["05-over-limit.jsonl", event("over-limit-two")]
+    ] as const;
+    for (const [index, [name, content]] of files.entries()) {
+      const target = path.join(root, name);
+      await writeFile(target, content);
+      const rankedTime = new Date(targetTime.getTime() - index * 1_000);
+      await utimes(target, rankedTime, rankedTime);
+    }
+
+    const snapshot = await loadAgentWorkSnapshot(createEmptyData().settings, {
+      date: "2026-07-02",
+      now: new Date("2026-07-03T12:00:00.000Z"),
+      roots: [root],
+      fs: fsAdapter,
+      maxFiles: 4,
+      maxSessions: 10
+    });
+
+    const dispositions = snapshot.evidenceCoverage?.map((entry) => entry.disposition) ?? [];
+    assert.ok(dispositions.includes("read"));
+    assert.ok(dispositions.includes("deduplicated"));
+    assert.ok(dispositions.includes("skipped"));
+    assert.ok(dispositions.includes("truncated"));
+    assert.ok(snapshot.evidenceCoverage?.some((entry) => entry.detail.includes("规范副本")));
+    assert.equal(snapshot.evidenceScope?.evidenceCutoff, "2026-07-03T12:00:00.000Z");
+    assert.equal(snapshot.evidenceScope?.timeZone.length ? true : false, true);
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("scanner records discovery failures and Session-cap omissions as incomplete coverage", async () => {
+  const settings = createEmptyData().settings;
+  const missingRoot = "/tmp/.codex/traceink-missing-root";
+  const failed = await loadAgentWorkSnapshot(settings, {
+    date: "2026-07-02",
+    now: new Date("2026-07-03T12:00:00.000Z"),
+    roots: [missingRoot],
+    fs: {
+      ...fsAdapter,
+      async readdir() {
+        const error = new Error("permission denied") as NodeJS.ErrnoException;
+        error.code = "EACCES";
+        throw error;
+      }
+    }
+  });
+  assert.deepEqual(failed.sessions, []);
+  assert.ok(failed.evidenceCoverage?.some((entry) =>
+    entry.sourceId.endsWith(missingRoot) &&
+    entry.disposition === "failed" &&
+    entry.detail.includes("permission denied")
+  ));
+
+  const temp = await mkdtemp(path.join(os.tmpdir(), "work-continuity-session-cap-"));
+  try {
+    const root = path.join(temp, ".codex", "sessions");
+    await mkdir(root, { recursive: true });
+    for (const [index, id] of ["first", "second"].entries()) {
+      const file = path.join(root, `${index}-${id}.jsonl`);
+      await writeFile(file, JSON.stringify({ timestamp: "2026-07-02T09:00:00.000Z", type: "session_meta", payload: { id } }));
+      const ranked = new Date(`2026-07-02T10:00:0${index}.000Z`);
+      await utimes(file, ranked, ranked);
+    }
+    const capped = await loadAgentWorkSnapshot(settings, {
+      date: "2026-07-02",
+      now: new Date("2026-07-03T12:00:00.000Z"),
+      roots: [root],
+      fs: fsAdapter,
+      maxSessions: 1
+    });
+    assert.equal(capped.sessions.length, 1);
+    assert.ok(capped.evidenceCoverage?.some((entry) =>
+      entry.disposition === "truncated" && entry.detail.includes("Session 容量上限")
+    ));
   } finally {
     await rm(temp, { recursive: true, force: true });
   }

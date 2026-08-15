@@ -10,6 +10,13 @@ export interface TraceinkSkillBundleRefV1 {
   editorialContractHash: Sha256;
 }
 
+export interface TraceinkReviewScopeV1 {
+  timeZone: string;
+  startInclusive: string;
+  endExclusive: string;
+  evidenceCutoff: string;
+}
+
 export interface TraceinkProducerRefV1 {
   provider: "codex" | "claude";
   model: string;
@@ -17,6 +24,7 @@ export interface TraceinkProducerRefV1 {
   startedAt: string;
   completedAt: string;
   skill: TraceinkSkillBundleRefV1;
+  scope?: TraceinkReviewScopeV1;
 }
 
 export interface TraceinkEvidenceRefV1 {
@@ -196,7 +204,7 @@ export function normalizeTraceinkArtifactV1(value: unknown): TraceinkArtifactV1 
   const logicalDate = logicalDateString(raw.logicalDate);
   const stage = traceinkStage(raw.stage);
   const revision = positiveInteger(raw.revision);
-  const producer = normalizeProducer(raw.producer);
+  const producer = normalizeProducer(raw.producer, logicalDate);
   const inputEvidenceHash = sha256(raw.inputEvidenceHash);
   const rawMarkdown = typeof raw.rawMarkdown === "string" ? raw.rawMarkdown : undefined;
   const outputHash = sha256(raw.outputHash);
@@ -303,7 +311,7 @@ export function isTraceinkLogicalDate(value: unknown): value is string {
   return Boolean(logicalDateString(value));
 }
 
-function normalizeProducer(value: unknown): TraceinkProducerRefV1 | undefined {
+function normalizeProducer(value: unknown, logicalDate?: string): TraceinkProducerRefV1 | undefined {
   const raw = asRecord(value);
   if (!raw) return undefined;
   const provider = raw.provider === "codex" || raw.provider === "claude" ? raw.provider : undefined;
@@ -314,6 +322,7 @@ function normalizeProducer(value: unknown): TraceinkProducerRefV1 | undefined {
   const startedAt = timestamp(raw.startedAt);
   const completedAt = timestamp(raw.completedAt);
   const skill = normalizeSkill(raw.skill);
+  const scope = raw.scope === undefined ? undefined : normalizeReviewScope(raw.scope, logicalDate);
   if (
     !provider ||
     !model ||
@@ -321,7 +330,8 @@ function normalizeProducer(value: unknown): TraceinkProducerRefV1 | undefined {
     !startedAt ||
     !completedAt ||
     Date.parse(completedAt) < Date.parse(startedAt) ||
-    !skill
+    !skill ||
+    (raw.scope !== undefined && !scope)
   ) return undefined;
   return {
     provider,
@@ -329,8 +339,68 @@ function normalizeProducer(value: unknown): TraceinkProducerRefV1 | undefined {
     ...(reasoningConfiguration ? { reasoningConfiguration } : {}),
     startedAt,
     completedAt,
-    skill
+    skill,
+    ...(scope ? { scope } : {})
   };
+}
+
+function normalizeReviewScope(value: unknown, logicalDate?: string): TraceinkReviewScopeV1 | undefined {
+  const raw = asRecord(value);
+  if (!raw) return undefined;
+  const timeZone = nonEmptyString(raw.timeZone);
+  const startInclusive = timestamp(raw.startInclusive);
+  const endExclusive = timestamp(raw.endExclusive);
+  const evidenceCutoff = timestamp(raw.evidenceCutoff);
+  if (
+    !timeZone ||
+    !isIanaTimeZone(timeZone) ||
+    !startInclusive ||
+    !endExclusive ||
+    !evidenceCutoff ||
+    Date.parse(endExclusive) <= Date.parse(startInclusive) ||
+    Date.parse(evidenceCutoff) < Date.parse(startInclusive) ||
+    (logicalDate !== undefined && !scopeMatchesLogicalDate(logicalDate, timeZone, startInclusive, endExclusive))
+  ) return undefined;
+  return { timeZone, startInclusive, endExclusive, evidenceCutoff };
+}
+
+function isIanaTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function scopeMatchesLogicalDate(
+  logicalDate: string,
+  timeZone: string,
+  startInclusive: string,
+  endExclusive: string
+): boolean {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  });
+  const parts = (timestamp: string): Record<string, string> => Object.fromEntries(
+    formatter.formatToParts(new Date(timestamp)).map((part) => [part.type, part.value])
+  );
+  const start = parts(startInclusive);
+  const end = parts(endExclusive);
+  const next = new Date(`${logicalDate}T00:00:00.000Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  const nextLogicalDate = next.toISOString().slice(0, 10);
+  return `${start.year}-${start.month}-${start.day}` === logicalDate &&
+    `${start.hour}:${start.minute}:${start.second}` === "00:00:00" &&
+    `${end.year}-${end.month}-${end.day}` === nextLogicalDate &&
+    `${end.hour}:${end.minute}:${end.second}` === "00:00:00";
 }
 
 function normalizeSkill(value: unknown): TraceinkSkillBundleRefV1 | undefined {

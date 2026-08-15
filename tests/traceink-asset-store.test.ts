@@ -168,6 +168,23 @@ test("malformed producer provenance and active references fail closed without ad
   assert.deepEqual(withoutMalformedArtifact.artifacts, []);
   assert.deepEqual(withoutMalformedArtifact.activeIndexByDate, {});
 
+  for (const scope of [{
+    timeZone: "Not/A-Timezone",
+    startInclusive: "2026-08-14T16:00:00.000Z",
+    endExclusive: "2026-08-15T16:00:00.000Z",
+    evidenceCutoff: "2026-08-15T10:00:00.000Z"
+  }, {
+    timeZone: "Asia/Shanghai",
+    startInclusive: "2026-08-13T16:00:00.000Z",
+    endExclusive: "2026-08-14T16:00:00.000Z",
+    evidenceCutoff: "2026-08-15T10:00:00.000Z"
+  }]) {
+    assert.deepEqual(normalizeTraceinkAssetStore({
+      ...stored,
+      artifacts: [{ ...artifact, producer: { ...artifact.producer, scope } }]
+    }).artifacts, []);
+  }
+
   const withTamperedMarkdown = normalizeTraceinkAssetStore({
     ...stored,
     artifacts: [{ ...artifact, rawMarkdown: `${artifact.rawMarkdown}tampered` }]

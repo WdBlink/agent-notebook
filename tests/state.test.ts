@@ -179,6 +179,58 @@ test("daily review preparation is disabled by default and persists one valid loc
   assert.equal(invalid.dailyReviewScheduleTime, "18:30");
 });
 
+test("snapshot normalization preserves the full desktop Session cap and its frozen evidence scope", () => {
+  const base = createEmptyData();
+  const sessions = Array.from({ length: 48 }, (_, index) => ({
+    id: `session-${index}`,
+    platform: "codex",
+    title: `Session ${index}`,
+    summary: "",
+    path: `/tmp/session-${index}.jsonl`,
+    updatedAt: "2026-08-15T10:00:00.000Z",
+    artifacts: [],
+    status: "completed"
+  }));
+  const coverage = sessions.map((session) => ({
+    sourceId: `codex:${session.path}`,
+    disposition: "read",
+    detail: "已采用规范副本。"
+  }));
+  const scope = {
+    timeZone: "Asia/Shanghai",
+    startInclusive: "2026-08-14T16:00:00.000Z",
+    endExclusive: "2026-08-15T16:00:00.000Z",
+    evidenceCutoff: "2026-08-15T10:00:00.000Z"
+  };
+
+  const normalized = normalizeData({
+    ...base,
+    workSessionSnapshot: {
+      date: "2026-08-15",
+      generatedAt: scope.evidenceCutoff,
+      sessions,
+      sources: ["/tmp"],
+      warnings: [],
+      evidenceCoverage: coverage,
+      evidenceScope: scope
+    }
+  });
+
+  assert.equal(normalized.workSessionSnapshot.sessions.length, 48);
+  assert.equal(normalized.workSessionSnapshot.evidenceCoverage?.length, 48);
+  assert.deepEqual(normalized.workSessionSnapshot.evidenceScope, scope);
+  assert.equal(
+    normalizeData({
+      ...normalized,
+      workSessionSnapshot: {
+        ...normalized.workSessionSnapshot,
+        evidenceScope: { ...scope, timeZone: "Not/A-Timezone" }
+      }
+    }).workSessionSnapshot.evidenceScope,
+    undefined
+  );
+});
+
 test("a stale stored plan is not kept active after normalization", () => {
   const normalized = normalizeData({
     schemaVersion: 2,
@@ -561,7 +613,7 @@ test("project directory resolution uses filesystem canonicalization, readability
 });
 
 test("work session snapshots are capped and retired task paths cannot remain resumable", () => {
-  const sessions = Array.from({ length: 35 }, (_, index) => ({
+  const sessions = Array.from({ length: 60 }, (_, index) => ({
     id: `session-${index}`,
     platform: index === 0 ? "claude" : "unknown-platform",
     title: `昨日会话 ${index}`,
@@ -589,7 +641,7 @@ test("work session snapshots are capped and retired task paths cannot remain res
       sessions
     }
   });
-  assert.equal(data.workSessionSnapshot.sessions.length, 30);
+  assert.equal(data.workSessionSnapshot.sessions.length, 48);
   assert.equal(data.workSessionSnapshot.sessions[0]?.resumable, false);
   assert.deepEqual(data.workSessionSnapshot.sessions[0]?.artifacts, ["src/main.ts"]);
   assert.deepEqual(data.workSessionSnapshot.sessions[0]?.transcriptCapture, {

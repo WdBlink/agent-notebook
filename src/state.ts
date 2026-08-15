@@ -4,6 +4,7 @@ import {
   DEFAULT_SETTINGS,
   ERROR_MESSAGES,
   LEGACY_SESSION_SCAN_ROOTS,
+  MAX_WORK_SESSION_SNAPSHOT_SESSIONS,
   TASK_CATEGORIES,
   TASK_PRIORITIES
 } from "./constants";
@@ -557,7 +558,8 @@ export function createEmptyWorkSessionSnapshot(date = previousLocalDateString(),
     generatedAt: timestamp,
     sessions: [],
     sources: [],
-    warnings: []
+    warnings: [],
+    evidenceCoverage: []
   };
 }
 
@@ -611,6 +613,7 @@ function createSeedWorkSessionSnapshot(): AgentWorkSnapshot {
     generatedAt: "2026-07-03T08:00:00.000Z",
     sources: ["~/.codex/archived_sessions", "~/.claude/projects"],
     warnings: [],
+    evidenceCoverage: [],
     sessions: [
       {
         id: "seed-codex-session",
@@ -653,15 +656,130 @@ function normalizeWorkSessionSnapshot(input: unknown): AgentWorkSnapshot {
     ? source.sessions.map((session) => normalizeWorkSession(session)).filter((session): session is AgentWorkSession => session !== null)
     : [];
 
+  const date = cleanText(source.date, previousLocalDateString());
+  const evidenceScope = normalizeEvidenceScope(source.evidenceScope, date);
   return {
-    date: cleanText(source.date, previousLocalDateString()),
+    date,
     generatedAt: cleanText(source.generatedAt, nowIso()),
-    sessions: sessions.slice(0, 30),
+    sessions: sessions.slice(0, MAX_WORK_SESSION_SNAPSHOT_SESSIONS),
     sources: cleanSessionScanRoots(source.sources),
     warnings: Array.isArray(source.warnings)
       ? source.warnings.map((warning) => cleanText(warning, "")).filter(Boolean).slice(0, 8)
-      : []
+      : [],
+    evidenceCoverage: normalizeEvidenceCoverage(source.evidenceCoverage),
+    ...(evidenceScope ? { evidenceScope } : {})
   };
+}
+
+function normalizeEvidenceCoverage(value: unknown): NonNullable<AgentWorkSnapshot["evidenceCoverage"]> {
+  if (!Array.isArray(value)) return [];
+  const dispositions = new Set(["read", "skipped", "deduplicated", "truncated", "failed"]);
+  const normalized = value.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object") return [];
+    const raw = candidate as Record<string, unknown>;
+    const sourceId = exactBoundedText(raw.sourceId, 8_192);
+    const detail = cleanText(raw.detail, "");
+    const disposition = typeof raw.disposition === "string" && dispositions.has(raw.disposition)
+      ? raw.disposition as NonNullable<AgentWorkSnapshot["evidenceCoverage"]>[number]["disposition"]
+      : undefined;
+    if (!sourceId || !detail || !disposition) return [];
+    return [{ sourceId, disposition, detail }];
+  });
+  if (normalized.length <= 240) return normalized;
+  return [
+    ...normalized.slice(0, 239),
+    {
+      sourceId: "scanner:coverage-register",
+      disposition: "truncated",
+      detail: `${normalized.length - 239} 条额外扫描记录未进入持久化覆盖登记。`
+    }
+  ];
+}
+
+function normalizeEvidenceScope(
+  value: unknown,
+  logicalDate: string
+): NonNullable<AgentWorkSnapshot["evidenceScope"]> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Record<string, unknown>;
+  const timeZone = cleanText(raw.timeZone, "");
+  const startInclusive = exactTimestamp(raw.startInclusive);
+  const endExclusive = exactTimestamp(raw.endExclusive);
+  const evidenceCutoff = exactTimestamp(raw.evidenceCutoff);
+  if (
+    !timeZone ||
+    !isIanaTimeZone(timeZone) ||
+    !startInclusive ||
+    !endExclusive ||
+    !evidenceCutoff ||
+    Date.parse(endExclusive) <= Date.parse(startInclusive) ||
+    Date.parse(evidenceCutoff) < Date.parse(startInclusive) ||
+    localDateAt(startInclusive, timeZone) !== logicalDate ||
+    localTimeAt(startInclusive, timeZone) !== "00:00:00" ||
+    localDateAt(endExclusive, timeZone) !== nextDateString(logicalDate) ||
+    localTimeAt(endExclusive, timeZone) !== "00:00:00"
+  ) return undefined;
+  return { timeZone, startInclusive, endExclusive, evidenceCutoff };
+}
+
+function exactBoundedText(value: unknown, maxLength: number): string | undefined {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > maxLength ||
+    value.trim().length === 0 ||
+    /[\0\r\n]/.test(value)
+  ) return undefined;
+  return value;
+}
+
+function exactTimestamp(value: unknown): string | undefined {
+  return typeof value === "string" && value.length <= 80 && Number.isFinite(Date.parse(value))
+    ? value
+    : undefined;
+}
+
+function isIanaTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function localDateAt(timestamp: string, timeZone: string): string {
+  const parts = localDateTimeParts(timestamp, timeZone);
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function localTimeAt(timestamp: string, timeZone: string): string {
+  const parts = localDateTimeParts(timestamp, timeZone);
+  return `${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
+function localDateTimeParts(timestamp: string, timeZone: string): Record<"year" | "month" | "day" | "hour" | "minute" | "second", string> {
+  const output = { year: "", month: "", day: "", hour: "", minute: "", second: "" };
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  });
+  for (const part of formatter.formatToParts(new Date(timestamp))) {
+    if (part.type in output) output[part.type as keyof typeof output] = part.value;
+  }
+  return output;
+}
+
+function nextDateString(value: string): string {
+  const next = new Date(`${value}T00:00:00.000Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next.toISOString().slice(0, 10);
 }
 
 function normalizeWorkSession(session: unknown): AgentWorkSession | null {

@@ -1,8 +1,13 @@
 import { createHash } from "node:crypto";
-import { DEFAULT_SESSION_PROVIDERS, DEFAULT_SESSION_SCAN_ROOTS } from "./constants";
+import {
+  DEFAULT_SESSION_PROVIDERS,
+  DEFAULT_SESSION_SCAN_ROOTS,
+  MAX_WORK_SESSION_SNAPSHOT_SESSIONS
+} from "./constants";
 import { createEmptyWorkSessionSnapshot } from "./state";
 import type {
   AgentPlatform,
+  AgentEvidenceCoverageEntry,
   AgentSessionStatus,
   AgentWorkSession,
   AgentWorkSnapshot,
@@ -66,6 +71,12 @@ interface CandidateFile {
   sortTime: number;
 }
 
+interface CandidateCollection {
+  files: CandidateFile[];
+  truncated: boolean;
+  coverage: AgentEvidenceCoverageEntry[];
+}
+
 interface ParsedText {
   records: unknown[];
   plainText?: string;
@@ -79,7 +90,7 @@ interface ActivityWindow {
 }
 
 const DEFAULT_MAX_FILES = 90;
-const DEFAULT_MAX_SESSIONS = 24;
+const DEFAULT_MAX_SESSIONS = MAX_WORK_SESSION_SNAPSHOT_SESSIONS;
 const DEFAULT_MAX_DEPTH = 4;
 const DEFAULT_MAX_ENTRIES = 900;
 
@@ -95,13 +106,18 @@ export async function loadAgentWorkSnapshot(
     .filter(({ platform }) => enabledProviders.has(platform as SessionProvider));
   const sources = sourceDescriptors.map(({ source }) => source);
   const fs = options.fs ?? createRuntimeFileSystem();
+  const day = dayWindow(date, now);
   if (!fs) {
-    return { ...createEmptyWorkSessionSnapshot(date, now.toISOString()), sources };
+    return {
+      ...createEmptyWorkSessionSnapshot(date, now.toISOString()),
+      sources,
+      evidenceScope: evidenceScopeForDay(day, now.toISOString())
+    };
   }
 
   const homeDir = options.homeDir ?? runtimeHomeDir();
-  const day = dayWindow(date, now);
   const candidates: CandidateFile[] = [];
+  const evidenceCoverage: AgentEvidenceCoverageEntry[] = [];
   const maxFiles = options.maxFiles ?? DEFAULT_MAX_FILES;
   const maxFilesPerRoot = Math.max(12, Math.ceil(maxFiles / Math.max(sources.length, 1)));
 
@@ -112,30 +128,78 @@ export async function loadAgentWorkSnapshot(
       maxDepth: options.maxDepth ?? DEFAULT_MAX_DEPTH,
       maxEntries: options.maxEntries ?? DEFAULT_MAX_ENTRIES
     });
-    candidates.push(...found);
+    candidates.push(...found.files);
+    evidenceCoverage.push(...found.coverage);
+    if (found.truncated) {
+      evidenceCoverage.push({
+        sourceId: `${platform}:${root}`,
+        disposition: "truncated",
+        detail: "候选发现达到目录深度、文件数或目录项上限；范围可能不完整。"
+      });
+    }
   }
 
   const sessions: AgentWorkSession[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, string>();
   let warnings: string[] = [];
   const maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
-  const sorted = candidates.sort((a, b) => b.sortTime - a.sortTime).slice(0, maxFiles);
+  const ordered = candidates.sort((a, b) => b.sortTime - a.sortTime);
+  const sorted = ordered.slice(0, maxFiles);
+  for (const candidate of ordered.slice(maxFiles)) {
+    evidenceCoverage.push({
+      sourceId: candidateSourceId(candidate),
+      disposition: "truncated",
+      detail: "候选文件超过本次扫描上限，未进入读取队列。"
+    });
+  }
 
   for (const candidate of sorted) {
-    if (sessions.length >= maxSessions) break;
+    if (sessions.length >= maxSessions) {
+      evidenceCoverage.push({
+        sourceId: candidateSourceId(candidate),
+        disposition: "truncated",
+        detail: "已达到本次 Session 容量上限，候选证据未进入本次快照。"
+      });
+      continue;
+    }
     let session: AgentWorkSession | null;
     try {
       session = await readSession(candidate, fs, day);
     } catch (error) {
       warnings.push(`会话证据读取失败（${candidate.path}）：${errorMessage(error)}`);
       warnings = warnings.slice(0, 8);
+      evidenceCoverage.push({
+        sourceId: candidateSourceId(candidate),
+        disposition: "failed",
+        detail: `读取失败：${errorMessage(error)}`
+      });
       continue;
     }
-    if (!session) continue;
+    if (!session) {
+      evidenceCoverage.push({
+        sourceId: candidateSourceId(candidate),
+        disposition: "skipped",
+        detail: "未读到落在本地日期范围内的规范事件。"
+      });
+      continue;
+    }
     const key = session.resumable ? `${session.platform}:${session.id}` : `${session.platform}:${session.id}:${session.path}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    const canonicalCopy = seen.get(key);
+    if (canonicalCopy) {
+      evidenceCoverage.push({
+        sourceId: candidateSourceId(candidate),
+        disposition: "deduplicated",
+        detail: `与已采用的规范副本重复：${canonicalCopy}`
+      });
+      continue;
+    }
+    seen.set(key, session.path);
     sessions.push(session);
+    evidenceCoverage.push({
+      sourceId: candidateSourceId(candidate),
+      disposition: "read",
+      detail: `已采用规范副本：${session.platform}:${session.id}:${session.path}`
+    });
   }
 
   let mergedSessions = sessions;
@@ -149,13 +213,20 @@ export async function loadAgentWorkSnapshot(
     }
   }
 
+  const generatedAt = (options.now ?? new Date()).toISOString();
   return {
     date,
-    generatedAt: (options.now ?? new Date()).toISOString(),
+    generatedAt,
     sources,
     sessions: mergedSessions,
-    warnings
+    warnings,
+    evidenceCoverage,
+    evidenceScope: evidenceScopeForDay(day, generatedAt)
   };
+}
+
+function candidateSourceId(candidate: CandidateFile): string {
+  return `${candidate.platform}:${candidate.path}`;
 }
 
 export function mergeSessionSummaries(
@@ -251,27 +322,49 @@ async function collectCandidateFiles(
   day: { start: number; end: number; stamp: string },
   fs: RuntimeFileSystem,
   limits: { maxFiles: number; maxDepth: number; maxEntries: number }
-): Promise<CandidateFile[]> {
+): Promise<CandidateCollection> {
   const files: CandidateFile[] = [];
+  const coverage: AgentEvidenceCoverageEntry[] = [];
   let inspected = 0;
+  let truncated = false;
 
   async function walk(dir: string, depth: number): Promise<void> {
-    if (files.length >= limits.maxFiles || inspected >= limits.maxEntries || depth > limits.maxDepth) return;
+    if (files.length >= limits.maxFiles || inspected >= limits.maxEntries || depth > limits.maxDepth) {
+      truncated = true;
+      return;
+    }
     let entries: string[];
     try {
       entries = await fs.readdir(dir);
-    } catch {
+    } catch (error) {
+      coverage.push({
+        sourceId: `${platform}:${dir}`,
+        disposition: errorCode(error) === "ENOENT" ? "skipped" : "failed",
+        detail: errorCode(error) === "ENOENT"
+          ? "扫描目录不存在。"
+          : `扫描目录读取失败：${errorMessage(error)}`
+      });
       return;
     }
 
     for (const entry of entries.sort().reverse()) {
-      if (files.length >= limits.maxFiles || inspected >= limits.maxEntries) return;
+      if (files.length >= limits.maxFiles || inspected >= limits.maxEntries) {
+        truncated = true;
+        return;
+      }
       inspected += 1;
       const fullPath = joinPath(dir, entry);
       let stat: RuntimeFileStat;
       try {
         stat = await fs.stat(fullPath);
-      } catch {
+      } catch (error) {
+        coverage.push({
+          sourceId: `${platform}:${fullPath}`,
+          disposition: errorCode(error) === "ENOENT" ? "skipped" : "failed",
+          detail: errorCode(error) === "ENOENT"
+            ? "候选在扫描期间消失。"
+            : `候选元数据读取失败：${errorMessage(error)}`
+        });
         continue;
       }
 
@@ -299,7 +392,14 @@ async function collectCandidateFiles(
   }
 
   await walk(root, 0);
-  return files;
+  if (files.length === 0 && coverage.length === 0) {
+    coverage.push({
+      sourceId: `${platform}:${root}`,
+      disposition: "skipped",
+      detail: "扫描完成；没有发现候选 Session 文件。"
+    });
+  }
+  return { files, truncated, coverage };
 }
 
 async function readSession(
@@ -713,6 +813,29 @@ function dayWindow(stamp: string, now: Date): ActivityWindow {
   // inspected; canonical event timestamps then keep only target-day activity.
   const end = Math.max(targetEnd, now.getTime() + 1);
   return { start, targetEnd, end, stamp };
+}
+
+function evidenceScopeForDay(day: ActivityWindow, evidenceCutoff: string): NonNullable<AgentWorkSnapshot["evidenceScope"]> {
+  return {
+    timeZone: resolvedLocalTimeZone(),
+    startInclusive: new Date(day.start).toISOString(),
+    endExclusive: new Date(day.targetEnd).toISOString(),
+    evidenceCutoff
+  };
+}
+
+function resolvedLocalTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+function errorCode(error: unknown): string | undefined {
+  return error && typeof error === "object" && "code" in error && typeof error.code === "string"
+    ? error.code
+    : undefined;
 }
 
 function isInTargetDay(stat: RuntimeFileStat, day: { start: number; end: number }): boolean {

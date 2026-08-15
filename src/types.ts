@@ -82,12 +82,27 @@ export interface AgentWorkSession {
   transcriptCapture?: AgentTranscriptCapture;
 }
 
+export interface AgentEvidenceCoverageEntry {
+  sourceId: string;
+  disposition: "read" | "skipped" | "deduplicated" | "truncated" | "failed";
+  detail: string;
+}
+
+export interface AgentEvidenceScope {
+  timeZone: string;
+  startInclusive: string;
+  endExclusive: string;
+  evidenceCutoff: string;
+}
+
 export interface AgentWorkSnapshot {
   date: string;
   generatedAt: string;
   sessions: AgentWorkSession[];
   sources: string[];
   warnings: string[];
+  evidenceCoverage?: AgentEvidenceCoverageEntry[];
+  evidenceScope?: AgentEvidenceScope;
 }
 
 export interface CockpitData {

@@ -27,6 +27,11 @@ export const SESSION_PROVIDER_DEFINITIONS: ReadonlyArray<{
 
 export const DEFAULT_SESSION_PROVIDERS: SessionProvider[] = SESSION_PROVIDER_DEFINITIONS.map(({ id }) => id);
 
+// One limit owns both desktop discovery and durable snapshot projection. A
+// canonical review must never compile more Sessions than the next reload can
+// retain.
+export const MAX_WORK_SESSION_SNAPSHOT_SESSIONS = 48;
+
 export const LEGACY_SESSION_SCAN_ROOTS = [
   "~/.codex/memories/rollout_summaries",
   "~/.claude/tasks",
