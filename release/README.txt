@@ -1,4 +1,4 @@
-Agent Whiteboard __VERSION__ for macOS (__ARCH__)
+Agent Notebook __VERSION__ for macOS (__ARCH__)
 ==================================================
 
 Requirements
@@ -9,10 +9,10 @@ Requirements
 
 Install
 -------
-1. Double-click "Install Agent Whiteboard.command".
+1. Double-click "Install Agent Notebook.command".
 2. Select your Obsidian Vault folder.
 3. Open Obsidian -> Settings -> Community plugins.
-4. Enable "Agent Whiteboard" and reload Obsidian if it was already open.
+4. Enable "Agent Notebook" and reload Obsidian if it was already open.
 
 The installer copies only plugin assets into:
   <vault>/.obsidian/plugins/agent-notebook/

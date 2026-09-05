@@ -19,6 +19,8 @@ export interface CockpitSettings {
   runtimeNodePath: string;
   codexCliPath: string;
   claudeCliPath: string;
+  dailyReviewScheduleEnabled: boolean;
+  dailyReviewScheduleTime: string;
 }
 
 export interface IntentInput {
@@ -50,6 +52,26 @@ export interface IntentPlan {
 
 export type AgentSessionStatus = "active" | "blocked" | "completed" | "unknown";
 
+export interface AgentTranscriptCapture {
+  canonicalPath: string;
+  sha256: string;
+  byteLength: number;
+  coverage: {
+    startByte: number;
+    endByte: number;
+  };
+}
+
+export type AgentSessionOrigin = "primary" | "subagent" | "automation" | "unknown";
+
+export interface AgentSessionLineage {
+  origin: AgentSessionOrigin;
+  parentSessionId?: string;
+  agentPath?: string;
+  agentNickname?: string;
+  agentRole?: string;
+}
+
 export interface AgentWorkSession {
   id: string;
   platform: AgentPlatform;
@@ -67,6 +89,21 @@ export interface AgentWorkSession {
   summarySource?: "codex" | "claude" | "metadata";
   artifacts: string[];
   status: AgentSessionStatus;
+  transcriptCapture?: AgentTranscriptCapture;
+  lineage?: AgentSessionLineage;
+}
+
+export interface AgentEvidenceCoverageEntry {
+  sourceId: string;
+  disposition: "read" | "skipped" | "deduplicated" | "truncated" | "failed";
+  detail: string;
+}
+
+export interface AgentEvidenceScope {
+  timeZone: string;
+  startInclusive: string;
+  endExclusive: string;
+  evidenceCutoff: string;
 }
 
 export interface AgentWorkSnapshot {
@@ -75,6 +112,8 @@ export interface AgentWorkSnapshot {
   sessions: AgentWorkSession[];
   sources: string[];
   warnings: string[];
+  evidenceCoverage?: AgentEvidenceCoverageEntry[];
+  evidenceScope?: AgentEvidenceScope;
 }
 
 export interface CockpitData {

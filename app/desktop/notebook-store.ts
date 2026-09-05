@@ -1,15 +1,21 @@
 import path from "node:path";
 import { buildResumeCommand } from "../../src/resume";
 import type { AgentSessionStatus, AgentWorkSession } from "../../src/types";
+import type { StructuredTodayReflectionV1, TodayWorklineIndexV1 } from "../../src/structured-today-contracts";
+import { normalizeDailyReviewPackage, type DailyReviewPackage } from "../../src/workline-review";
+import { createTodayBoardGeneration, legacyTodayBoardGeneration, projectTodayBoard, type TodayBoardPackageGeneration } from "../../src/today-board";
 import type {
   DailyContinuationBookmark,
   DailyDraftInput,
   DailyNotebookPage,
+  DailySealInput,
+  DailyWorklineReflection,
   DailyWorkRecord,
   DesktopNotebookState,
   NotebookNote,
   NotebookNoteDelivery,
-  NotebookNoteInput
+  NotebookNoteInput,
+  StructuredTodaySealedCloseoutV1
 } from "./api";
 
 export interface NotebookDocument {
@@ -59,6 +65,7 @@ export function notebookStateForDate(document: NotebookDocument, date: string, s
   return {
     notes: document.notes.filter((note) => note.logicalDate === logicalDate).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(cloneNote),
     page,
+    todayBoard: projectTodayBoard(page, sessions),
     previewRecords,
     continuationCandidates: candidates,
     knowledgeRoot: document.knowledgeRoot,
@@ -154,14 +161,20 @@ export function composeDailyPage(
   document: NotebookDocument,
   logicalDate: string,
   sessions: AgentWorkSession[],
-  now = new Date()
+  now = new Date(),
+  reviewPackage?: DailyReviewPackage
 ): NotebookDocument {
   if (!isDate(logicalDate)) throw new Error("手帐日期无效。");
   const existing = document.pages[logicalDate];
   if (existing?.status === "sealed") throw new Error("这一天已经封页，不能重新整理。");
   const timestamp = now.toISOString();
+  const existingGenerations = generationsFor(existing);
+  const appendedGeneration = reviewPackage ? createTodayBoardGeneration(reviewPackage, sessions, existingGenerations.length) : undefined;
+  const packageGenerations = appendedGeneration ? [...existingGenerations, appendedGeneration] : existingGenerations;
+  const activeGeneration = appendedGeneration ?? packageGenerations.at(-1);
+  const exactReviewPackage = activeGeneration?.package;
   const page: DailyNotebookPage = {
-    schemaVersion: 1,
+    schemaVersion: 3,
     logicalDate,
     status: "draft",
     createdAt: existing?.createdAt ?? timestamp,
@@ -169,9 +182,55 @@ export function composeDailyPage(
     evidenceCutoff: timestamp,
     workRecords: existing?.workRecords.length ? existing.workRecords : compileWorkRecords(sessions),
     reflection: existing?.reflection ?? "",
+    ...(exactReviewPackage ? { reviewPackage: exactReviewPackage } : {}),
+    ...(packageGenerations.length ? { packageGenerations } : {}),
+    ...(activeGeneration ? { activePackageGenerationId: activeGeneration.id } : {}),
+    worklineReflections: existing?.worklineReflections ?? [],
     bookmarks: existing?.bookmarks ?? []
   };
   return { ...document, pages: { ...document.pages, [logicalDate]: page } };
+}
+
+export function appendDailyReviewGeneration(
+  document: NotebookDocument,
+  logicalDate: string,
+  sessions: AgentWorkSession[],
+  now: Date,
+  reviewPackage: DailyReviewPackage,
+  expectedActiveGenerationId: string | null
+): NotebookDocument {
+  const existing = document.pages[logicalDate];
+  if (existing?.status === "sealed") throw new Error("这一天已经封页，不能重新整理。");
+  const activeGenerationId = existing?.activePackageGenerationId ?? null;
+  if (activeGenerationId !== expectedActiveGenerationId) {
+    throw new Error("这一天的回看材料已经变化；当前整理结果已过期，请重新刷新。");
+  }
+  return composeDailyPage(document, logicalDate, sessions, now, reviewPackage);
+}
+
+export function recordDailyCompilationFailure(
+  document: NotebookDocument,
+  logicalDate: string,
+  error: string,
+  now = new Date(),
+  expectedActiveGenerationId?: string | null
+): NotebookDocument {
+  const ensured = document.pages[logicalDate]
+    ? document
+    : composeDailyPage(document, logicalDate, [], now);
+  const existing = ensured.pages[logicalDate];
+  if (!existing || existing.status !== "draft") throw new Error("这一天当前不能记录整理失败。");
+  if (expectedActiveGenerationId !== undefined && (existing.activePackageGenerationId ?? null) !== expectedActiveGenerationId) {
+    return ensured;
+  }
+  const lastCompilationError = cleanText(error, 2_000) || "整理失败，请重试。";
+  return {
+    ...ensured,
+    pages: {
+      ...ensured.pages,
+      [logicalDate]: { ...existing, lastCompilationError, updatedAt: now.toISOString() }
+    }
+  };
 }
 
 export function saveDailyDraft(
@@ -183,10 +242,15 @@ export function saveDailyDraft(
 ): NotebookDocument {
   const existing = document.pages[logicalDate];
   if (!existing || existing.status !== "draft") throw new Error("请先开始整理今天。");
+  const activeGeneration = requireExpectedActiveGeneration(existing, input.expectedActiveGenerationId);
   const bookmarks = selectBookmarks(input.bookmarkIds, uniqueBookmarks([...existing.bookmarks, ...candidates]));
+  const worklineReflections = input.worklineReflections === undefined
+    ? existing.worklineReflections
+    : mergeActiveWorklineReflections(existing.worklineReflections, input.worklineReflections, activeGeneration, now);
   const page: DailyNotebookPage = {
     ...existing,
     reflection: cleanText(input.reflection, 12_000),
+    worklineReflections,
     bookmarks,
     updatedAt: now.toISOString()
   };
@@ -196,10 +260,13 @@ export function saveDailyDraft(
 export function sealDailyPage(
   document: NotebookDocument,
   logicalDate: string,
-  input: DailyDraftInput,
+  input: DailySealInput,
   candidates: DailyContinuationBookmark[],
   now = new Date()
 ): NotebookDocument {
+  const current = document.pages[logicalDate];
+  if (!current || current.status !== "draft") throw new Error("请先开始整理今天。");
+  requireExpectedActiveGeneration(current, input.expectedActiveGenerationId);
   const saved = saveDailyDraft(document, logicalDate, input, candidates, now);
   const page = saved.pages[logicalDate];
   if (!page) throw new Error("今天的页面不存在。");
@@ -211,6 +278,62 @@ export function sealDailyPage(
       [logicalDate]: { ...page, status: "sealed", sealedAt: timestamp, updatedAt: timestamp }
     }
   };
+}
+
+export function sealStructuredTodayPage(
+  document: NotebookDocument,
+  logicalDate: string,
+  index: TodayWorklineIndexV1,
+  reflections: StructuredTodayReflectionV1[],
+  closeout: StructuredTodaySealedCloseoutV1,
+  candidates: DailyContinuationBookmark[],
+  bookmarkIds: string[],
+  now = new Date()
+): NotebookDocument {
+  if (!isDate(logicalDate) || index.logicalDate !== logicalDate) throw new Error("结构化封页日期无效。");
+  const current = document.pages[logicalDate];
+  if (current?.status === "sealed") throw new Error("这一天已经封页，不能重复封存。");
+  if (
+    closeout.index.artifactId !== index.artifactId ||
+    closeout.index.revision !== index.revision ||
+    closeout.index.contentHash !== index.contentHash
+  ) throw new Error("结构化封页索引已经变化。");
+  const timestamp = now.toISOString();
+  const sessionById = new Map(index.sessions.map((session) => [session.sessionId, session]));
+  const workRecords: DailyWorkRecord[] = index.worklines.map((workline) => ({
+    id: `structured-record-${workline.worklineId}`,
+    projectKey: `structured:${workline.worklineId}`,
+    projectName: "结构化工作脉络",
+    title: workline.title,
+    summary: workline.summary,
+    changed: workline.possibleChange,
+    uncertainty: workline.evidenceReadiness === "ready" ? "证据可展开。" : "证据仍不完整或受阻。",
+    occurredAt: workline.endedAt ?? workline.startedAt,
+    sessions: workline.sessionIds.flatMap((sessionId) => {
+      const session = sessionById.get(sessionId);
+      return session ? [{ id: session.sessionId, platform: session.provider, path: session.sourcePath, title: session.title }] : [];
+    })
+  }));
+  const bookmarks = selectBookmarks(bookmarkIds, candidates);
+  const reflection = reflections
+    .sort((left, right) => left.worklineId.localeCompare(right.worklineId))
+    .map((item) => item.text)
+    .join("\n\n");
+  const page: DailyNotebookPage = {
+    schemaVersion: 4,
+    logicalDate,
+    status: "sealed",
+    createdAt: current?.createdAt ?? timestamp,
+    updatedAt: timestamp,
+    evidenceCutoff: timestamp,
+    sealedAt: timestamp,
+    workRecords,
+    reflection,
+    worklineReflections: [],
+    bookmarks,
+    structuredCloseout: structuredClone(closeout)
+  };
+  return { ...document, pages: { ...document.pages, [logicalDate]: page } };
 }
 
 export function findNotebookNote(document: NotebookDocument, noteId: string): NotebookNote {
@@ -305,8 +428,19 @@ function normalizePage(value: unknown, logicalDate: string): DailyNotebookPage {
   if (!value || typeof value !== "object") return emptyPage(logicalDate);
   const raw = value as Partial<DailyNotebookPage>;
   const status = raw.status === "sealed" ? "sealed" : raw.status === "draft" ? "draft" : "unformed";
+  const reviewPackage = normalizeDailyReviewPackage(raw.reviewPackage, logicalDate);
+  const hasPackageGenerations = Object.prototype.hasOwnProperty.call(raw, "packageGenerations");
+  const packageGenerations = hasPackageGenerations ? normalizePackageGenerations(raw.packageGenerations, logicalDate) : [];
+  const legacyGeneration = !hasPackageGenerations && reviewPackage ? legacyTodayBoardGeneration(reviewPackage) : undefined;
+  const generations = packageGenerations.length ? packageGenerations : legacyGeneration ? [legacyGeneration] : [];
+  const hasExplicitActiveGenerationId = Object.prototype.hasOwnProperty.call(raw, "activePackageGenerationId");
+  const requestedActiveGenerationId = cleanText(raw.activePackageGenerationId, 400);
+  const activeGeneration = hasExplicitActiveGenerationId
+    ? generations.find((generation) => generation.id === requestedActiveGenerationId)
+    : hasPackageGenerations ? undefined : generations.at(-1);
+  const structuredCloseout = normalizeStructuredCloseout(raw.structuredCloseout);
   return {
-    schemaVersion: 1,
+    schemaVersion: raw.schemaVersion === 4 && structuredCloseout ? 4 : 3,
     logicalDate,
     status,
     ...(raw.createdAt ? { createdAt: cleanTimestamp(raw.createdAt) } : {}),
@@ -315,13 +449,234 @@ function normalizePage(value: unknown, logicalDate: string): DailyNotebookPage {
     ...(status === "sealed" && raw.sealedAt ? { sealedAt: cleanTimestamp(raw.sealedAt) } : {}),
     workRecords: Array.isArray(raw.workRecords) ? raw.workRecords.map(normalizeWorkRecord).filter((item): item is DailyWorkRecord => Boolean(item)) : [],
     reflection: cleanText(raw.reflection, 12_000),
-    bookmarks: Array.isArray(raw.bookmarks) ? raw.bookmarks.map(normalizeBookmark).filter((item): item is DailyContinuationBookmark => Boolean(item)).slice(0, 3) : []
+    ...(activeGeneration ? { reviewPackage: activeGeneration.package } : {}),
+    ...(generations.length ? { packageGenerations: generations } : {}),
+    ...(hasExplicitActiveGenerationId
+      ? { activePackageGenerationId: requestedActiveGenerationId }
+      : activeGeneration ? { activePackageGenerationId: activeGeneration.id } : {}),
+    ...(cleanText(raw.lastCompilationError, 2_000) ? { lastCompilationError: cleanText(raw.lastCompilationError, 2_000) } : {}),
+    worklineReflections: generations.length && Array.isArray(raw.worklineReflections)
+      ? normalizeWorklineReflections(raw.worklineReflections, generations, activeGeneration)
+      : [],
+    bookmarks: Array.isArray(raw.bookmarks)
+      ? uniqueBookmarks(raw.bookmarks.map(normalizeBookmark).filter((item): item is DailyContinuationBookmark => Boolean(item))).slice(0, 3)
+      : [],
+    ...(structuredCloseout ? { structuredCloseout } : {})
   };
 }
 
+function normalizeStructuredCloseout(value: unknown): StructuredTodaySealedCloseoutV1 | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Partial<StructuredTodaySealedCloseoutV1>;
+  const index = normalizeStructuredArtifactReference(raw.index);
+  if (!index || !Array.isArray(raw.dossiers) || !Array.isArray(raw.reflections) || !Array.isArray(raw.proposals) || !Array.isArray(raw.dispositions)) {
+    return undefined;
+  }
+  const dossiers = raw.dossiers.flatMap((item) => {
+    const reference = normalizeStructuredArtifactReference(item);
+    const worklineId = cleanText(item?.worklineId, 240);
+    return reference && worklineId ? [{ ...reference, worklineId }] : [];
+  });
+  const reflections = raw.reflections.flatMap((item) => {
+    const reflectionId = cleanText(item?.reflectionId, 240);
+    const revision = Number(item?.revision);
+    const contentHash = cleanText(item?.contentHash, 64);
+    const worklineId = cleanText(item?.worklineId, 240);
+    return reflectionId && Number.isSafeInteger(revision) && revision > 0 && /^[a-f0-9]{64}$/.test(contentHash) && worklineId
+      ? [{ reflectionId, revision, contentHash, worklineId }]
+      : [];
+  });
+  const proposals = raw.proposals.flatMap((item) => {
+    const reference = normalizeStructuredArtifactReference(item);
+    const worklineId = cleanText(item?.worklineId, 240);
+    return reference && worklineId ? [{ ...reference, worklineId }] : [];
+  });
+  const dispositions = raw.dispositions.flatMap((item) => {
+    const dispositionId = cleanText(item?.dispositionId, 240);
+    const revision = Number(item?.revision);
+    const proposalId = cleanText(item?.proposalId, 240);
+    return dispositionId && Number.isSafeInteger(revision) && revision > 0 && proposalId
+      ? [{ dispositionId, revision, proposalId }]
+      : [];
+  });
+  if (
+    dossiers.length !== raw.dossiers.length ||
+    reflections.length !== raw.reflections.length ||
+    proposals.length !== raw.proposals.length ||
+    dispositions.length !== raw.dispositions.length
+  ) return undefined;
+  return { index, dossiers, reflections, proposals, dispositions };
+}
+
+function normalizeStructuredArtifactReference(value: unknown): { artifactId: string; revision: number; contentHash: string } | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as { artifactId?: unknown; revision?: unknown; contentHash?: unknown };
+  const artifactId = cleanText(raw.artifactId, 240);
+  const revision = Number(raw.revision);
+  const contentHash = cleanText(raw.contentHash, 64);
+  return artifactId && Number.isSafeInteger(revision) && revision > 0 && /^[a-f0-9]{64}$/.test(contentHash)
+    ? { artifactId, revision, contentHash }
+    : undefined;
+}
+
+function generationsFor(page: DailyNotebookPage | undefined): TodayBoardPackageGeneration[] {
+  if (!page) return [];
+  if (Object.prototype.hasOwnProperty.call(page, "packageGenerations")) {
+    return page.packageGenerations?.length ? structuredClone(page.packageGenerations) : [];
+  }
+  return page.reviewPackage ? [legacyTodayBoardGeneration(page.reviewPackage)] : [];
+}
+
+function activeGenerationForPage(page: DailyNotebookPage): TodayBoardPackageGeneration | undefined {
+  const generations = generationsFor(page);
+  if (!Object.prototype.hasOwnProperty.call(page, "activePackageGenerationId")) {
+    return Object.prototype.hasOwnProperty.call(page, "packageGenerations") ? undefined : generations.at(-1);
+  }
+  const activeGenerationId = cleanText(page.activePackageGenerationId, 400);
+  return generations.find((generation) => generation.id === activeGenerationId);
+}
+
+function requireExpectedActiveGeneration(
+  page: DailyNotebookPage,
+  expectedActiveGenerationId: string | null
+): TodayBoardPackageGeneration {
+  const activeGenerationId = cleanText(page.activePackageGenerationId, 400);
+  const activeGeneration = activeGenerationForPage(page);
+  if (!activeGenerationId || !activeGeneration) {
+    throw new Error("请先整理出有效的工作线材料，再保存或封存今天。");
+  }
+  if (activeGenerationId !== expectedActiveGenerationId) {
+    throw new Error("这一天的回看材料已经变化；当前保存或封页请求已过期，请重新查看。");
+  }
+  return activeGeneration;
+}
+
+function normalizePackageGenerations(value: unknown, logicalDate: string): TodayBoardPackageGeneration[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const raw = item as Partial<TodayBoardPackageGeneration>;
+    const reviewPackage = normalizeDailyReviewPackage(raw.package, logicalDate);
+    const id = cleanText(raw.id, 400);
+    if (!reviewPackage || !id || seen.has(id)) return [];
+    seen.add(id);
+    const admittedEvidence = Array.isArray(raw.admittedEvidence) ? raw.admittedEvidence.flatMap((entry) => {
+      if (!entry || typeof entry !== "object") return [];
+      const identity = normalizeStoredIdentity(entry.identity);
+      const revision = cleanText(entry.revision, 400);
+      return identity && revision ? [{ identity, revision }] : [];
+    }) : [];
+    return [{
+      schemaVersion: 1,
+      id,
+      generatedAt: cleanTimestamp(raw.generatedAt),
+      evidenceCutoff: cleanTimestamp(raw.evidenceCutoff),
+      admittedEvidence,
+      package: reviewPackage
+    }];
+  });
+}
+
+function selectWorklineReflections(
+  values: Array<Pick<DailyWorklineReflection, "worklineId" | "text">>,
+  generation: TodayBoardPackageGeneration | undefined,
+  now: Date
+): DailyWorklineReflection[] {
+  if (!generation) return [];
+  const allowed = new Set(generation.package.worklines.map((workline) => workline.id));
+  const seen = new Set<string>();
+  const updatedAt = now.toISOString();
+  return values.flatMap((value) => {
+    const worklineId = cleanText(value?.worklineId, 240);
+    const text = cleanText(value?.text, 12_000);
+    if (!worklineId || !text || !allowed.has(worklineId) || seen.has(worklineId)) return [];
+    seen.add(worklineId);
+    return [{ packageGenerationId: generation.id, worklineId, text, updatedAt }];
+  });
+}
+
+function mergeActiveWorklineReflections(
+  existing: DailyWorklineReflection[],
+  values: Array<Pick<DailyWorklineReflection, "worklineId" | "text">>,
+  generation: TodayBoardPackageGeneration | undefined,
+  now: Date
+): DailyWorklineReflection[] {
+  if (!generation) return existing;
+  const historical = existing.filter((reflection) => reflection.packageGenerationId !== generation.id);
+  return [...historical, ...selectWorklineReflections(values, generation, now)];
+}
+
+function normalizeWorklineReflections(
+  value: unknown[],
+  generations: TodayBoardPackageGeneration[],
+  activeGeneration: TodayBoardPackageGeneration | undefined
+): DailyWorklineReflection[] {
+  const seen = new Set<string>();
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const raw = item as Partial<DailyWorklineReflection>;
+    const worklineId = cleanText(raw.worklineId, 240);
+    const text = cleanText(raw.text, 12_000);
+    const updatedAt = cleanTimestamp(raw.updatedAt);
+    if (!worklineId || !text) return [];
+    const hasGenerationId = Object.prototype.hasOwnProperty.call(raw, "packageGenerationId");
+    const requestedGenerationId = cleanText(raw.packageGenerationId, 400);
+    const generation = hasGenerationId
+      ? generations.find((candidate) => candidate.id === requestedGenerationId && generationHasWorkline(candidate, worklineId))
+      : legacyReflectionGeneration(worklineId, updatedAt, generations, activeGeneration);
+    if (!generation) return [];
+    const identity = `${generation.id}\0${worklineId}`;
+    if (seen.has(identity)) return [];
+    seen.add(identity);
+    return [{ packageGenerationId: generation.id, worklineId, text, updatedAt }];
+  });
+}
+
+function legacyReflectionGeneration(
+  worklineId: string,
+  updatedAt: string,
+  generations: TodayBoardPackageGeneration[],
+  activeGeneration: TodayBoardPackageGeneration | undefined
+): TodayBoardPackageGeneration | undefined {
+  const updatedAtMs = Date.parse(updatedAt);
+  let latestEligible: TodayBoardPackageGeneration | undefined;
+  let latestGeneratedAt = Number.NEGATIVE_INFINITY;
+  let latestContaining: TodayBoardPackageGeneration | undefined;
+  let latestContainingGeneratedAt = Number.NEGATIVE_INFINITY;
+  for (const generation of generations) {
+    const generatedAt = Date.parse(generation.generatedAt);
+    if (!generationHasWorkline(generation, worklineId)) continue;
+    if (generatedAt >= latestContainingGeneratedAt) {
+      latestContaining = generation;
+      latestContainingGeneratedAt = generatedAt;
+    }
+    if (generatedAt > updatedAtMs) continue;
+    if (generatedAt >= latestGeneratedAt) {
+      latestEligible = generation;
+      latestGeneratedAt = generatedAt;
+    }
+  }
+  return latestEligible
+    ?? (activeGeneration && generationHasWorkline(activeGeneration, worklineId) ? activeGeneration : undefined)
+    ?? latestContaining;
+}
+
+function generationHasWorkline(generation: TodayBoardPackageGeneration, worklineId: string): boolean {
+  return generation.package.worklines.some((workline) => workline.id === worklineId);
+}
+
 function selectBookmarks(ids: string[], candidates: DailyContinuationBookmark[]): DailyContinuationBookmark[] {
-  const wanted = new Set(Array.isArray(ids) ? ids.slice(0, 3) : []);
-  return candidates.filter((candidate) => wanted.has(candidate.id)).slice(0, 3).map((item) => structuredClone(item));
+  if (!Array.isArray(ids)) throw new Error("续上书签请求无效。");
+  if (ids.length > 3) throw new Error("续上书签最多只能选择 3 项。");
+  const wanted = ids.map((id) => cleanText(id, 2_000));
+  if (new Set(wanted).size !== wanted.length) throw new Error("续上书签必须保持唯一，不能重复选择。");
+  const available = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+  return wanted.map((id) => {
+    const bookmark = available.get(id);
+    if (!bookmark) throw new Error(`续上书签不存在或已经失效：${id || "<empty>"}`);
+    return structuredClone(bookmark);
+  });
 }
 
 function uniqueBookmarks(bookmarks: DailyContinuationBookmark[]): DailyContinuationBookmark[] {
@@ -406,8 +761,13 @@ function sessionKey(session: AgentWorkSession): string {
 function clonePage(page: DailyNotebookPage): DailyNotebookPage { return structuredClone(page); }
 function cloneNote(note: NotebookNote): NotebookNote { return structuredClone(note); }
 function uniqueNotes(notes: NotebookNote[]): NotebookNote[] { const seen = new Set<string>(); return notes.filter((note) => { if (seen.has(note.id)) return false; seen.add(note.id); return true; }); }
-function emptyPage(logicalDate: string): DailyNotebookPage { return { schemaVersion: 1, logicalDate, status: "unformed", workRecords: [], reflection: "", bookmarks: [] }; }
+function emptyPage(logicalDate: string): DailyNotebookPage { return { schemaVersion: 1, logicalDate, status: "unformed", workRecords: [], reflection: "", worklineReflections: [], bookmarks: [] }; }
 function cleanText(value: unknown, limit: number): string { return typeof value === "string" ? value.replace(/\0/g, "").trim().slice(0, limit) : ""; }
+
+function normalizeStoredIdentity(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0 || value.length > 4_000 || /[\0\r\n]/.test(value)) return "";
+  return value;
+}
 function cleanTimestamp(value: unknown): string { const date = new Date(typeof value === "string" ? value : 0); return Number.isNaN(date.getTime()) ? new Date(0).toISOString() : date.toISOString(); }
 function isDate(value: unknown): value is string { return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value); }
 function localDate(date = new Date()): string { const offset = date.getTimezoneOffset() * 60_000; return new Date(date.getTime() - offset).toISOString().slice(0, 10); }

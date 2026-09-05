@@ -18,8 +18,8 @@ if (!arch || !new Set(["arm64", "x64"]).has(arch)) throw new Error("Could not de
 
 const packageJson = JSON.parse(await fs.readFile("package.json", "utf8"));
 const version = packageJson.version;
-const expectedRootName = `agent-whiteboard-v${version}-macos-${arch}`;
-const temp = await fs.mkdtemp(path.join(os.tmpdir(), "agent-whiteboard-release-"));
+const expectedRootName = `agent-notebook-v${version}-macos-${arch}`;
+const temp = await fs.mkdtemp(path.join(os.tmpdir(), "agent-notebook-release-"));
 const mountPoint = path.join(temp, "mounted");
 let mounted = false;
 
@@ -54,7 +54,7 @@ try {
     }
   }
 
-  const installer = path.join(root, "Install Agent Whiteboard.command");
+  const installer = path.join(root, "Install Agent Notebook.command");
   const installerStat = await fs.stat(installer);
   if ((installerStat.mode & 0o111) === 0) throw new Error("Release installer is not executable.");
   const installerText = await fs.readFile(installer, "utf8");
@@ -63,7 +63,7 @@ try {
   }
 
   const main = await fs.readFile(path.join(plugin, "main.js"), "utf8");
-  for (const snippet of ["agent-whiteboard-view", "refresh-work-sessions", ".codex/sessions", ".claude/projects"]) {
+  for (const snippet of ["agent-notebook-view", "refresh-work-sessions", ".codex/sessions", ".claude/projects"]) {
     if (!main.includes(snippet)) throw new Error(`Release main.js is missing ${snippet}.`);
   }
 

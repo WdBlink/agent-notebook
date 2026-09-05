@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -11,7 +11,11 @@ const fsAdapter: RuntimeFileSystem = {
   readdir,
   async readFile(filePath: string, encoding: "utf8") {
     return readFile(filePath, encoding);
-  }
+  },
+  async readBytes(filePath: string) {
+    return readFile(filePath);
+  },
+  realpath
 };
 
 test("extracts Codex JSONL sessions with resume hints", () => {
@@ -53,6 +57,35 @@ test("extracts Codex JSONL sessions with resume hints", () => {
   assert.equal(session?.resumable, true);
 });
 
+test("preserves Codex subagent lineage instead of treating a child transcript as a primary Session", () => {
+  const content = [
+    JSON.stringify({
+      timestamp: "2026-08-30T03:31:02.892Z",
+      type: "session_meta",
+      payload: {
+        id: "child-thread",
+        parent_thread_id: "root-thread",
+        thread_source: "subagent",
+        source: { subagent: { thread_spawn: {
+          parent_thread_id: "root-thread",
+          agent_path: "/root/radar_pipeline",
+          agent_nickname: "Confucius",
+          agent_role: "worker"
+        } } }
+      }
+    }),
+    JSON.stringify({ type: "response_item", payload: { type: "message", role: "user", content: [{ text: "执行雷达子任务" }] } })
+  ].join("\n");
+  const session = extractWorkSessionFromText(content, "/tmp/child.jsonl", "codex", "2026-08-30T04:00:00.000Z");
+  assert.deepEqual(session?.lineage, {
+    origin: "subagent",
+    parentSessionId: "root-thread",
+    agentPath: "/root/radar_pipeline",
+    agentNickname: "Confucius",
+    agentRole: "worker"
+  });
+});
+
 test("Codex archived sessions are completed and model summaries cannot reopen them", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-archive-"));
   const archive = path.join(root, ".codex", "archived_sessions");
@@ -72,6 +105,7 @@ test("Codex archived sessions are completed and model summaries cannot reopen th
     });
     assert.equal(snapshot.sessions[0]?.status, "completed");
     assert.equal(snapshot.sessions[0]?.title, "模型标题");
+    assert.match(snapshot.sessions[0]?.transcriptCapture?.sha256 ?? "", /^[a-f0-9]{64}$/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -201,6 +235,189 @@ test("scans yesterday Codex and Claude files from configured local roots", async
     assert.equal(snapshot.sessions.length, 2);
     assert.ok(snapshot.sessions.some((session) => session.platform === "codex" && session.resumeHint === "codex resume codex-yesterday"));
     assert.ok(snapshot.sessions.some((session) => session.platform === "claude" && session.title.includes("等 batch v2 完成")));
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("scanner captures the canonical transcript hash, byte length, and complete byte coverage", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-evidence-capture-"));
+  const realRoot = path.join(temp, "real-sessions");
+  const root = path.join(temp, ".codex", "sessions");
+  const sessionPath = path.join(realRoot, "rollout-2026-07-02.jsonl");
+  const content = [
+    JSON.stringify({ timestamp: "2026-07-02T09:00:00.000Z", type: "session_meta", payload: { id: "capture-id" } }),
+    JSON.stringify({
+      timestamp: "2026-07-02T09:01:00.000Z",
+      type: "response_item",
+      payload: { type: "message", role: "user", content: [{ type: "input_text", text: "冻结这段证据" }] }
+    })
+  ].join("\n");
+
+  try {
+    await mkdir(realRoot, { recursive: true });
+    await mkdir(path.dirname(root), { recursive: true });
+    await symlink(realRoot, root, "dir");
+    await writeFile(sessionPath, content);
+    const targetTime = new Date("2026-07-02T10:00:00.000Z");
+    await utimes(sessionPath, targetTime, targetTime);
+
+    const snapshot = await loadAgentWorkSnapshot(createEmptyData().settings, {
+      now: new Date("2026-07-03T12:00:00.000Z"),
+      roots: [root],
+      fs: fsAdapter
+    });
+    const session = snapshot.sessions[0] as (typeof snapshot.sessions)[number] & {
+      transcriptCapture?: {
+        canonicalPath: string;
+        sha256: string;
+        byteLength: number;
+        coverage: { startByte: number; endByte: number };
+      };
+    };
+
+    assert.equal(session.path, await realpath(sessionPath));
+    assert.deepEqual(session.transcriptCapture, {
+      canonicalPath: await realpath(sessionPath),
+      sha256: "da66d7a01759dbfbceace356dc1f2d87976249c58fb22c5afe79245986b587be",
+      byteLength: 261,
+      coverage: { startByte: 0, endByte: 261 }
+    });
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("scanner reports a discovered transcript that cannot be captured instead of silently omitting it", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-evidence-warning-"));
+  const root = path.join(temp, ".codex", "sessions");
+  const goodPath = path.join(root, "good-2026-07-02.jsonl");
+  const badPath = path.join(root, "bad-2026-07-02.jsonl");
+  const targetTime = new Date("2026-07-02T10:00:00.000Z");
+  try {
+    await mkdir(root, { recursive: true });
+    await writeFile(goodPath, JSON.stringify({ timestamp: "2026-07-02T09:00:00.000Z", type: "session_meta", payload: { id: "good" } }));
+    await writeFile(badPath, JSON.stringify({ timestamp: "2026-07-02T09:00:00.000Z", type: "session_meta", payload: { id: "bad" } }));
+    await utimes(goodPath, targetTime, targetTime);
+    await utimes(badPath, targetTime, targetTime);
+    const canonicalBadPath = await realpath(badPath);
+
+    const snapshot = await loadAgentWorkSnapshot(createEmptyData().settings, {
+      now: new Date("2026-07-03T12:00:00.000Z"),
+      roots: [root],
+      fs: {
+        ...fsAdapter,
+        async readBytes(target) {
+          if (target === canonicalBadPath) throw new Error("permission denied");
+          return readFile(target);
+        }
+      }
+    });
+
+    assert.deepEqual(snapshot.sessions.map((item) => item.id), ["good"]);
+    assert.match(snapshot.warnings.join(" "), /bad-2026-07-02\.jsonl/);
+    assert.match(snapshot.warnings.join(" "), /permission denied/);
+    assert.ok(snapshot.evidenceCoverage?.some((entry) =>
+      entry.sourceId.endsWith("bad-2026-07-02.jsonl") &&
+      entry.disposition === "failed" &&
+      entry.detail.includes("permission denied")
+    ));
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("scanner records read, skipped, deduplicated, and truncated evidence dispositions", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-evidence-coverage-"));
+  const root = path.join(temp, ".codex", "sessions");
+  const targetTime = new Date("2026-07-02T10:00:00.000Z");
+  const event = (id: string, timestamp = "2026-07-02T09:00:00.000Z") => [
+    JSON.stringify({ timestamp, type: "session_meta", payload: { id } }),
+    JSON.stringify({ timestamp, type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: id }] } })
+  ].join("\n");
+
+  try {
+    await mkdir(root, { recursive: true });
+    const files = [
+      ["01-good.jsonl", event("shared-id")],
+      ["02-duplicate.jsonl", event("shared-id")],
+      ["03-outside.jsonl", event("outside", "2026-07-01T09:00:00.000Z")],
+      ["04-over-limit.jsonl", event("over-limit")],
+      ["05-over-limit.jsonl", event("over-limit-two")]
+    ] as const;
+    for (const [index, [name, content]] of files.entries()) {
+      const target = path.join(root, name);
+      await writeFile(target, content);
+      const rankedTime = new Date(targetTime.getTime() - index * 1_000);
+      await utimes(target, rankedTime, rankedTime);
+    }
+
+    const snapshot = await loadAgentWorkSnapshot(createEmptyData().settings, {
+      date: "2026-07-02",
+      now: new Date("2026-07-03T12:00:00.000Z"),
+      roots: [root],
+      fs: fsAdapter,
+      maxFiles: 4,
+      maxSessions: 10
+    });
+
+    const dispositions = snapshot.evidenceCoverage?.map((entry) => entry.disposition) ?? [];
+    assert.ok(dispositions.includes("read"));
+    assert.ok(dispositions.includes("deduplicated"));
+    assert.ok(dispositions.includes("skipped"));
+    assert.ok(dispositions.includes("truncated"));
+    assert.ok(snapshot.evidenceCoverage?.some((entry) => entry.detail.includes("规范副本")));
+    assert.equal(snapshot.evidenceScope?.evidenceCutoff, "2026-07-03T12:00:00.000Z");
+    assert.equal(snapshot.evidenceScope?.timeZone.length ? true : false, true);
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("scanner records discovery failures and Session-cap omissions as incomplete coverage", async () => {
+  const settings = createEmptyData().settings;
+  const missingRoot = "/tmp/.codex/traceink-missing-root";
+  const failed = await loadAgentWorkSnapshot(settings, {
+    date: "2026-07-02",
+    now: new Date("2026-07-03T12:00:00.000Z"),
+    roots: [missingRoot],
+    fs: {
+      ...fsAdapter,
+      async readdir() {
+        const error = new Error("permission denied") as NodeJS.ErrnoException;
+        error.code = "EACCES";
+        throw error;
+      }
+    }
+  });
+  assert.deepEqual(failed.sessions, []);
+  assert.ok(failed.evidenceCoverage?.some((entry) =>
+    entry.sourceId.endsWith(missingRoot) &&
+    entry.disposition === "failed" &&
+    entry.detail.includes("permission denied")
+  ));
+
+  const temp = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-session-cap-"));
+  try {
+    const root = path.join(temp, ".codex", "sessions");
+    await mkdir(root, { recursive: true });
+    for (const [index, id] of ["first", "second"].entries()) {
+      const file = path.join(root, `${index}-${id}.jsonl`);
+      await writeFile(file, JSON.stringify({ timestamp: "2026-07-02T09:00:00.000Z", type: "session_meta", payload: { id } }));
+      const ranked = new Date(`2026-07-02T10:00:0${index}.000Z`);
+      await utimes(file, ranked, ranked);
+    }
+    const capped = await loadAgentWorkSnapshot(settings, {
+      date: "2026-07-02",
+      now: new Date("2026-07-03T12:00:00.000Z"),
+      roots: [root],
+      fs: fsAdapter,
+      maxSessions: 1
+    });
+    assert.equal(capped.sessions.length, 1);
+    assert.ok(capped.evidenceCoverage?.some((entry) =>
+      entry.disposition === "truncated" && entry.detail.includes("Session 容量上限")
+    ));
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
@@ -340,6 +557,14 @@ test("merges model summaries without allowing canonical paths or ids to change",
         async readFile(target, encoding) {
           if (target === path.join(temp, "codex", "rollout.jsonl")) return readFile(file, encoding);
           return readFile(target, encoding);
+        },
+        async readBytes(target) {
+          if (target === path.join(temp, "codex", "rollout.jsonl") || target === await realpath(file)) return readFile(file);
+          return readFile(target);
+        },
+        async realpath(target) {
+          if (target === path.join(temp, "codex", "rollout.jsonl")) return realpath(file);
+          return realpath(target);
         }
       },
       summarizer: async () => ({

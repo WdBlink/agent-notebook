@@ -8,7 +8,7 @@ ACTUAL_ARCH="$MACHINE"
 if [[ "$MACHINE" == "x86_64" ]]; then ACTUAL_ARCH="x64"; fi
 
 show_error() {
-  /usr/bin/osascript -e "display alert \"Agent Whiteboard 安装失败\" message \"$1\" as critical" >/dev/null 2>&1 || true
+  /usr/bin/osascript -e "display alert \"Agent Notebook 安装失败\" message \"$1\" as critical" >/dev/null 2>&1 || true
   print -u2 -- "$1"
 }
 
@@ -58,5 +58,5 @@ if [[ ! -f "$PLUGIN_DIR/main.js" || ! -f "$PLUGIN_DIR/styles.css" || ! -f "$PLUG
   exit 1
 fi
 
-/usr/bin/osascript -e "display dialog \"Agent Whiteboard $VERSION 已安装。请在 Obsidian → 设置 → 第三方插件中启用 Agent Whiteboard；若 Obsidian 已打开，请重新加载应用。\" buttons {\"完成\"} default button \"完成\"" >/dev/null 2>&1 || true
-print -- "Agent Whiteboard $VERSION installed to: $PLUGIN_DIR"
+/usr/bin/osascript -e "display dialog \"Agent Notebook $VERSION 已安装。请在 Obsidian → 设置 → 第三方插件中启用 Agent Notebook；若 Obsidian 已打开，请重新加载应用。\" buttons {\"完成\"} default button \"完成\"" >/dev/null 2>&1 || true
+print -- "Agent Notebook $VERSION installed to: $PLUGIN_DIR"

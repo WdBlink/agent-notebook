@@ -13,4 +13,6 @@ coverage/
 dist/
 runtime/process-membership
 /ctx
+/.superpowers/
 .od-skills/
+.worktrees/

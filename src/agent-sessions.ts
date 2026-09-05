@@ -1,7 +1,13 @@
-import { DEFAULT_SESSION_PROVIDERS, DEFAULT_SESSION_SCAN_ROOTS } from "./constants";
+import { createHash } from "node:crypto";
+import {
+  DEFAULT_SESSION_PROVIDERS,
+  DEFAULT_SESSION_SCAN_ROOTS,
+  MAX_WORK_SESSION_SNAPSHOT_SESSIONS
+} from "./constants";
 import { createEmptyWorkSessionSnapshot } from "./state";
 import type {
   AgentPlatform,
+  AgentEvidenceCoverageEntry,
   AgentSessionStatus,
   AgentWorkSession,
   AgentWorkSnapshot,
@@ -20,6 +26,8 @@ export interface RuntimeFileSystem {
   stat(path: string): Promise<RuntimeFileStat>;
   readdir(path: string): Promise<string[]>;
   readFile(path: string, encoding: "utf8"): Promise<string>;
+  readBytes(path: string): Promise<Uint8Array>;
+  realpath(path: string): Promise<string>;
 }
 
 export interface SessionScanOptions {
@@ -63,6 +71,12 @@ interface CandidateFile {
   sortTime: number;
 }
 
+interface CandidateCollection {
+  files: CandidateFile[];
+  truncated: boolean;
+  coverage: AgentEvidenceCoverageEntry[];
+}
+
 interface ParsedText {
   records: unknown[];
   plainText?: string;
@@ -76,7 +90,7 @@ interface ActivityWindow {
 }
 
 const DEFAULT_MAX_FILES = 90;
-const DEFAULT_MAX_SESSIONS = 24;
+const DEFAULT_MAX_SESSIONS = MAX_WORK_SESSION_SNAPSHOT_SESSIONS;
 const DEFAULT_MAX_DEPTH = 4;
 const DEFAULT_MAX_ENTRIES = 900;
 
@@ -92,15 +106,23 @@ export async function loadAgentWorkSnapshot(
     .filter(({ platform }) => enabledProviders.has(platform as SessionProvider));
   const sources = sourceDescriptors.map(({ source }) => source);
   const fs = options.fs ?? createRuntimeFileSystem();
+  const day = dayWindow(date, now);
   if (!fs) {
-    return { ...createEmptyWorkSessionSnapshot(date, now.toISOString()), sources };
+    return {
+      ...createEmptyWorkSessionSnapshot(date, now.toISOString()),
+      sources,
+      evidenceScope: evidenceScopeForDay(day, now.toISOString())
+    };
   }
 
   const homeDir = options.homeDir ?? runtimeHomeDir();
-  const day = dayWindow(date, now);
   const candidates: CandidateFile[] = [];
+  const evidenceCoverage: AgentEvidenceCoverageEntry[] = [];
   const maxFiles = options.maxFiles ?? DEFAULT_MAX_FILES;
-  const maxFilesPerRoot = Math.max(12, Math.ceil(maxFiles / Math.max(sources.length, 1)));
+  // Each provider root gets the full discovery budget before one global
+  // recency cut. Dividing the budget by root allowed a burst of child-Agent
+  // files to hide their older primary Session before lineage was parsed.
+  const maxFilesPerRoot = Math.max(12, maxFiles);
 
   for (const { source, platform } of sourceDescriptors) {
     const root = expandHome(source, homeDir);
@@ -109,43 +131,130 @@ export async function loadAgentWorkSnapshot(
       maxDepth: options.maxDepth ?? DEFAULT_MAX_DEPTH,
       maxEntries: options.maxEntries ?? DEFAULT_MAX_ENTRIES
     });
-    candidates.push(...found);
-  }
-
-  const sessions: AgentWorkSession[] = [];
-  const seen = new Set<string>();
-  const maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
-  const sorted = candidates.sort((a, b) => b.sortTime - a.sortTime).slice(0, maxFiles);
-
-  for (const candidate of sorted) {
-    if (sessions.length >= maxSessions) break;
-    const session = await readSession(candidate, fs, day);
-    if (!session) continue;
-    const key = session.resumable ? `${session.platform}:${session.id}` : `${session.platform}:${session.id}:${session.path}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    sessions.push(session);
-  }
-
-  let mergedSessions = sessions;
-  let warnings: string[] = [];
-  if (options.summarizer && sessions.length > 0) {
-    try {
-      const batch = await options.summarizer({ date, sessions, settings });
-      mergedSessions = mergeSessionSummaries(sessions, batch.summaries);
-      warnings = batch.warnings.slice(0, 8);
-    } catch (error) {
-      warnings = [`Agent 总结失败：${errorMessage(error)}`];
+    candidates.push(...found.files);
+    evidenceCoverage.push(...found.coverage);
+    if (found.truncated) {
+      evidenceCoverage.push({
+        sourceId: `${platform}:${root}`,
+        disposition: "truncated",
+        detail: "候选发现达到目录深度、文件数或目录项上限；范围可能不完整。"
+      });
     }
   }
 
+  const sessions: AgentWorkSession[] = [];
+  const seen = new Map<string, string>();
+  let warnings: string[] = [];
+  const maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
+  const ordered = candidates.sort((a, b) => b.sortTime - a.sortTime);
+  const sorted = ordered.slice(0, maxFiles);
+  for (const candidate of ordered.slice(maxFiles)) {
+    evidenceCoverage.push({
+      sourceId: candidateSourceId(candidate),
+      disposition: "truncated",
+      detail: "候选文件超过本次扫描上限，未进入读取队列。"
+    });
+  }
+
+  for (const candidate of sorted) {
+    let session: AgentWorkSession | null;
+    try {
+      session = await readSession(candidate, fs, day);
+    } catch (error) {
+      warnings.push(`会话证据读取失败（${candidate.path}）：${errorMessage(error)}`);
+      warnings = warnings.slice(0, 8);
+      evidenceCoverage.push({
+        sourceId: candidateSourceId(candidate),
+        disposition: "failed",
+        detail: `读取失败：${errorMessage(error)}`
+      });
+      continue;
+    }
+    if (!session) {
+      evidenceCoverage.push({
+        sourceId: candidateSourceId(candidate),
+        disposition: "skipped",
+        detail: "未读到落在本地日期范围内的规范事件。"
+      });
+      continue;
+    }
+    const key = session.resumable ? `${session.platform}:${session.id}` : `${session.platform}:${session.id}:${session.path}`;
+    const canonicalCopy = seen.get(key);
+    if (canonicalCopy) {
+      evidenceCoverage.push({
+        sourceId: candidateSourceId(candidate),
+        disposition: "deduplicated",
+        detail: `与已采用的规范副本重复：${canonicalCopy}`
+      });
+      continue;
+    }
+    seen.set(key, session.path);
+    sessions.push(session);
+    evidenceCoverage.push({
+      sourceId: candidateSourceId(candidate),
+      disposition: "read",
+      detail: `已采用规范副本：${session.platform}:${session.id}:${session.path}`
+    });
+  }
+
+  const retainedSessions = retainMainSessionFamilies(sessions, maxSessions);
+  const retainedIdentities = new Set(retainedSessions.map((session) => `${session.platform}:${session.id}:${session.path}`));
+  for (const session of sessions) {
+    if (retainedIdentities.has(`${session.platform}:${session.id}:${session.path}`)) continue;
+    evidenceCoverage.push({
+      sourceId: `${session.platform}:${session.path}`,
+      disposition: "truncated",
+      detail: "已达到本次 Session 容量上限；主会话优先保留，当前执行记录未进入快照。"
+    });
+  }
+
+  let mergedSessions = retainedSessions;
+  if (options.summarizer && retainedSessions.length > 0) {
+    try {
+      const batch = await options.summarizer({ date, sessions: retainedSessions, settings });
+      mergedSessions = mergeSessionSummaries(retainedSessions, batch.summaries);
+      warnings = [...warnings, ...batch.warnings].slice(0, 8);
+    } catch (error) {
+      warnings = [...warnings, `Agent 总结失败：${errorMessage(error)}`].slice(0, 8);
+    }
+  }
+
+  const generatedAt = (options.now ?? new Date()).toISOString();
   return {
     date,
-    generatedAt: now.toISOString(),
+    generatedAt,
     sources,
     sessions: mergedSessions,
-    warnings
+    warnings,
+    evidenceCoverage,
+    evidenceScope: evidenceScopeForDay(day, generatedAt)
   };
+}
+
+function retainMainSessionFamilies(sessions: AgentWorkSession[], maxSessions: number): AgentWorkSession[] {
+  if (sessions.length <= maxSessions) return sessions;
+  const main = sessions.filter((session) => session.lineage?.origin !== "subagent");
+  const retained = main.slice(0, maxSessions);
+  if (retained.length >= maxSessions) return retained;
+  const retainedRootIds = new Set(retained.map((session) => session.id));
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  const children = sessions.filter((session) => {
+    if (session.lineage?.origin !== "subagent") return false;
+    let parentId = session.lineage.parentSessionId;
+    const seen = new Set([session.id]);
+    while (parentId && !seen.has(parentId)) {
+      if (retainedRootIds.has(parentId)) return true;
+      seen.add(parentId);
+      parentId = byId.get(parentId)?.lineage?.parentSessionId;
+    }
+    return false;
+  });
+  return [...retained, ...children.slice(0, maxSessions - retained.length)]
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function candidateSourceId(candidate: CandidateFile): string {
+  return `${candidate.platform}:${candidate.path}`;
 }
 
 export function mergeSessionSummaries(
@@ -204,6 +313,7 @@ export function extractWorkSessionFromText(
   const artifacts = collectArtifacts(parsed.records, projectPath).slice(0, 12);
   const status = normalizeStatus(firstUsefulText(collectStringsByKeys(parsed.records, ["status", "state", "phase"])));
   const resumeHint = identity.resumable ? resumeCommand(platform, id) : undefined;
+  const lineage = extractSessionLineage(parsed.records, platform);
 
   const session: AgentWorkSession = {
     id,
@@ -222,8 +332,57 @@ export function extractWorkSessionFromText(
   if (projectPath) session.projectPath = projectPath;
   if (branch) session.branch = truncateOneLine(branch, 160);
   if (resumeHint) session.resumeHint = resumeHint;
+  if (lineage) session.lineage = lineage;
   session.artifacts = normalizeGeneratedArtifacts(artifacts, session);
   return session;
+}
+
+function extractSessionLineage(
+  records: unknown[],
+  platform: AgentPlatform
+): AgentWorkSession["lineage"] | undefined {
+  if (platform === "claude") return { origin: "primary" };
+  if (platform !== "codex") return { origin: "unknown" };
+  for (const value of records) {
+    const record = asRecord(value);
+    if (stringField(record, "type") !== "session_meta") continue;
+    const payload = asRecord(recordField(record, "payload"));
+    const source = recordField(payload, "source");
+    const subagent = asRecord(recordField(source, "subagent"));
+    const spawn = asRecord(recordField(subagent, "thread_spawn"));
+    const threadSource = stringField(payload, "thread_source");
+    const origin = subagent || threadSource === "subagent"
+      ? "subagent"
+      : typeof source === "string" && source === "exec"
+        ? "automation"
+        : typeof source === "string" || source
+          ? "primary"
+          : "unknown";
+    const lineage: NonNullable<AgentWorkSession["lineage"]> = { origin };
+    const parentSessionId = firstUsefulText([
+      stringField(spawn, "parent_thread_id") ?? "",
+      stringField(payload, "parent_thread_id") ?? "",
+      stringField(payload, "forked_from_id") ?? ""
+    ]);
+    const agentPath = firstUsefulText([
+      stringField(spawn, "agent_path") ?? "",
+      stringField(payload, "agent_path") ?? ""
+    ]);
+    const agentNickname = firstUsefulText([
+      stringField(spawn, "agent_nickname") ?? "",
+      stringField(payload, "agent_nickname") ?? ""
+    ]);
+    const agentRole = firstUsefulText([
+      stringField(spawn, "agent_role") ?? "",
+      stringField(payload, "agent_role") ?? ""
+    ]);
+    if (parentSessionId) lineage.parentSessionId = parentSessionId;
+    if (agentPath) lineage.agentPath = agentPath;
+    if (agentNickname) lineage.agentNickname = agentNickname;
+    if (agentRole) lineage.agentRole = agentRole;
+    return lineage;
+  }
+  return { origin: "unknown" };
 }
 
 export function previousLocalDateString(now = new Date()): string {
@@ -241,27 +400,49 @@ async function collectCandidateFiles(
   day: { start: number; end: number; stamp: string },
   fs: RuntimeFileSystem,
   limits: { maxFiles: number; maxDepth: number; maxEntries: number }
-): Promise<CandidateFile[]> {
+): Promise<CandidateCollection> {
   const files: CandidateFile[] = [];
+  const coverage: AgentEvidenceCoverageEntry[] = [];
   let inspected = 0;
+  let truncated = false;
 
   async function walk(dir: string, depth: number): Promise<void> {
-    if (files.length >= limits.maxFiles || inspected >= limits.maxEntries || depth > limits.maxDepth) return;
+    if (files.length >= limits.maxFiles || inspected >= limits.maxEntries || depth > limits.maxDepth) {
+      truncated = true;
+      return;
+    }
     let entries: string[];
     try {
       entries = await fs.readdir(dir);
-    } catch {
+    } catch (error) {
+      coverage.push({
+        sourceId: `${platform}:${dir}`,
+        disposition: errorCode(error) === "ENOENT" ? "skipped" : "failed",
+        detail: errorCode(error) === "ENOENT"
+          ? "扫描目录不存在。"
+          : `扫描目录读取失败：${errorMessage(error)}`
+      });
       return;
     }
 
     for (const entry of entries.sort().reverse()) {
-      if (files.length >= limits.maxFiles || inspected >= limits.maxEntries) return;
+      if (files.length >= limits.maxFiles || inspected >= limits.maxEntries) {
+        truncated = true;
+        return;
+      }
       inspected += 1;
       const fullPath = joinPath(dir, entry);
       let stat: RuntimeFileStat;
       try {
         stat = await fs.stat(fullPath);
-      } catch {
+      } catch (error) {
+        coverage.push({
+          sourceId: `${platform}:${fullPath}`,
+          disposition: errorCode(error) === "ENOENT" ? "skipped" : "failed",
+          detail: errorCode(error) === "ENOENT"
+            ? "候选在扫描期间消失。"
+            : `候选元数据读取失败：${errorMessage(error)}`
+        });
         continue;
       }
 
@@ -289,7 +470,14 @@ async function collectCandidateFiles(
   }
 
   await walk(root, 0);
-  return files;
+  if (files.length === 0 && coverage.length === 0) {
+    coverage.push({
+      sourceId: `${platform}:${root}`,
+      disposition: "skipped",
+      detail: "扫描完成；没有发现候选 Session 文件。"
+    });
+  }
+  return { files, truncated, coverage };
 }
 
 async function readSession(
@@ -297,16 +485,22 @@ async function readSession(
   fs: RuntimeFileSystem,
   day: ActivityWindow
 ): Promise<AgentWorkSession | null> {
-  try {
-    const content = await fs.readFile(candidate.path, "utf8");
-    if (hasTargetDayActivity(content, day) === false) return null;
-    const session = extractWorkSessionFromText(content, candidate.path, candidate.platform, candidate.updatedAt);
-    if (session && isArchivedSessionPath(candidate.path)) session.status = "completed";
-    if (session) await enrichWorkspaceMetadata(session, fs);
-    return session;
-  } catch {
-    return null;
+  const canonicalPath = await fs.realpath(candidate.path);
+  const bytes = await fs.readBytes(canonicalPath);
+  const content = new TextDecoder().decode(bytes);
+  if (hasTargetDayActivity(content, day) === false) return null;
+  const session = extractWorkSessionFromText(content, canonicalPath, candidate.platform, candidate.updatedAt);
+  if (session) {
+    session.transcriptCapture = {
+      canonicalPath,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      byteLength: bytes.byteLength,
+      coverage: { startByte: 0, endByte: bytes.byteLength }
+    };
   }
+  if (session && (isArchivedSessionPath(candidate.path) || isArchivedSessionPath(canonicalPath))) session.status = "completed";
+  if (session) await enrichWorkspaceMetadata(session, fs);
+  return session;
 }
 
 export function isArchivedSessionPath(value: string): boolean {
@@ -623,8 +817,23 @@ function createRuntimeFileSystem(): RuntimeFileSystem | undefined {
   const runtimeRequire = getRuntimeRequire();
   if (!runtimeRequire) return undefined;
   try {
-    const fsModule = runtimeRequire("fs") as { promises?: RuntimeFileSystem };
-    return fsModule.promises;
+    const fsModule = runtimeRequire("fs") as {
+      promises?: {
+        stat(path: string): Promise<RuntimeFileStat>;
+        readdir(path: string): Promise<string[]>;
+        readFile(path: string, encoding?: "utf8"): Promise<string | Uint8Array>;
+        realpath(path: string): Promise<string>;
+      };
+    };
+    const promises = fsModule.promises;
+    if (!promises) return undefined;
+    return {
+      stat: (path) => promises.stat(path),
+      readdir: (path) => promises.readdir(path),
+      readFile: async (path, encoding) => promises.readFile(path, encoding) as Promise<string>,
+      readBytes: async (path) => promises.readFile(path) as Promise<Uint8Array>,
+      realpath: (path) => promises.realpath(path)
+    };
   } catch {
     return undefined;
   }
@@ -682,6 +891,29 @@ function dayWindow(stamp: string, now: Date): ActivityWindow {
   // inspected; canonical event timestamps then keep only target-day activity.
   const end = Math.max(targetEnd, now.getTime() + 1);
   return { start, targetEnd, end, stamp };
+}
+
+function evidenceScopeForDay(day: ActivityWindow, evidenceCutoff: string): NonNullable<AgentWorkSnapshot["evidenceScope"]> {
+  return {
+    timeZone: resolvedLocalTimeZone(),
+    startInclusive: new Date(day.start).toISOString(),
+    endExclusive: new Date(day.targetEnd).toISOString(),
+    evidenceCutoff
+  };
+}
+
+function resolvedLocalTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+function errorCode(error: unknown): string | undefined {
+  return error && typeof error === "object" && "code" in error && typeof error.code === "string"
+    ? error.code
+    : undefined;
 }
 
 function isInTargetDay(stat: RuntimeFileStat, day: { start: number; end: number }): boolean {

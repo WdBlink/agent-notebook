@@ -27,6 +27,11 @@ export const SESSION_PROVIDER_DEFINITIONS: ReadonlyArray<{
 
 export const DEFAULT_SESSION_PROVIDERS: SessionProvider[] = SESSION_PROVIDER_DEFINITIONS.map(({ id }) => id);
 
+// One limit owns both desktop discovery and durable snapshot projection. A
+// canonical review must never compile more Sessions than the next reload can
+// retain.
+export const MAX_WORK_SESSION_SNAPSHOT_SESSIONS = 48;
+
 export const LEGACY_SESSION_SCAN_ROOTS = [
   "~/.codex/memories/rollout_summaries",
   "~/.claude/tasks",
@@ -43,7 +48,9 @@ export const DEFAULT_SETTINGS: CockpitSettings = {
   sessionSummaryMode: "native",
   runtimeNodePath: "node",
   codexCliPath: "codex",
-  claudeCliPath: "claude"
+  claudeCliPath: "claude",
+  dailyReviewScheduleEnabled: false,
+  dailyReviewScheduleTime: "18:30"
 };
 
 export const TASK_CATEGORIES: TaskCategory[] = ["research", "build", "write", "analysis", "admin", "other"];

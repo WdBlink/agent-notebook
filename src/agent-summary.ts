@@ -4,6 +4,11 @@ import type {
   SessionSummaryBatch
 } from "./agent-sessions";
 import type { AgentPlatform, AgentSessionStatus, AgentWorkSession, CockpitSettings } from "./types";
+import {
+  createCliOutputCollector,
+  structuredCliError,
+  type CliStdoutMode
+} from "./cli-output-collector";
 
 export interface CliRunRequest {
   command: string;
@@ -11,6 +16,7 @@ export interface CliRunRequest {
   stdin: string;
   cwd: string;
   timeoutMs: number;
+  stdoutMode?: CliStdoutMode;
 }
 
 export interface CliRunResult {
@@ -19,6 +25,26 @@ export interface CliRunResult {
 }
 
 export type CliRunner = (request: CliRunRequest) => Promise<CliRunResult>;
+
+export function codexCompilerArgs(model?: string, outputSchemaPath?: string): string[] {
+  const selectedModel = model?.trim();
+  const reasoningArgs = selectedModel === "gpt-5.3-codex-spark"
+    ? ["-c", 'model_reasoning_effort="xhigh"']
+    : [];
+  return [
+    "exec",
+    "--ignore-user-config",
+    ...reasoningArgs,
+    ...(selectedModel ? ["--model", selectedModel] : []),
+    "--ephemeral",
+    "--skip-git-repo-check",
+    "--sandbox",
+    "read-only",
+    ...(outputSchemaPath ? ["--output-schema", outputSchemaPath] : []),
+    "--json",
+    "-"
+  ];
+}
 
 export interface CliSummarizerOptions {
   runner?: CliRunner;
@@ -30,7 +56,6 @@ export interface CliSummarizerOptions {
   onBatch?: (batch: SessionSummaryBatch) => void | Promise<void>;
 }
 
-const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 180_000;
 
 const CLAUDE_RESPONSE_SCHEMA = {
@@ -164,12 +189,11 @@ async function runProvider(
 ): Promise<SessionSummaryBatch> {
   const prompt = buildSessionSummaryPrompt(platform, date, sessions);
   const command = expandHome(platform === "codex" ? settings.codexCliPath : settings.claudeCliPath, homeDir);
-  const modelArgs = model?.trim() ? ["--model", model.trim()] : [];
   const args =
     platform === "codex"
-      ? ["exec", ...modelArgs, "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "--json", "-"]
+      ? codexCompilerArgs(model)
       : [
-          ...modelArgs,
+          ...(model?.trim() ? ["--model", model.trim()] : []),
           "--print",
           "--output-format",
           "json",
@@ -183,7 +207,14 @@ async function runProvider(
           "--no-session-persistence"
         ];
 
-  const result = await runner({ command, args, stdin: prompt, cwd: homeDir, timeoutMs });
+  const result = await runner({
+    command,
+    args,
+    stdin: prompt,
+    cwd: homeDir,
+    timeoutMs,
+    stdoutMode: platform === "codex" ? "codex-jsonl" : "single-json"
+  });
   const parsed = platform === "codex" ? parseCodexOutput(result.stdout) : parseClaudeOutput(result.stdout);
   const normalized = normalizeProviderResponse(parsed, platform, sessions);
   const warnings =
@@ -193,7 +224,7 @@ async function runProvider(
   return { summaries: normalized, warnings };
 }
 
-export function parseCodexOutput(output: string): unknown {
+export function parseCodexOutput(output: string, recoverInvalidJson?: (text: string) => unknown): unknown {
   let finalMessage = "";
   for (const line of output.split(/\r?\n/)) {
     if (!line.trim().startsWith("{")) continue;
@@ -208,14 +239,20 @@ export function parseCodexOutput(output: string): unknown {
     }
   }
   if (!finalMessage) throw new Error("Codex 没有返回最终总结消息");
-  return parseJsonValue(finalMessage);
+  return recoverInvalidJson ? recoverInvalidJson(finalMessage) : parseJsonValue(finalMessage);
 }
 
-export function parseClaudeOutput(output: string): unknown {
+export function parseClaudeOutput(output: string, recoverInvalidJson?: (text: string) => unknown): unknown {
   const envelope = parseJsonValue(output);
   const record = asRecord(envelope);
+  if (record?.is_error === true || (typeof record?.subtype === "string" && record.subtype.startsWith("error_"))) {
+    const detail = structuredCliError(output) || "Provider returned an error envelope";
+    throw new Error(`Claude Code 返回错误：${detail}`);
+  }
   if (record?.structured_output && typeof record.structured_output === "object") return record.structured_output;
-  if (typeof record?.result === "string") return parseJsonValue(record.result);
+  if (typeof record?.result === "string") {
+    return recoverInvalidJson ? recoverInvalidJson(record.result) : parseJsonValue(record.result);
+  }
   return envelope;
 }
 
@@ -294,39 +331,81 @@ function runChildProcess(
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true
     });
-    let stdout = "";
-    let stderr = "";
+    const collector = createCliOutputCollector(request.stdoutMode);
     let settled = false;
+    let closed = false;
+    let terminationError: Error | undefined;
+    let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const stopChild = (): void => {
+      child.kill("SIGTERM");
+      if (forceKillTimer) return;
+      forceKillTimer = setTimeout(() => {
+        if (!closed) child.kill("SIGKILL");
+      }, 500);
+      const timerWithUnref = forceKillTimer as ReturnType<typeof setTimeout> & { unref?: () => void };
+      timerWithUnref.unref?.();
+    };
 
     const finish = (error?: Error): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
       if (error) reject(error);
-      else resolve({ stdout, stderr });
+      else {
+        try {
+          resolve(collector.finish());
+        } catch (collectorError) {
+          reject(collectorError);
+        }
+      }
+    };
+    const terminate = (error: Error): void => {
+      if (terminationError) return;
+      terminationError = error;
+      stopChild();
     };
 
     const append = (target: "stdout" | "stderr", chunk: unknown): void => {
-      const text = String(chunk);
-      if (target === "stdout") stdout += text;
-      else stderr += text;
-      if (stdout.length + stderr.length > MAX_OUTPUT_BYTES) {
-        child.kill("SIGTERM");
-        finish(new Error("CLI 输出超过 4 MB 限制"));
+      if (terminationError) return;
+      try {
+        if (target === "stdout") collector.pushStdout(chunk);
+        else collector.pushStderr(chunk);
+      } catch (collectorError) {
+        terminate(collectorError instanceof Error ? collectorError : new Error("CLI 输出处理失败"));
       }
     };
 
     const timer = setTimeout(() => {
-      child.kill("SIGTERM");
-      finish(new Error(`CLI 总结超过 ${Math.round(request.timeoutMs / 1000)} 秒`));
+      terminate(new Error(`CLI 总结超过 ${Math.round(request.timeoutMs / 1000)} 秒`));
     }, request.timeoutMs);
 
     child.stdout.on("data", (chunk) => append("stdout", chunk));
     child.stderr.on("data", (chunk) => append("stderr", chunk));
-    child.on("error", (error) => finish(error));
+    child.on("error", (error) => {
+      closed = true;
+      finish(terminationError ?? error);
+    });
     child.on("close", (code, signal) => {
+      closed = true;
+      if (forceKillTimer) clearTimeout(forceKillTimer);
+      if (terminationError) {
+        finish(terminationError);
+        return;
+      }
       if (code === 0) finish();
-      else finish(new Error(`CLI 退出码 ${code ?? signal ?? "unknown"}`));
+      else {
+        let snapshot: CliRunResult = { stdout: "", stderr: "" };
+        try {
+          snapshot = collector.finish();
+        } catch (collectorError) {
+          finish(collectorError instanceof Error ? collectorError : new Error("CLI 输出处理失败"));
+          return;
+        }
+        const detail = structuredCliError(snapshot.stdout) || tail(snapshot.stderr, 500);
+        finish(new Error(`CLI 退出码 ${code ?? signal ?? "unknown"}${detail ? `：${detail}` : ""}`));
+      }
     });
     child.stdin.end(request.stdin);
   });
@@ -373,9 +452,15 @@ function parseJsonValue(text: string): unknown {
   } catch {
     const start = trimmed.indexOf("{");
     const end = trimmed.lastIndexOf("}");
-    if (start >= 0 && end > start) return JSON.parse(trimmed.slice(start, end + 1)) as unknown;
-    throw new Error("CLI 返回的总结不是有效 JSON");
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(trimmed.slice(start, end + 1)) as unknown;
+      } catch {
+        // A transport schema is required for model output; do not guess or rewrite its values.
+      }
+    }
   }
+  throw new Error("CLI 返回的总结不是有效 JSON");
 }
 
 function cleanString(value: unknown, maxLength: number): string | undefined {

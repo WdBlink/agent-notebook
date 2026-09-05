@@ -52,7 +52,7 @@ jobs:
         run: |
           VERSION="$(node -p 'require("./package.json").version')"
           for FORMAT in dmg zip; do
-            npm run verify:desktop-release -- --archive "dist/macos/Agent Notebook-${VERSION}-macos-${{ matrix.arch }}.${FORMAT}" --arch "${{ matrix.arch }}"
+            npm run verify:desktop-release -- --archive "dist/macos/agent-notebook-${VERSION}-macos-${{ matrix.arch }}.${FORMAT}" --arch "${{ matrix.arch }}"
           done
       - uses: actions/upload-artifact@v4
         with:

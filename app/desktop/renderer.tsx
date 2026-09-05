@@ -32,10 +32,13 @@ import {
 } from "lucide-react";
 import { createRoot } from "react-dom/client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ReactElement } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactElement } from "react";
 import { buildResumeCommand } from "../../src/resume";
 import type { AgentSessionStatus, AgentWorkSession, SessionProvider } from "../../src/types";
-import type { DailyDraftInput, DailyWorkRecord, DesktopNotebookState, DesktopState, NotebookNote, ProjectContextDocument, ProjectContextState, SessionTranscriptState } from "./api";
+import type { DailyReviewBlock, DailyReviewEvidence, DailyWorklineReview } from "../../src/workline-review";
+import type { DailyDraftInput, DailySealInput, DailyWorkRecord, DesktopNotebookState, DesktopState, NotebookNote, ProjectContextDocument, ProjectContextState, SessionTranscriptState } from "./api";
+import { TodayBoard } from "./today-board";
+import type { TodayReviewEntry, TodayTranscriptTarget } from "./today-board";
 
 type ViewKey = "brief" | "sessions" | "timeline" | "map" | "sources";
 type StatusFilter = "all" | AgentSessionStatus;
@@ -102,6 +105,36 @@ const relationLabels: Record<MapRelation, string> = {
   related: "相关"
 };
 
+const modalFocusableSelector = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])'
+].join(",");
+
+function trapModalFocus(event: ReactKeyboardEvent<HTMLElement>): void {
+  if (event.key !== "Tab") return;
+  const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(modalFocusableSelector))
+    .filter((element) => element.getClientRects().length > 0 && element.getAttribute("aria-hidden") !== "true");
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  if (!first || !last) {
+    event.preventDefault();
+    event.currentTarget.focus();
+    return;
+  }
+  const active = document.activeElement;
+  if (event.shiftKey && (active === first || !event.currentTarget.contains(active))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (active === last || !event.currentTarget.contains(active))) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 function App(): ReactElement {
   const [state, setState] = useState<DesktopState | null>(null);
   const [view, setView] = useState<ViewKey>("brief");
@@ -112,8 +145,11 @@ function App(): ReactElement {
   const [commandOpen, setCommandOpen] = useState(false);
   const [selectedProjectKey, setSelectedProjectKey] = useState("all");
   const [evidenceSession, setEvidenceSession] = useState<AgentWorkSession | null>(null);
-  const [transcriptSession, setTranscriptSession] = useState<AgentWorkSession | null>(null);
+  const [transcriptTarget, setTranscriptTarget] = useState<TodayTranscriptTarget | null>(null);
+  const [reviewEntry, setReviewEntry] = useState<TodayReviewEntry | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const transcriptReturnFocus = useRef<HTMLElement | null>(null);
+  const reviewReturnFocus = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     void load();
@@ -136,8 +172,12 @@ function App(): ReactElement {
         setCommandOpen(true);
       }
       if (event.key === "Escape") {
-        if (transcriptSession) {
-          setTranscriptSession(null);
+        if (transcriptTarget) {
+          closeTranscript();
+          return;
+        }
+        if (reviewEntry) {
+          closeReview();
           return;
         }
         setCommandOpen(false);
@@ -148,7 +188,7 @@ function App(): ReactElement {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [transcriptSession]);
+  }, [reviewEntry, transcriptTarget]);
 
   async function load(date?: string): Promise<void> {
     setLoading(true);
@@ -217,6 +257,30 @@ function App(): ReactElement {
     setState((current) => current ? { ...current, notebook } : current);
   }
 
+  function openTranscript(target: TodayTranscriptTarget, returnFocus: HTMLElement): void {
+    transcriptReturnFocus.current = returnFocus;
+    setTranscriptTarget(target);
+  }
+
+  function closeTranscript(): void {
+    setTranscriptTarget(null);
+    const target = transcriptReturnFocus.current;
+    transcriptReturnFocus.current = null;
+    window.requestAnimationFrame(() => (target?.isConnected ? target : document.querySelector<HTMLElement>(".today-board"))?.focus());
+  }
+
+  function openReview(entry: TodayReviewEntry, returnFocus: HTMLElement): void {
+    reviewReturnFocus.current = returnFocus;
+    setReviewEntry(entry);
+  }
+
+  function closeReview(): void {
+    setReviewEntry(null);
+    const target = reviewReturnFocus.current;
+    reviewReturnFocus.current = null;
+    window.requestAnimationFrame(() => (target?.isConnected ? target : document.querySelector<HTMLElement>(".today-board"))?.focus());
+  }
+
   const sessions = state?.data.workSessionSnapshot.sessions ?? [];
   const projects = useMemo(() => groupSessionsByProject(sessions), [sessions]);
   const selectedSessions = useMemo(() => sessionsForProject(projects, sessions, selectedProjectKey), [projects, sessions, selectedProjectKey]);
@@ -246,20 +310,18 @@ function App(): ReactElement {
         {notice ? <div className="toast" role="status">{notice}</div> : null}
         <section className={`content${view === "brief" ? " today-content" : ""}`} onPointerDown={() => { if (calendarOpen) setCalendarOpen(false); if (providerOpen) setProviderOpen(false); }}>
           {view === "brief" ? (
-            <Brief
+            <TodayBoard
               state={state}
               projects={projects}
-              sessions={selectedSessions}
+              sessions={sessions}
               selectedProjectKey={selectedProjectKey}
               loading={loading}
               error={loadError}
               onProject={setSelectedProjectKey}
-              onEvidence={setEvidenceSession}
-              onResume={(session) => void copyResume(session)}
               onRetry={() => void refresh()}
               onNotebook={updateNotebook}
-              onNotice={showNotice}
-              onSession={(session) => { setView("sessions"); setEvidenceSession(session); }}
+              onOpenReview={openReview}
+              onTranscript={openTranscript}
             />
           ) : null}
           {view === "sessions" ? (
@@ -304,6 +366,14 @@ function App(): ReactElement {
                 setState(next);
                 showNotice("LLM-Wiki 根目录已经更新");
               }}
+              onReviewSchedule={async (enabled, time) => {
+                const next = await window.agentWhiteboard.updateSettings({
+                  dailyReviewScheduleEnabled: enabled,
+                  dailyReviewScheduleTime: time
+                });
+                setState(next);
+                showNotice(enabled ? `每天 ${time} 自动准备工作脉络` : "已关闭每日自动整理");
+              }}
             />
           ) : null}
         </section>
@@ -313,10 +383,22 @@ function App(): ReactElement {
           session={evidenceSession}
           onClose={() => setEvidenceSession(null)}
           onCopy={() => void copyResume(evidenceSession)}
-          onOpen={() => setTranscriptSession(evidenceSession)}
+          onOpen={(returnFocus) => openTranscript({
+            title: evidenceSession.title,
+            platform: evidenceSession.platform,
+            request: { id: evidenceSession.id, platform: evidenceSession.platform, path: evidenceSession.path }
+          }, returnFocus)}
         />
       ) : null}
-      {transcriptSession ? <TranscriptReader session={transcriptSession} onClose={() => setTranscriptSession(null)} /> : null}
+      {reviewEntry ? <TodayReviewFlow
+        state={state}
+        entry={reviewEntry}
+        onNotebook={updateNotebook}
+        onNotice={showNotice}
+        onTranscript={openTranscript}
+        onClose={closeReview}
+      /> : null}
+      {transcriptTarget ? <TranscriptReader target={transcriptTarget} onClose={closeTranscript} /> : null}
       {commandOpen ? (
         <CommandPalette
           state={state}
@@ -498,7 +580,7 @@ function Brief({
 
   async function beginClosing(): Promise<void> {
     if (notebook.page.status === "sealed") return;
-    const next = notebook.page.status === "draft"
+    const next = notebook.page.status === "draft" && notebook.page.reviewPackage
       ? notebook
       : await runNotebookAction(() => window.agentWhiteboard.composeDailyPage(state.activeDate));
     if (next) setClosing(true);
@@ -526,10 +608,14 @@ function Brief({
                 <div><span className="folio-label">{weekdayEnglish(state.activeDate)} · {formatMonthDay(state.activeDate)}</span><h2>{notebook.page.status === "sealed" ? "今天到这里" : "今日页草稿"}</h2></div>
                 {notebook.page.status === "sealed" ? <div className="seal-mark"><LockKeyhole size={15} />封</div> : <span className="page-state">OPEN PAGE<br />{records.length} RECORDS</span>}
               </header>
-              <div className="daily-records">
-                {records.map((record) => <DailyRecordRow key={record.id} record={record} sessions={sessions} onSession={onSession} />)}
-                {records.length === 0 ? <div className="blank-page">{notebook.notes.length === 0 ? <p>唯有那些沉思默想的时刻，才是真正的你我。</p> : null}</div> : null}
-              </div>
+              {notebook.page.status === "sealed" && notebook.page.reviewPackage ? (
+                <SealedReviewSummary notebook={notebook} />
+              ) : (
+                <div className="daily-records">
+                  {records.map((record) => <DailyRecordRow key={record.id} record={record} sessions={sessions} onSession={onSession} />)}
+                  {records.length === 0 ? <div className="blank-page">{notebook.notes.length === 0 ? <p>唯有那些沉思默想的时刻，才是真正的你我。</p> : null}</div> : null}
+                </div>
+              )}
               {notebook.page.status === "sealed" && notebook.page.reflection ? <blockquote className="personal-ink">{notebook.page.reflection}</blockquote> : null}
               {notebook.page.status === "sealed" && notebook.page.bookmarks.length ? (
                 <section className="sealed-bookmarks"><span className="folio-label">NEXT OPEN</span>{notebook.page.bookmarks.map((bookmark) => {
@@ -542,7 +628,7 @@ function Brief({
               ) : null}
               <footer className="daily-paper-foot">
                 <div><strong>{notebook.page.status === "sealed" ? `已封存 · ${formatDateTime(notebook.page.sealedAt)}` : notebook.page.status === "draft" ? "整理稿已暂存" : "这一页还没有封存"}</strong><small>{notebook.page.status === "sealed" ? "页面内容保持只读" : "便签和会话原文仍保留各自来源"}</small></div>
-                {notebook.page.status !== "sealed" && state.activeDate <= localDate() ? <button type="button" className="seal-entry" disabled={busy} onClick={() => void beginClosing()}>{notebook.page.status === "draft" ? "继续整理今天" : "开始整理今天"}</button> : null}
+                {notebook.page.status !== "sealed" && state.activeDate <= localDate() ? <button type="button" className="seal-entry" disabled={busy} onClick={() => void beginClosing()}>{busy ? "正在整理工作线…" : notebook.page.status === "draft" ? "继续整理今天" : "开始整理今天"}</button> : null}
               </footer>
             </section>
           </article>
@@ -565,15 +651,6 @@ function Brief({
         onWiki={async (id) => { const result = await runNotebookResult(() => window.agentWhiteboard.routeNotebookNoteToWiki(id), onNotebook, setBusy, setActionError); if (result) onNotice("已写入 LLM-Wiki/raw，等待 Wiki 协议吸收"); }}
         onProject={async (id, projectPath) => { const result = await runNotebookResult(() => window.agentWhiteboard.routeNotebookNoteToProject(id, projectPath), onNotebook, setBusy, setActionError); if (result) onNotice("已交给项目 CTX 协议"); }}
       /> : null}
-      {closing ? <ClosingRitual
-        notebook={notebook}
-        date={state.activeDate}
-        busy={busy}
-        error={actionError}
-        onClose={() => { setClosing(false); setActionError(null); }}
-        onSave={async (input) => { await runNotebookAction(() => window.agentWhiteboard.saveDailyDraft(state.activeDate, input), "整理稿已保存"); }}
-        onSeal={async (input) => { const next = await runNotebookAction(() => window.agentWhiteboard.sealDailyPage(state.activeDate, input), "今天已经封好"); if (next) setClosing(false); }}
-      /> : null}
     </section>
   );
 }
@@ -587,6 +664,16 @@ function DailyRecordRow({ record, sessions, onSession }: { record: DailyWorkReco
     const session = sessions.find((item) => item.id === reference.id && item.path === reference.path && item.platform === reference.platform);
     return <button type="button" key={`${reference.platform}:${reference.id}:${reference.path}`} onClick={() => session && onSession(session)} disabled={!session}><span>{platformAbbreviation(reference.platform)}</span>{reference.title}</button>;
   })}</div></div></details>;
+}
+
+function SealedReviewSummary({ notebook }: { notebook: DesktopNotebookState }): ReactElement {
+  const review = notebook.page.reviewPackage;
+  const generationId = notebook.page.activePackageGenerationId;
+  if (!review) return <div className="daily-records" />;
+  return <section className="sealed-review-summary"><span className="folio-label">SEALED REVIEW · {review.worklines.length} WORKLINES</span>{review.worklines.map((workline) => {
+    const reflection = notebook.page.worklineReflections.find((item) => item.packageGenerationId === generationId && item.worklineId === workline.id);
+    return <article key={workline.id}><small>{worklineStatusLabel(workline.status)}</small><h3>{workline.title}</h3><p>{workline.summary}</p>{reflection ? <blockquote>{reflection.text}</blockquote> : null}</article>;
+  })}</section>;
 }
 
 function NotebookNoteEditor({
@@ -625,15 +712,181 @@ function NotebookNoteEditor({
   return <div className="note-layer" role="dialog" aria-modal="true" aria-label={note ? note.title : "新建便签"}><button type="button" className="note-backdrop" aria-label="关闭便签" onClick={onClose} /><section className="note-editor"><header><button type="button" aria-label="关闭" onClick={onClose}><ChevronLeft size={20} /></button><span>{note ? `${formatDateTime(note.createdAt)} · ${body.length}` : "QUICK CAPTURE"}</span><div>{note ? <><button type="button" aria-label={note.favorite ? "取消收藏" : "收藏"} onClick={() => void onSave(note.id, { favorite: !note.favorite })}><Star size={19} fill={note.favorite ? "currentColor" : "none"} /></button><button type="button" aria-label="删除" onClick={() => setDeleteOpen(true)}><Trash2 size={19} /></button><button type="button" aria-label="分享便签" onClick={() => { setShareOpen(!shareOpen); setProjectOpen(false); }}><Send size={19} /></button></> : null}</div></header><div className="note-paper"><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="标题（可以留空）" aria-label="便签标题" /><textarea autoFocus={!note} value={body} onChange={(event) => setBody(event.target.value)} placeholder="写下刚刚想到的事，或者粘贴一个链接…" aria-label="便签正文" /></div>{error ? <div className="note-error"><AlertTriangle size={14} />{error}</div> : null}<footer><div>{note?.deliveries.map((delivery) => <span key={`${delivery.kind}:${delivery.deliveredAt}`}>{delivery.kind.toUpperCase()}</span>)}</div><button type="button" className="primary-action" disabled={busy || !body.trim()} onClick={() => void (note ? onSave(note.id, { title, body }) : onCreate({ title, body }))}>{note ? "保存" : "收下"}</button></footer>{note && shareOpen ? <div className="note-share-menu"><button type="button" onClick={() => void onCard(note.id)}><Image size={20} /><span><strong>生成精美卡片</strong><small>导出独立 SVG 卡片并打开</small></span></button><button type="button" onClick={() => void onWiki(note.id)}><Archive size={20} /><span><strong>归入 LLM-Wiki</strong><small>{knowledgeRawPath}</small></span></button><button type="button" onClick={() => setProjectOpen(true)}><Network size={20} /><span><strong>归入项目</strong><small>交给项目 CTX 协议自动吸收</small></span></button></div> : null}{note && projectOpen ? <div className="project-route-menu"><header><strong>交给项目 CTX</strong><button type="button" onClick={() => setProjectOpen(false)}><X size={16} /></button></header>{projects.filter((project) => project.path).map((project) => <button type="button" key={project.key} onClick={() => void onProject(note.id, project.path!)}><span>{project.name}</span><small>{project.path}</small></button>)}</div> : null}{note && deleteOpen ? <div className="delete-confirm"><p>删除这条便签？已经送往其他位置的副本不会被删除。</p><button type="button" onClick={() => setDeleteOpen(false)}>取消</button><button type="button" className="danger" onClick={() => void onDelete(note.id)}>删除</button></div> : null}</section></div>;
 }
 
-function ClosingRitual({ notebook, date, busy, error, onClose, onSave, onSeal }: { notebook: DesktopNotebookState; date: string; busy: boolean; error: string | null; onClose(): void; onSave(input: DailyDraftInput): Promise<void>; onSeal(input: DailyDraftInput): Promise<void> }): ReactElement {
-  const [reflection, setReflection] = useState(notebook.page.reflection);
+type DailyReviewStage = "dossier" | "reflection" | "seal";
+
+function TodayReviewFlow({ state, entry, onNotebook, onNotice, onTranscript, onClose }: {
+  state: DesktopState;
+  entry: TodayReviewEntry;
+  onNotebook(notebook: DesktopNotebookState): void;
+  onNotice(message: string): void;
+  onTranscript(target: TodayTranscriptTarget, returnFocus: HTMLElement): void;
+  onClose(): void;
+}): ReactElement {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function runNotebookAction(action: () => Promise<DesktopNotebookState>, success: string): Promise<boolean> {
+    setBusy(true);
+    setError(null);
+    try {
+      const notebook = await action();
+      onNotebook(notebook);
+      onNotice(success);
+      return true;
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "日终回看没有完成。");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <DailyReviewWorkspace
+    notebook={state.notebook}
+    date={state.activeDate}
+    entry={entry}
+    busy={busy}
+    error={error}
+    readOnly={state.notebook.todayBoard.mode === "sealed"}
+    onTranscript={onTranscript}
+    onClose={onClose}
+    onSave={(input) => runNotebookAction(() => window.agentWhiteboard.saveDailyDraft(state.activeDate, input), "整理稿已保存")}
+    onSeal={async (input) => {
+      if (await runNotebookAction(() => window.agentWhiteboard.sealDailyPage(state.activeDate, input), "今天已经封好")) onClose();
+    }}
+  />;
+}
+
+function DailyReviewWorkspace({
+  notebook,
+  date,
+  entry,
+  busy,
+  error,
+  readOnly,
+  onTranscript,
+  onClose,
+  onSave,
+  onSeal
+}: {
+  notebook: DesktopNotebookState;
+  date: string;
+  entry: TodayReviewEntry;
+  busy: boolean;
+  error: string | null;
+  readOnly: boolean;
+  onTranscript(target: TodayTranscriptTarget, returnFocus: HTMLElement): void;
+  onClose(): void;
+  onSave(input: DailyDraftInput): Promise<boolean>;
+  onSeal(input: DailySealInput): Promise<void>;
+}): ReactElement {
+  const [generation] = useState(() => notebook.todayBoard.activeGeneration
+    ? structuredClone(notebook.todayBoard.activeGeneration)
+    : undefined);
+  const review = generation?.package;
+  const [stage, setStage] = useState<DailyReviewStage>(entry.stage);
+  const [activeWorklineId] = useState(entry.stage === "dossier" ? entry.worklineId : review?.worklines[0]?.id ?? "");
+  const [reflections, setReflections] = useState<Record<string, string>>(() => Object.fromEntries(notebook.page.worklineReflections
+    .filter((item) => item.packageGenerationId === generation?.id)
+    .map((item) => [item.worklineId, item.text])));
   const [bookmarkIds, setBookmarkIds] = useState(notebook.page.bookmarks.map((item) => item.id));
-  const input = { reflection, bookmarkIds };
+  const activeWorkline = review?.worklines.find((item) => item.id === activeWorklineId) ?? review?.worklines[0];
+
+  if (!review) {
+    return <div className="review-layer" role="dialog" aria-modal="true" aria-label="日终回看" onKeyDown={trapModalFocus}><section className="review-shell review-unavailable"><button type="button" autoFocus className="review-close" aria-label="退出日终回看" onClick={onClose}><X size={19} /></button><AlertTriangle size={24} /><h2>这份旧整理稿还没有工作线材料。</h2><p>退出后重新开始整理，应用会从当前只读证据生成回看材料。</p></section></div>;
+  }
+
+  const reflectionInput = (): DailyDraftInput => ({
+    reflection: notebook.page.reflection,
+    worklineReflections: review.worklines.flatMap((workline) => {
+      const text = reflections[workline.id]?.trim();
+      return text ? [{ worklineId: workline.id, text }] : [];
+    }),
+    bookmarkIds,
+    expectedActiveGenerationId: generation.id
+  });
+
   function toggleBookmark(id: string): void {
     setBookmarkIds((current) => current.includes(id) ? current.filter((item) => item !== id) : current.length < 3 ? [...current, id] : current);
   }
-  return <div className="closing-layer" role="dialog" aria-modal="true" aria-label="整理今天"><section className="closing-sheet"><header><div><span className="folio-label">END OF DAY · {formatShortDate(date)}</span><h2>收笔之前</h2></div><button type="button" aria-label="退出整理" onClick={onClose}><X size={20} /></button></header><div className="closing-grid"><section className="closing-records"><span className="folio-label">TODAY · {notebook.page.workRecords.length}</span>{notebook.page.workRecords.map((record) => <article key={record.id}><time>{formatTime(record.occurredAt)}</time><div><small>{record.projectName}</small><strong>{record.title}</strong><p>{record.summary}</p></div></article>)}</section><aside className="closing-ink"><label><span className="folio-label">PERSONAL INK</span><textarea value={reflection} onChange={(event) => setReflection(event.target.value)} placeholder="我今天真正想留下的是……" /></label><section><span className="folio-label">明天从哪里继续 · 最多 3 项</span><div className="bookmark-choices">{notebook.continuationCandidates.map((bookmark) => <button type="button" key={bookmark.id} aria-pressed={bookmarkIds.includes(bookmark.id)} onClick={() => toggleBookmark(bookmark.id)}><span>{bookmarkIds.includes(bookmark.id) ? <Check size={13} /> : null}</span><div><strong>{bookmark.title}</strong><small>{bookmark.projectName} · {platformLabel(bookmark.provider)}</small></div></button>)}</div></section></aside></div>{error ? <div className="closing-error"><AlertTriangle size={15} />{error}</div> : null}<footer><button type="button" disabled={busy} onClick={() => void onSave(input)}>暂存整理稿</button><button type="button" className="seal-button" disabled={busy} onClick={() => void onSeal(input)}>收笔并封存</button></footer></section></div>;
+
+  async function saveReflection(): Promise<void> {
+    if (!activeWorkline || !reflections[activeWorkline.id]?.trim()) return;
+    if (await onSave(reflectionInput())) onClose();
+  }
+
+  return <div className="review-layer" role="dialog" aria-modal="true" aria-label="日终回看" onKeyDown={trapModalFocus}>
+    <section className="review-shell" data-stage={stage}>
+      <header className="review-topbar"><div><span className="review-brand">DAILY REVIEW</span><strong>{formatDateTitle(date)}</strong><small>{stageLabel(stage)} · {review.model}</small></div><button type="button" className="review-close" aria-label="退出日终回看" onClick={onClose}><X size={19} /></button></header>
+      {stage === "dossier" && activeWorkline ? <ReviewDossier
+        workline={activeWorkline}
+        evidence={review.evidence}
+        generationId={generation.id}
+        logicalDate={review.logicalDate}
+        hasReflection={Boolean(reflections[activeWorkline.id]?.trim())}
+        readOnly={readOnly}
+        onBack={onClose}
+        onTranscript={onTranscript}
+        onReflect={readOnly ? undefined : () => setStage("reflection")}
+      /> : null}
+      {stage === "reflection" && activeWorkline ? <ReviewReflection
+        workline={activeWorkline}
+        value={reflections[activeWorkline.id] ?? ""}
+        busy={busy}
+        onBack={() => setStage("dossier")}
+        onChange={(value) => setReflections((current) => ({ ...current, [activeWorkline.id]: value }))}
+        onSave={() => void saveReflection()}
+      /> : null}
+      {stage === "seal" ? <ReviewSeal
+        review={review.worklines}
+        reflections={reflections}
+        candidates={notebook.continuationCandidates}
+        bookmarkIds={bookmarkIds}
+        busy={busy}
+        onBack={onClose}
+        onToggleBookmark={toggleBookmark}
+        onSeal={() => void onSeal(reflectionInput())}
+      /> : null}
+      {error ? <div className="review-error"><AlertTriangle size={15} />{error}</div> : null}
+    </section>
+  </div>;
 }
+
+function ReviewDossier({ workline, evidence, logicalDate, generationId, hasReflection, readOnly, onBack, onTranscript, onReflect }: { workline: DailyWorklineReview; evidence: DailyReviewEvidence[]; logicalDate: string; generationId: string; hasReflection: boolean; readOnly: boolean; onBack(): void; onTranscript(target: TodayTranscriptTarget, returnFocus: HTMLElement): void; onReflect?: (() => void) | undefined }): ReactElement {
+  return <main className="review-dossier"><aside className="review-spine"><button type="button" autoFocus onClick={onBack}>← 返回工作线</button><span className="review-eyebrow">WORKLINE</span><h2>{workline.title}</h2><p>{workline.summary}</p></aside><section className="review-reader paper-scroll"><header><span className="generated-label">AI 整理</span><span className="review-eyebrow">EVIDENCE DOSSIER</span><h1>{workline.dossier.title}</h1><p>{workline.dossier.dek}</p></header><div className="review-blocks">{workline.dossier.blocks.map((block) => <ReviewBlock key={block.id} block={block} evidence={evidence} logicalDate={logicalDate} generationId={generationId} onTranscript={onTranscript} />)}</div>{workline.dossier.question ? <section className="human-question"><span>留给你的问题</span><h2>{workline.dossier.question.prompt}</h2>{workline.dossier.question.context ? <p>{workline.dossier.question.context}</p> : null}</section> : null}<footer><span>{readOnly ? "封存材料保持只读；生成内容仍可追溯。" : "生成内容保持可追溯；它不是你的决定。"}</span>{onReflect ? <button type="button" onClick={onReflect}>{hasReflection ? "查看我的思考" : "看完了，开始思考"}</button> : null}</footer></section></main>;
+}
+
+function ReviewBlock({ block, evidence, logicalDate, generationId, onTranscript }: { block: DailyReviewBlock; evidence: DailyReviewEvidence[]; logicalDate: string; generationId: string; onTranscript(target: TodayTranscriptTarget, returnFocus: HTMLElement): void }): ReactElement {
+  const sources = block.evidenceIds.map((id) => evidence.find((item) => item.id === id)).filter((item): item is DailyReviewEvidence => Boolean(item));
+  return <article className="review-block" data-kind={block.kind}><span>{block.label ?? humanizeBlockKind(block.kind)}</span><h2>{block.title}</h2><p>{block.body}</p>{sources.length ? <div className="review-block-evidence">{sources.map((source) => {
+    if (source.kind === "artifact") {
+      return <span className="review-evidence-reference" key={source.id} title="旧工作包只保存了文件路径，没有冻结当时的文件内容。"><FileText size={13} />当前文件引用（未冻结） · {source.label}</span>;
+    }
+    return <button type="button" key={source.id} onClick={(event) => onTranscript({
+      title: source.label,
+      platform: source.platform,
+      request: {
+        id: source.sessionId,
+        platform: source.platform,
+        path: source.path,
+        packageRef: { logicalDate, generationId, evidenceId: source.id }
+      }
+    }, event.currentTarget)}><FileText size={13} />打开原始会话 · {source.label}</button>;
+  })}</div> : <small className="review-missing-evidence">这段生成内容没有可打开的直接证据。</small>}</article>;
+}
+
+function ReviewReflection({ workline, value, busy, onBack, onChange, onSave }: { workline: DailyWorklineReview; value: string; busy: boolean; onBack(): void; onChange(value: string): void; onSave(): void }): ReactElement {
+  return <main className="review-reflection"><aside className="reflection-context"><button type="button" onClick={onBack}>← 返回阅读</button><span className="review-eyebrow">STILL ON THE DESK</span><h2>{workline.dossier.question?.prompt ?? workline.dossier.title}</h2><p>这张纸只保留你刚刚读到的问题，不替你回答。</p></aside><section className="reflection-paper paper-scroll"><header><span className="review-eyebrow">YOUR INK · ORIGINAL PRESERVED</span><h1>看完这些，你现在怎么理解这件事？</h1><p>先用自己的话写。AI 不会在这里提供候选答案，也不会覆盖你的原文。</p></header><label><span>你的原始墨迹</span><textarea autoFocus aria-label="你的原始墨迹" value={value} onChange={(event) => onChange(event.target.value)} placeholder="从哪个判断发生了变化开始写……" /></label><footer><span>{Array.from(value.trim()).length} 字 · 本机草稿</span><button type="button" disabled={busy || !value.trim()} onClick={onSave}>收下这段思考</button></footer></section></main>;
+}
+
+function ReviewSeal({ review, reflections, candidates, bookmarkIds, busy, onBack, onToggleBookmark, onSeal }: { review: DailyWorklineReview[]; reflections: Record<string, string>; candidates: DesktopNotebookState["continuationCandidates"]; bookmarkIds: string[]; busy: boolean; onBack(): void; onToggleBookmark(id: string): void; onSeal(): void }): ReactElement {
+  const written = review.filter((workline) => reflections[workline.id]?.trim());
+  return <main className="review-seal"><aside className="seal-spine"><button type="button" autoFocus onClick={onBack}>← 返回工作线</button><span className="review-eyebrow">END OF DAY</span><h1>今天到这里。</h1><p>封页只冻结今天。之后到达的新证据不会改写这一页。</p></aside><section className="seal-paper paper-scroll"><header><span className="review-eyebrow">YOUR REVIEW · READY TO SEAL</span><h2>收笔之前，再看一眼自己的话</h2></header><div className="seal-reflections">{written.map((workline) => <article key={workline.id}><small>{workline.title}</small><blockquote>{reflections[workline.id]}</blockquote></article>)}{written.length === 0 ? <p className="seal-empty">今天没有写下个人思考；仍可封页，但系统不会替你补写。</p> : null}</div><section className="seal-bookmarks"><span className="review-eyebrow">明天从哪里继续 · 最多 3 项</span><div className="bookmark-choices">{candidates.map((bookmark) => <button type="button" key={bookmark.id} aria-pressed={bookmarkIds.includes(bookmark.id)} onClick={() => onToggleBookmark(bookmark.id)}><span>{bookmarkIds.includes(bookmark.id) ? <Check size={13} /> : null}</span><div><strong>{bookmark.title}</strong><small>{bookmark.projectName} · {platformLabel(bookmark.provider)}</small></div></button>)}</div></section><footer><span>封存后，工作线材料与人的原文保持只读。</span><button type="button" disabled={busy} onClick={onSeal}>收笔并封存</button></footer></section></main>;
+}
+
+function stageLabel(stage: DailyReviewStage): string { return stage === "dossier" ? "阅读工作线" : stage === "reflection" ? "安静思考" : "今日收口"; }
+function worklineStatusLabel(status: string): string { return status === "needs-judgment" ? "需要判断" : status === "running" ? "仍在运行" : status === "ready" ? "已有阶段结果" : "等待回看"; }
+function humanizeBlockKind(value: string): string { return value.replace(/[-_]+/g, " ").toUpperCase(); }
 
 async function runNotebookResult<T extends { notebook: DesktopNotebookState }>(action: () => Promise<T>, onNotebook: (notebook: DesktopNotebookState) => void, setBusy: (busy: boolean) => void, setError: (message: string | null) => void): Promise<T | undefined> {
   setBusy(true);
@@ -826,13 +1079,16 @@ function DocumentDrawer({ document, onClose, onOpen }: { document: ProjectContex
   return <div className="drawer-layer"><button className="drawer-backdrop" type="button" aria-label="关闭项目文档" onClick={onClose} /><aside className="document-drawer"><header><div><span className="kicker">Project document / read only</span><h2>{document.label}</h2><code>{document.relativePath}</code></div><button type="button" aria-label="关闭" onClick={onClose}><X size={19} /></button></header><pre>{document.content}</pre><footer><button type="button" onClick={onOpen}><ExternalLink size={15} />在默认应用打开</button></footer></aside></div>;
 }
 
-function SourcesPanel({ state, onProvider, onAddRoot, onOpenPath, onKnowledgeRoot }: { state: DesktopState; onProvider(provider: SessionProvider): void; onAddRoot(): void; onOpenPath(target: string): void; onKnowledgeRoot(): void }): ReactElement {
+function SourcesPanel({ state, onProvider, onAddRoot, onOpenPath, onKnowledgeRoot, onReviewSchedule }: { state: DesktopState; onProvider(provider: SessionProvider): void; onAddRoot(): void; onOpenPath(target: string): void; onKnowledgeRoot(): void; onReviewSchedule(enabled: boolean, time: string): void }): ReactElement {
   const enabled = new Set(state.data.settings.enabledSessionProviders);
+  const scheduleEnabled = state.data.settings.dailyReviewScheduleEnabled;
+  const scheduleTime = state.data.settings.dailyReviewScheduleTime;
   return (
     <section className="view sources-view">
       <ViewHeading kicker="Trust surface / local evidence" title="Sources" />
       <div className="source-grid">
         <div className="source-main">
+          <div className="source-record review-schedule static"><Clock3 size={18} /><span><strong>每日自动准备工作脉络</strong><code>{scheduleEnabled ? `每天 ${scheduleTime}` : "未开启"}</code><small>应用保持运行时在后台整理；可能使用本地配置的模型额度。</small></span><div className="review-schedule-controls"><label><input type="checkbox" checked={scheduleEnabled} onChange={(event) => onReviewSchedule(event.target.checked, scheduleTime)} /><span>{scheduleEnabled ? "已开启" : "开启"}</span></label><input type="time" aria-label="每日自动整理时间" value={scheduleTime} disabled={!scheduleEnabled} onChange={(event) => onReviewSchedule(scheduleEnabled, event.target.value)} /></div></div>
           <div className="source-record knowledge-root"><Archive size={18} /><span><strong>LLM-Wiki knowledge root</strong><code>{state.notebook.knowledgeRoot}</code><small>INGEST → {state.notebook.knowledgeRawPath}</small></span><em>protocol</em><div><button type="button" onClick={() => onOpenPath(state.notebook.knowledgeRawPath)}>打开 raw</button><button type="button" onClick={onKnowledgeRoot}>管理根目录</button></div></div>
           {(["codex", "claude"] as SessionProvider[]).map((provider) => <button type="button" className="source-record" key={provider} onClick={() => onProvider(provider)}><Bot size={18} /><span><strong>{platformLabel(provider)} sessions</strong><code>{provider === "codex" ? "~/.codex/sessions/" : "~/.claude/projects/"}</code></span><em data-enabled={enabled.has(provider)}>{enabled.has(provider) ? "connected" : "disabled"}</em></button>)}
           <div className="source-record static"><Archive size={18} /><span><strong>Archived sessions</strong><code>provider-specific archives</code></span><em>read only</em></div>
@@ -851,42 +1107,48 @@ function SourcesPanel({ state, onProvider, onAddRoot, onOpenPath, onKnowledgeRoo
   );
 }
 
-function EvidenceDrawer({ session, onClose, onCopy, onOpen }: { session: AgentWorkSession; onClose(): void; onCopy(): void; onOpen(): void }): ReactElement {
+function EvidenceDrawer({ session, onClose, onCopy, onOpen }: { session: AgentWorkSession; onClose(): void; onCopy(): void; onOpen(returnFocus: HTMLElement): void }): ReactElement {
   const resume = buildResumeCommand(session);
-  return <div className="drawer-layer"><button className="drawer-backdrop" type="button" aria-label="关闭会话详情" onClick={onClose} /><aside className="evidence-drawer"><header><div><span className="kicker">Evidence / continuation</span><h2>{session.title}</h2></div><button type="button" aria-label="关闭" onClick={onClose}><X size={19} /></button></header><div className="drawer-content"><section><h3>Current stop</h3><p>{session.summary}</p></section><section><h3>Why this status</h3><p>{statusReason(session)}</p></section><section><h3>Canonical handles</h3><dl><div><dt>Provider</dt><dd>{platformLabel(session.platform)}</dd></div>{isArchivedSession(session) ? <div><dt>Storage state</dt><dd><span className="archive-state"><Archive size={13} />已归档</span></dd></div> : null}<div><dt>Session ID</dt><dd><code>{session.id}</code></dd></div><div><dt>Working directory</dt><dd><code>{session.worktreePath ?? session.projectPath ?? session.repositoryPath ?? "未识别"}</code></dd></div><div><dt>Rollout path</dt><dd><code>{session.path}</code></dd></div><div><dt>Updated</dt><dd><code>{session.updatedAt}</code></dd></div></dl></section>{session.artifacts.length ? <section><h3>Artifacts</h3>{session.artifacts.map((artifact) => <code className="artifact" key={artifact}>{artifact}</code>)}</section> : null}</div><footer><button type="button" onClick={onOpen}><FileText size={14} />打开记录</button><code>{resume ?? "No verified resume handle"}</code><button type="button" className="primary-action" disabled={!resume} onClick={onCopy}><Clipboard size={14} />Copy resume</button></footer></aside></div>;
+  return <div className="drawer-layer"><button className="drawer-backdrop" type="button" aria-label="关闭会话详情" onClick={onClose} /><aside className="evidence-drawer"><header><div><span className="kicker">Evidence / continuation</span><h2>{session.title}</h2></div><button type="button" aria-label="关闭" onClick={onClose}><X size={19} /></button></header><div className="drawer-content"><section><h3>Current stop</h3><p>{session.summary}</p></section><section><h3>Why this status</h3><p>{statusReason(session)}</p></section><section><h3>Canonical handles</h3><dl><div><dt>Provider</dt><dd>{platformLabel(session.platform)}</dd></div>{isArchivedSession(session) ? <div><dt>Storage state</dt><dd><span className="archive-state"><Archive size={13} />已归档</span></dd></div> : null}<div><dt>Session ID</dt><dd><code>{session.id}</code></dd></div><div><dt>Working directory</dt><dd><code>{session.worktreePath ?? session.projectPath ?? session.repositoryPath ?? "未识别"}</code></dd></div><div><dt>Rollout path</dt><dd><code>{session.path}</code></dd></div><div><dt>Updated</dt><dd><code>{session.updatedAt}</code></dd></div></dl></section>{session.artifacts.length ? <section><h3>Artifacts</h3>{session.artifacts.map((artifact) => <code className="artifact" key={artifact}>{artifact}</code>)}</section> : null}</div><footer><button type="button" onClick={(event) => onOpen(event.currentTarget)}><FileText size={14} />打开记录</button><code>{resume ?? "No verified resume handle"}</code><button type="button" className="primary-action" disabled={!resume} onClick={onCopy}><Clipboard size={14} />Copy resume</button></footer></aside></div>;
 }
 
-function TranscriptReader({ session, onClose }: { session: AgentWorkSession; onClose(): void }): ReactElement {
+function TranscriptReader({ target, onClose }: { target: TodayTranscriptTarget; onClose(): void }): ReactElement {
   const [transcript, setTranscript] = useState<SessionTranscriptState | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     setTranscript(null);
     setError(null);
-    void window.agentWhiteboard.getSessionTranscript({ id: session.id, platform: session.platform, path: session.path })
+    void window.agentWhiteboard.getSessionTranscript(target.request)
       .then((next) => { if (!cancelled) setTranscript(next); })
       .catch((reason: unknown) => { if (!cancelled) setError(reason instanceof Error ? reason.message : "会话记录暂时无法读取。 "); });
     return () => { cancelled = true; };
-  }, [session.id, session.path, session.platform]);
+  }, [target.request.id, target.request.packageRef?.evidenceId, target.request.packageRef?.generationId, target.request.packageRef?.logicalDate, target.request.path, target.request.platform]);
 
   return (
-    <div className="transcript-layer" role="dialog" aria-modal="true" aria-label={`${session.title} 会话记录`}>
+    <div className="transcript-layer" role="dialog" aria-modal="true" aria-label={`${target.title} 会话记录`} onKeyDown={trapModalFocus}>
       <button className="transcript-backdrop" type="button" aria-label="关闭会话记录" onClick={onClose} />
       <section className="transcript-reader">
         <header>
-          <div><span className="kicker">Conversation archive / read only</span><h2>{session.title}</h2><p>{platformLabel(session.platform)} · <code>{session.id}</code></p></div>
-          <button type="button" aria-label="关闭会话记录" onClick={onClose}><X size={20} /></button>
+          <div><span className="kicker">Conversation archive / read only</span><h2>{target.title}</h2><p>{platformLabel(target.platform)} · <code>{target.request.id}</code></p></div>
+          <button type="button" autoFocus aria-label="关闭会话记录" onClick={onClose}><X size={20} /></button>
         </header>
         <div className="transcript-scroll">
           {!transcript && !error ? <TranscriptSkeleton /> : null}
           {error ? <StateMessage kind="error" title="会话记录暂时无法读取" detail={error} /> : null}
           {transcript?.warning ? <div className="transcript-warning"><AlertTriangle size={15} />{transcript.warning}</div> : null}
+          {target.citation ? (
+            <div className="transcript-citation-context" role="note">
+              <FileText size={16} aria-hidden="true" />
+              <p><strong>引用 {target.citation.label} · Session 级证据</strong><span>这里是该引用对应的完整会话。当前资产没有消息级位置，因此不会自动猜测或高亮某一段。</span></p>
+            </div>
+          ) : null}
           {transcript && transcript.messages.length === 0 ? <StateMessage kind="empty" title="没有可显示的对话正文" detail="文件存在，但没有识别到用户或助手消息；系统指令和工具事件不会作为正文铺开。" /> : null}
           {transcript?.messages.map((message, index) => {
             const previous = transcript.messages[index - 1];
             const day = transcriptDay(message.timestamp);
             const previousDay = transcriptDay(previous?.timestamp);
-            return <div className="transcript-entry" key={message.id}>{day && day !== previousDay ? <div className="transcript-day"><span>{day}</span></div> : null}<article data-role={message.role}><aside><strong>{message.role === "user" ? "You" : platformLabel(session.platform)}</strong><time>{message.timestamp ? transcriptTime(message.timestamp) : ""}</time></aside><div className="transcript-copy"><ReadableTranscriptText content={message.content} /></div></article></div>;
+            return <div className="transcript-entry" key={message.id}>{day && day !== previousDay ? <div className="transcript-day"><span>{day}</span></div> : null}<article data-role={message.role}><aside><strong>{message.role === "user" ? "You" : platformLabel(target.platform)}</strong><time>{message.timestamp ? transcriptTime(message.timestamp) : ""}</time></aside><div className="transcript-copy"><ReadableTranscriptText content={message.content} /></div></article></div>;
           })}
         </div>
         <footer><div><strong>{transcript?.messages.length ?? 0}</strong><span>messages</span>{transcript?.omittedToolEvents ? <><strong>{transcript.omittedToolEvents}</strong><span>tool events folded</span></> : null}</div><button type="button" onClick={onClose}>回到证据</button></footer>

@@ -1,27 +1,102 @@
-# Work Continuity v0.5.0
+# Agent Notebook v0.7.2
 
-This release turns the standalone macOS app into a daily work notebook: collect thoughts while working, understand the day across Codex and Claude Code, then deliberately organize and seal a stable page.
+The product is now Agent Notebook: a knowledge notebook co-written by you and your agents. Application, repository, package, installer, export attribution and product configuration names now agree. The repository is `WdBlink/agent-notebook`, the application ID is `com.wdblink.agentnotebook`, and product environment variables use `AGENT_NOTEBOOK_*`.
+
+The macOS data directory is `~/Library/Application Support/Agent Notebook`. This pre-launch rename does not install a general migration layer; existing developer data is moved intact. Historical release names and original evidence remain unchanged. Installers use the stable `agent-notebook-<version>-macos-<arch>` filename prefix, without spaces.
+
+Message-level evidence preview remains development-only. macOS installers remain unsigned and not notarized.
+
+# Work Continuity v0.7.1
+
+Today preparation now keeps one temporary frozen input per workflow and stores only hash-checked input references in checkpoints and initial pending writes. Interrupted work can resume without repeating completed model calls; successful publication removes its recovery state. Inactive failed/interrupted runs expire after 24 hours, superseded attempts are reclaimed, and active runs are protected. Cleanup failures no longer turn a successfully saved page into a failed task.
+
+This release also includes the structured Today workflow: one digest per main Session family, child-Agent evidence within that family, a top-level preparation progress bar, human-only interaction counts, provider/tool activity windows, and on-demand dossiers with saved reflections and explicit proposal decisions. Published pages and provider transcripts are not deleted by checkpoint maintenance.
+
+Existing oversized database files can be reclaimed with the explicit offline maintenance command documented in the README. It preserves a compressed recovery copy and verifies saved artifact bytes and SQLite integrity. Normal startup performs bounded recovery-state cleanup; it does not run a blocking full database rewrite.
+
+Message-level evidence preview remains development-only and cannot be enabled in packaged applications. Its semantic release gates remain pending. macOS installers are unsigned and not notarized.
+
+# Work Continuity v0.7.0
+
+Work Continuity v0.7.0 moves daily workline preparation out of the user's waiting path. Today remains one continuous work surface: source Sessions stay readable while the app prepares the day's review in the background, and a finished package appears without requiring the user to watch a model run.
 
 ## Highlights
 
-- Replaces the former Brief dashboard with the Today notebook surface from the validated HTML prototype.
-- Keeps timestamped notes and the Daily Page in separate, independently scrolling panes across wide and compact windows.
-- Groups multiple provider sessions into project-level work records instead of repeating the Codex or Claude Code session list.
-- Expands each work record to show what changed, what remains uncertain, and every contributing source session.
-- Adds durable local note creation, editing, favorites, deletion, and delivery history.
-- Exports an individual note as a standalone SVG card.
-- Routes a note explicitly to the configured `LLM-Wiki/raw` intake or an existing project's CTX intake; the original note remains unchanged.
-- Adds the complete EOD flow: bounded draft, personal writing, up to three continuation bookmarks, temporary draft save, and immutable sealing.
-- Preserves Sessions, Timeline, Map, Sources, in-app transcript reading, provider selection, and copy-only resume commands.
-- Adds a versioned, normalized, atomically replaced notebook store separate from provider evidence and semantic caches.
-- Fixes the GitHub release workflow so tags build and verify the independent Electron application rather than the deprecated Obsidian plugin.
-- Packages and verifies separate macOS DMGs and ZIP archives for Apple Silicon and Intel.
+- Adds one optional local daily preparation time under **Sources**. It is off by default and runs only while Work Continuity is open; there is no login item, wake service, daemon, or general automation center.
+- Keeps the raw Today Board usable during preparation. A run is represented only as a small `正在准备工作脉络…` state; the UI never exposes Skill, KSI, Prompt, or pipeline controls.
+- Makes **现在整理** non-blocking. The same background path serves manual and scheduled preparation, deduplicates repeated starts, and atomically publishes a new package only after compilation and validation succeed.
+- Uses exactly one enabled provider per preparation attempt. A slow or failed run never silently repeats the full day with a second provider and doubles time or model spend.
+- Persists first-run failures as retryable diagnostics without replacing source Sessions or a previously readable package.
+- Gives daily workline preparation priority over low-value Session-title generation, preventing competing model calls while a day still needs compilation.
+- Preserves the existing human-authority boundary: the app prepares evidence-linked worklines, but reflection, continuation choices, and sealing still require explicit user action.
+
+## Verification
+
+- The full suite covers schedule normalization, one-attempt gating, background deduplication, raw/failure persistence, the single-provider boundary, and all prior review/seal invariants.
+- A real Electron test starts with a due schedule, performs no review click, receives a compiled workline through a fake local provider CLI, and verifies that the result is durable while user reflection remains blank.
+
+## Boundaries
+
+- Work Continuity must remain open for the configured daily preparation time. v0.7.0 does not wake the Mac or install a system service.
+- The archives remain unsigned and not notarized. macOS may require Control-clicking the app and choosing **Open** for the first launch.
+
+# Work Continuity v0.6.2
+
+Work Continuity v0.6.2 fixes the follow-up failure that could appear as `CLI 返回的总结不是有效 JSON` after the provider had already finished organizing the day.
+
+## Fixes
+
+- Gives Codex a strict, product-owned output schema instead of relying on a Prompt-only “return JSON” request.
+- Recovers the provider's known brace-free YAML transport form locally, only when a completion marker and the same strict schema validate; ambiguous, truncated, or YAML-specific structures remain errors.
+- Keeps Traceink semantics open-ended: workline and block roles remain free strings, while future semantic fields travel through a validated extension envelope and return to the ordinary replay payload.
+- Uses the same result envelope for Claude Code and surfaces provider-declared error results directly instead of misreporting their text as malformed JSON.
+- Retains the existing cost boundary: an invalid or semantically incomplete model result never silently triggers a second paid provider call.
+- Verifies that the schema transport is present inside every packaged macOS archive.
+
+## Boundaries
+
+- The v0.6.2 archives remain unsigned and not notarized. macOS may require Control-clicking the app and choosing **Open** for the first launch.
+- This maintenance release changes only the result transport and diagnostics. It does not replace the KSI-informed Traceink Prompt, constrain semantic block vocabulary, or alter sealed history.
+
+# Work Continuity v0.6.1
+
+Work Continuity v0.6.1 fixes the first-run failure that could appear as `CLI 输出超过 4 MB 限制` while organizing a day with many or very long Codex Sessions.
+
+## Fixes
+
+- Streams Codex JSONL output and retains only the final Traceink result and bounded structured diagnostics. Large reasoning, command, and tool-progress events no longer fill the app's result buffer or leak into error messages.
+- Keeps the 4 MB safety boundary on the actual final result instead of applying it to all intermediate provider traffic.
+- Gives the Traceink compiler an explicit bounded-batch reading contract for long frozen transcripts, including coverage tracking and visible missing-range reporting.
+- Shows structured Claude Code `result` and `errors[]` diagnostics instead of reducing failures to a bare exit code.
+- Uses a bounded graceful-stop → forced-stop lifecycle so a timed-out or malformed provider call cannot leave a hidden CLI process running.
+
+## Boundaries
+
+- The v0.6.1 archives remain unsigned and not notarized. macOS may require Control-clicking the app and choosing **Open** for the first launch.
+- This maintenance release preserves the v0.6.0 Today Board, Traceink prompt profile, sealed history, and human-authority workflow; it does not introduce a new compact-evidence ontology or silently discard experimental evidence.
+
+# Work Continuity v0.6.0
+
+Work Continuity v0.6.0 replaces the capture-led Today surface with one evidence-led Today Board. A day now moves through a visible `raw → compiled → stale → sealed` lifecycle: source Sessions remain independent until you ask the app to organize them, new evidence never silently rewrites an existing compilation, and a sealed historical page stays fixed.
+
+## Highlights
+
+- Reconstructs shared worklines across Codex and Claude Code Sessions with the KSI-informed Traceink prompt profile (`traceink-review-v1`) instead of producing one summary card per Session.
+- Isolates the product-owned Codex model/reasoning pair from incompatible interactive CLI settings, surfaces structured provider errors, and tries the other already-enabled provider once only when CLI invocation fails.
+- Keeps compilation on demand. **Raw** shows source Session lanes, **compiled** shows the current workline package, **stale** preserves that package beside newly arrived evidence, and **sealed** replays the chosen historical generation without calling the model again.
+- Shows only evidence-supported participation: explicit human interventions, observed Agent-independent activity windows, collaborative spans, and uncertainty remain distinct. Agent activity volume is never presented as proof of human attention or importance.
+- Adds an evidence reader for each workline. Generated interpretations stay labeled, admitted sources can be reopened, disagreement and scope survive compression, and the dossier stops at a question that still requires the person.
+- Gives human reflection its own blank, local field. Traceink prepares material to think with; it does not write first-person conclusions, infer adoption, or overwrite the person's original words.
+- Makes reflection saves and sealing generation-safe. Every save or seal request names the exact active compilation generation; a concurrent refresh makes an older review fail instead of writing into or sealing different material. Once sealed, the selected package, evidence references, human reflection, and continuation bookmarks are immutable.
+- Preserves **Sessions**, **Timeline**, **Map**, and **Sources**, including read-only transcript inspection, provider selection, bounded CTX context, and copy-only resume commands.
+- Removes note capture and delivery from the primary Today surface. Existing notebook note records remain readable by the compatibility store, but they are legacy data rather than the v0.6.0 product workflow.
+- Packages separate DMG and ZIP archives for Apple Silicon and Intel Macs and verifies the Work Continuity bundle, architecture, version, Today Board, Traceink profile, evidence reader, and sealing contract inside each archive.
 
 ## Boundaries
 
 - macOS only.
-- Unsigned and not notarized.
-- Provider session stores remain read-only.
-- Wiki and CTX writes occur only after an explicit note-delivery action.
-- Project delivery requires an existing CTX store; the app never adopts CTX automatically.
-- Continuation remains copy-only: the app does not own a terminal, PTY, tmux session, or provider process.
+- The v0.6.0 archives are unsigned and not notarized. macOS may require Control-clicking the app and choosing **Open** for the first launch.
+- Provider Session stores are read-only. Work Continuity never edits Codex or Claude Code transcripts.
+- Traceink compilation uses installed provider CLIs and the provider account/network already configured on the Mac. Invocation failures remain visible; an already-enabled second provider may be tried once, but semantic validation failures never trigger another call or fall back to a thin summary.
+- Resume remains copy-only. Work Continuity does not start a terminal, PTY, tmux Session, or provider process.
+- Legacy Wiki/CTX note-delivery APIs remain compatibility code and still require an explicit action; they are not part of the primary Today Board.

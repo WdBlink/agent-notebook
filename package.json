@@ -1,6 +1,6 @@
 {
   "name": "agent-notebook",
-  "version": "0.5.0",
+  "version": "0.7.2",
   "description": "A local-first knowledge notebook co-written by you and your agents.",
   "main": "dist/desktop/main.js",
   "type": "module",
@@ -54,7 +54,7 @@
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "app-icon.icns",
-      "artifactName": "${productName}-${version}-macos-${arch}.${ext}",
+      "artifactName": "agent-notebook-${version}-macos-${arch}.${ext}",
       "target": [
         {
           "target": "dmg",
@@ -73,11 +73,15 @@
       ]
     },
     "dmg": {
-      "artifactName": "${productName}-${version}-macos-${arch}.${ext}"
+      "artifactName": "agent-notebook-${version}-macos-${arch}.${ext}"
     }
   },
   "devDependencies": {
+    "@langchain/core": "1.2.9",
+    "@langchain/langgraph": "1.4.13",
+    "@langchain/langgraph-checkpoint": "1.1.5",
     "@playwright/test": "1.61.1",
+    "@types/js-yaml": "4.0.9",
     "@types/jsdom": "28.0.3",
     "@types/node": "26.1.0",
     "@types/react": "^19.0.14",
@@ -88,15 +92,19 @@
     "jsdom": "29.1.1",
     "obsidian": "1.13.1",
     "tsx": "^4.22.5",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "zod": "4.5.2"
   },
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
     "@xyflow/react": "^12.10.1",
+    "js-yaml": "4.3.2",
     "lucide-react": "^0.577.0",
     "node-pty": "1.1.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   }
 }
