@@ -69,7 +69,7 @@ test("selected workline produces only one exact Traceink dossier with the canoni
     runner: async (request) => {
       if (request.args[0] === "features") return featureResult();
       providerCalls += 1;
-      assert.match(request.stdin, /steps 4–5/);
+      assert.match(request.stdin, /workflow step 4 for this selected workline/);
       assert.match(request.stdin, /Do not regenerate the full-day index/);
       assert.match(request.stdin, /跨 Session 主线/);
       assert.equal(sliceBetween(request.stdin, TRACEINK_SKILL_BEGIN_MARKER, TRACEINK_SKILL_END_MARKER), bundle.skillText);
