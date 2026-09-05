@@ -1,3 +1,11 @@
+# Agent Notebook v0.7.2
+
+The product is now Agent Notebook: a knowledge notebook co-written by you and your agents. Application, repository, package, installer, export attribution and product configuration names now agree. The repository is `WdBlink/agent-notebook`, the application ID is `com.wdblink.agentnotebook`, and product environment variables use `AGENT_NOTEBOOK_*`.
+
+The macOS data directory is `~/Library/Application Support/Agent Notebook`. This pre-launch rename does not install a general migration layer; existing developer data is moved intact. Historical release names and original evidence remain unchanged. Installers use the stable `agent-notebook-<version>-macos-<arch>` filename prefix, without spaces.
+
+Message-level evidence preview remains development-only. macOS installers remain unsigned and not notarized.
+
 # Work Continuity v0.7.1
 
 Today preparation now keeps one temporary frozen input per workflow and stores only hash-checked input references in checkpoints and initial pending writes. Interrupted work can resume without repeating completed model calls; successful publication removes its recovery state. Inactive failed/interrupted runs expire after 24 hours, superseded attempts are reclaimed, and active runs are protected. Cleanup failures no longer turn a successfully saved page into a failed task.

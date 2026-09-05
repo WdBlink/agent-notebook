@@ -64,8 +64,8 @@ export function RuntimeTerminalSurface({ gateway, runtimeId, ownerId, displayOwn
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(container);
-    const testHook = (globalThis as typeof globalThis & { __dailyCockpitTerminalTestHook?: TerminalTestHook })
-      .__dailyCockpitTerminalTestHook;
+    const testHook = (globalThis as typeof globalThis & { __agentNotebookTerminalTestHook?: TerminalTestHook })
+      .__agentNotebookTerminalTestHook;
     const unregisterTestReader = testHook?.register(displayOwnerId, () => readActiveBuffer(terminal));
 
     let disposed = false;

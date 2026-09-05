@@ -5,15 +5,15 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const pluginId = "daily-cockpit";
+const pluginId = "agent-notebook";
 const args = process.argv.slice(2);
 const vault = await resolveVault(args);
 const port = Number(readArg(args, "--port") ?? "9222");
 const model = readArg(args, "--model") ?? "qwen2.5:7b";
 const endpoint = readArg(args, "--endpoint") ?? "http://127.0.0.1:11434/v1/chat/completions";
 const obsidianBin = "/Applications/Obsidian.app/Contents/MacOS/Obsidian";
-const screenshotPath = path.join(process.cwd(), "test-results", "obsidian-daily-cockpit.png");
-const e2eRoot = "Daily Cockpit E2E";
+const screenshotPath = path.join(process.cwd(), "test-results", "obsidian-agent-notebook.png");
+const e2eRoot = "Agent Notebook E2E";
 const e2eFolder = `${e2eRoot}/run-${process.pid}-${Date.now()}`;
 
 await assertFile(obsidianBin);
@@ -47,15 +47,15 @@ try {
       scanRoots: plugin.data?.settings?.sessionScanRoots ?? [],
       sessionCount: plugin.data?.workSessionSnapshot?.sessions?.length ?? 0,
       commands: Object.keys(globalThis.app.commands.commands).filter((command) => command.includes(id)),
-      leaves: globalThis.app.workspace.getLeavesOfType("daily-cockpit-view").length
+      leaves: globalThis.app.workspace.getLeavesOfType("agent-notebook-view").length
     };
   }, { id: pluginId, modelName: model, modelEndpoint: endpoint, folder: e2eFolder });
 
   if (!pluginState.hasRefreshWorkSessions || pluginState.leaves < 1) {
-    throw new Error(`Daily Cockpit view did not initialize: ${JSON.stringify(pluginState)}`);
+    throw new Error(`Agent Notebook view did not initialize: ${JSON.stringify(pluginState)}`);
   }
   if (!pluginState.scanRoots.includes("~/.codex/sessions") || !pluginState.scanRoots.includes("~/.claude/projects")) {
-    throw new Error("Daily Cockpit settings are missing canonical Codex or Claude roots");
+    throw new Error("Agent Notebook settings are missing canonical Codex or Claude roots");
   }
 
   await page.waitForFunction(
@@ -92,9 +92,9 @@ try {
   await fs.access(expandHome(resumeSession.path));
 
   const expectedResumeCommand = buildExpectedResumeCommand(resumeSession);
-  await execFileAsync("osascript", ["-e", 'set the clipboard to "daily-cockpit-e2e-sentinel"']);
-  const sessionCard = page.locator(".daily-cockpit-session").filter({ hasText: resumeSession.title }).first();
-  const resumeButton = sessionCard.locator(".daily-cockpit-resume");
+  await execFileAsync("osascript", ["-e", 'set the clipboard to "agent-notebook-e2e-sentinel"']);
+  const sessionCard = page.locator(".agent-notebook-session").filter({ hasText: resumeSession.title }).first();
+  const resumeButton = sessionCard.locator(".agent-notebook-resume");
   await resumeButton.click();
   await resumeButton.filter({ hasText: "已复制" }).waitFor({ state: "visible", timeout: 5000 });
   const copiedResumeCommand = (await execFileAsync("pbpaste")).stdout.trim();
@@ -105,7 +105,7 @@ try {
   const resumeVerification = await verifyCodexResume(resumeSession);
 
   const previousPlanId = await page.evaluate((id) => globalThis.app.plugins.plugins[id].data.activePlanId, pluginId);
-  await page.getByLabel("待拆解的自然语言意图").fill("明天继续验证 Daily Cockpit：检查昨日工作聚合，并确认恢复命令和导出结果。拆成两条简洁待办。");
+  await page.getByLabel("待拆解的自然语言意图").fill("明天继续验证 Agent Notebook：检查昨日工作聚合，并确认恢复命令和导出结果。拆成两条简洁待办。");
   await page.getByRole("button", { name: "拆成待办" }).click();
   await page.waitForFunction(
     ({ id, before }) => {
@@ -180,7 +180,7 @@ process.stdout.write(`${JSON.stringify(result, null, 2)}\n`, () => process.exit(
 async function verifyCodexResume(session) {
   const cwd = expandHome(session.worktreePath ?? session.projectPath ?? process.cwd());
   await fs.access(cwd);
-  const marker = `DAILY_COCKPIT_RESUME_OK_${Date.now()}`;
+  const marker = `AGENT_NOTEBOOK_RESUME_OK_${Date.now()}`;
   const { stdout } = await execFileAsync(
     "codex",
     ["exec", "resume", session.id, `Reply exactly ${marker}. Do not run tools or modify files.`, "--json", "--skip-git-repo-check"],

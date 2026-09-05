@@ -179,7 +179,7 @@ test("captured transcript content hash changes make an admitted generation stale
 });
 
 test("symlinked scan root detects same-mtime content mutation from scan through generation projection", async () => {
-  const temp = await mkdtemp(path.join(os.tmpdir(), "work-continuity-stale-e2e-"));
+  const temp = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-stale-e2e-"));
   const realRoot = path.join(temp, "real-sessions");
   const aliasRoot = path.join(temp, ".codex", "sessions");
   const transcriptPath = path.join(realRoot, "rollout-2026-08-01.jsonl");

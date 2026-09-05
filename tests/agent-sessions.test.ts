@@ -87,7 +87,7 @@ test("preserves Codex subagent lineage instead of treating a child transcript as
 });
 
 test("Codex archived sessions are completed and model summaries cannot reopen them", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "work-continuity-archive-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-archive-"));
   const archive = path.join(root, ".codex", "archived_sessions");
   await mkdir(archive, { recursive: true });
   const sessionPath = path.join(archive, "rollout-archived.jsonl");
@@ -190,7 +190,7 @@ test("a UUID in a Claude task path does not create a resumable session", () => {
 });
 
 test("scans yesterday Codex and Claude files from configured local roots", async () => {
-  const temp = await mkdtemp(path.join(os.tmpdir(), "daily-cockpit-sessions-"));
+  const temp = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-sessions-"));
   const codexRoot = path.join(temp, "codex");
   const claudeRoot = path.join(temp, "claude", "projects");
   const targetTime = new Date("2026-07-02T14:30:00.000Z");
@@ -241,7 +241,7 @@ test("scans yesterday Codex and Claude files from configured local roots", async
 });
 
 test("scanner captures the canonical transcript hash, byte length, and complete byte coverage", async () => {
-  const temp = await mkdtemp(path.join(os.tmpdir(), "work-continuity-evidence-capture-"));
+  const temp = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-evidence-capture-"));
   const realRoot = path.join(temp, "real-sessions");
   const root = path.join(temp, ".codex", "sessions");
   const sessionPath = path.join(realRoot, "rollout-2026-07-02.jsonl");
@@ -289,7 +289,7 @@ test("scanner captures the canonical transcript hash, byte length, and complete 
 });
 
 test("scanner reports a discovered transcript that cannot be captured instead of silently omitting it", async () => {
-  const temp = await mkdtemp(path.join(os.tmpdir(), "work-continuity-evidence-warning-"));
+  const temp = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-evidence-warning-"));
   const root = path.join(temp, ".codex", "sessions");
   const goodPath = path.join(root, "good-2026-07-02.jsonl");
   const badPath = path.join(root, "bad-2026-07-02.jsonl");
@@ -328,7 +328,7 @@ test("scanner reports a discovered transcript that cannot be captured instead of
 });
 
 test("scanner records read, skipped, deduplicated, and truncated evidence dispositions", async () => {
-  const temp = await mkdtemp(path.join(os.tmpdir(), "work-continuity-evidence-coverage-"));
+  const temp = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-evidence-coverage-"));
   const root = path.join(temp, ".codex", "sessions");
   const targetTime = new Date("2026-07-02T10:00:00.000Z");
   const event = (id: string, timestamp = "2026-07-02T09:00:00.000Z") => [
@@ -397,7 +397,7 @@ test("scanner records discovery failures and Session-cap omissions as incomplete
     entry.detail.includes("permission denied")
   ));
 
-  const temp = await mkdtemp(path.join(os.tmpdir(), "work-continuity-session-cap-"));
+  const temp = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-session-cap-"));
   try {
     const root = path.join(temp, ".codex", "sessions");
     await mkdir(root, { recursive: true });
@@ -424,7 +424,7 @@ test("scanner records discovery failures and Session-cap omissions as incomplete
 });
 
 test("descends the Codex year/month/day hierarchy even when parent directory mtimes are newer", async () => {
-  const temp = await mkdtemp(path.join(os.tmpdir(), "daily-cockpit-codex-tree-"));
+  const temp = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-codex-tree-"));
   const root = path.join(temp, ".codex", "sessions");
   const dayDir = path.join(root, "2026", "07", "02");
   const file = path.join(dayDir, "rollout-2026-07-02T09-00-00-019f1111-2222-7333-8444-555555555555.jsonl");
@@ -454,7 +454,7 @@ test("descends the Codex year/month/day hierarchy even when parent directory mti
 });
 
 test("keeps a cross-midnight Codex session eligible for target-day provider analysis", async () => {
-  const temp = await mkdtemp(path.join(os.tmpdir(), "daily-cockpit-cross-midnight-"));
+  const temp = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-cross-midnight-"));
   const root = path.join(temp, ".codex", "sessions");
   const oldDayDir = path.join(root, "2026", "06", "30");
   const file = path.join(oldDayDir, "rollout-2026-06-30T09-00-00-019f1111-2222-7333-8444-666666666666.jsonl");
@@ -504,7 +504,7 @@ test("keeps a cross-midnight Codex session eligible for target-day provider anal
 });
 
 test("recognizes a Git worktree without replacing its canonical cwd", async () => {
-  const temp = await mkdtemp(path.join(os.tmpdir(), "daily-cockpit-worktree-"));
+  const temp = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-worktree-"));
   const root = path.join(temp, "codex-sessions");
   const worktree = path.join(temp, "repo-worktrees", "resume fix");
   const mainRepo = path.join(temp, "repo");
@@ -533,7 +533,7 @@ test("recognizes a Git worktree without replacing its canonical cwd", async () =
 });
 
 test("merges model summaries without allowing canonical paths or ids to change", async () => {
-  const temp = await mkdtemp(path.join(os.tmpdir(), "daily-cockpit-summary-merge-"));
+  const temp = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-summary-merge-"));
   const file = path.join(temp, "rollout.jsonl");
   try {
     await writeFile(
@@ -594,7 +594,7 @@ test("merges model summaries without allowing canonical paths or ids to change",
 test("missing session roots return an empty snapshot", async () => {
   const snapshot = await loadAgentWorkSnapshot(createEmptyData().settings, {
     now: new Date("2026-07-03T09:00:00.000Z"),
-    roots: ["/tmp/daily-cockpit-missing-root"],
+    roots: ["/tmp/agent-notebook-missing-root"],
     fs: fsAdapter
   });
 
@@ -603,7 +603,7 @@ test("missing session roots return an empty snapshot", async () => {
 });
 
 test("provider selection supports both, either provider, and neither", async () => {
-  const temp = await mkdtemp(path.join(os.tmpdir(), "daily-cockpit-provider-selection-"));
+  const temp = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-provider-selection-"));
   const codexRoot = path.join(temp, ".codex", "sessions");
   const claudeRoot = path.join(temp, ".claude", "projects", "project-a");
   const roots = [path.dirname(claudeRoot), codexRoot];

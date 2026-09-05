@@ -52,7 +52,7 @@ jobs:
         run: |
           VERSION="$(node -p 'require("./package.json").version')"
           for FORMAT in dmg zip; do
-            npm run verify:desktop-release -- --archive "dist/macos/Work Continuity-${VERSION}-macos-${{ matrix.arch }}.${FORMAT}" --arch "${{ matrix.arch }}"
+            npm run verify:desktop-release -- --archive "dist/macos/agent-notebook-${VERSION}-macos-${{ matrix.arch }}.${FORMAT}" --arch "${{ matrix.arch }}"
           done
       - uses: actions/upload-artifact@v4
         with:
@@ -89,7 +89,7 @@ jobs:
         run: |
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" dist/upload/*.dmg dist/upload/*.zip dist/upload/SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"
-            gh release edit "$RELEASE_TAG" --notes-file RELEASE_NOTES.md --title "Work Continuity $RELEASE_TAG" --repo "$GITHUB_REPOSITORY"
+            gh release edit "$RELEASE_TAG" --notes-file RELEASE_NOTES.md --title "Agent Notebook $RELEASE_TAG" --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$RELEASE_TAG" dist/upload/*.dmg dist/upload/*.zip dist/upload/SHA256SUMS.txt --verify-tag --title "Work Continuity $RELEASE_TAG" --notes-file RELEASE_NOTES.md --repo "$GITHUB_REPOSITORY"
+            gh release create "$RELEASE_TAG" dist/upload/*.dmg dist/upload/*.zip dist/upload/SHA256SUMS.txt --verify-tag --title "Agent Notebook $RELEASE_TAG" --notes-file RELEASE_NOTES.md --repo "$GITHUB_REPOSITORY"
           fi

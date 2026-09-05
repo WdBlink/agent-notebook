@@ -101,15 +101,15 @@ import { structuredTodaySessionFamilies } from "./structured-today-input";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.AGENT_WHITEBOARD_DEV === "1";
-const structuredTodayProducerEnabled = process.env.WORK_CONTINUITY_STRUCTURED_TODAY !== "0";
-const messageSpanCandidateEnabled = !app.isPackaged && process.env.WORK_CONTINUITY_MESSAGE_SPANS === "1";
+const structuredTodayProducerEnabled = process.env.AGENT_NOTEBOOK_STRUCTURED_TODAY !== "0";
+const messageSpanCandidateEnabled = !app.isPackaged && process.env.AGENT_NOTEBOOK_MESSAGE_SPANS === "1";
 const storeFileName = "cockpit-data.json";
 const summaryCacheFileName = "session-summary-cache-v1.json";
 const notebookFileName = "notebook-v1.json";
 const structuredTodayCheckpointFileName = "structured-today-workflows-v1.sqlite";
 const summaryModels: SummaryModelMap = {
-  codex: process.env.WORK_CONTINUITY_CODEX_SUMMARY_MODEL?.trim() || "gpt-5.3-codex-spark",
-  claude: process.env.WORK_CONTINUITY_CLAUDE_SUMMARY_MODEL?.trim() || "fable"
+  codex: process.env.AGENT_NOTEBOOK_CODEX_SUMMARY_MODEL?.trim() || "gpt-5.3-codex-spark",
+  claude: process.env.AGENT_NOTEBOOK_CLAUDE_SUMMARY_MODEL?.trim() || "fable"
 };
 
 let mainWindow: BrowserWindow | undefined;
@@ -164,7 +164,7 @@ const runtimeFs: RuntimeFileSystem = {
   }
 };
 
-app.setName("Work Continuity");
+app.setName("Agent Notebook");
 if (!app.requestSingleInstanceLock()) app.exit(0);
 app.on("second-instance", () => { mainWindow?.show(); mainWindow?.focus(); });
 
@@ -268,7 +268,7 @@ ipcMain.handle("desktop:delete-notebook-note", async (_event, noteId: string) =>
 
 ipcMain.handle("desktop:export-notebook-note-card", async (_event, noteId: string) => {
   const note = findNotebookNote(notebook, cleanIdentifier(noteId));
-  const outputDirectory = path.join(app.getPath("documents"), "Work Continuity Cards");
+  const outputDirectory = path.join(app.getPath("documents"), "Agent Notebook Cards");
   await fs.mkdir(outputDirectory, { recursive: true });
   const target = path.join(outputDirectory, `${note.logicalDate}-${safeFileName(note.title)}-${note.id.slice(-8)}.svg`);
   await fs.writeFile(target, renderNoteCard(note), "utf8");
@@ -287,7 +287,7 @@ ipcMain.handle("desktop:route-notebook-note-to-wiki", async (_event, noteId: str
   const root = await fs.realpath(expandHome(notebook.knowledgeRoot)).catch(() => "");
   if (!root) throw new Error("LLM-Wiki 根目录不存在，请先在 Sources 中设置。");
   const rawRoot = path.join(root, "raw");
-  const targetDirectory = path.join(rawRoot, "work-continuity", note.logicalDate);
+  const targetDirectory = path.join(rawRoot, "agent-notebook", note.logicalDate);
   await fs.mkdir(targetDirectory, { recursive: true });
   const target = path.join(targetDirectory, `${timestampSlug()}-${safeFileName(note.title)}.md`);
   await fs.writeFile(target, renderProtocolCapture(note, "llm-wiki"), { encoding: "utf8", flag: "wx" });
@@ -1038,7 +1038,7 @@ function createWindow(): void {
     height: 900,
     minWidth: 720,
     minHeight: 620,
-    title: "Work Continuity",
+    title: "Agent Notebook",
     backgroundColor: "#f4f2eb",
     titleBarStyle: "hiddenInset",
     icon: path.join(__dirname, "app-icon.png"),
@@ -1200,7 +1200,7 @@ function scheduleSessionSummaries(
   misses: CockpitData["workSessionSnapshot"]["sessions"],
   settings: CockpitData["settings"]
 ): void {
-  const disabled = process.env.WORK_CONTINUITY_DISABLE_SUMMARIES === "1" || settings.sessionSummaryMode !== "native";
+  const disabled = process.env.AGENT_NOTEBOOK_DISABLE_SUMMARIES === "1" || settings.sessionSummaryMode !== "native";
   if (disabled || misses.length === 0) {
     summaryJob = {
       status: disabled ? "idle" : "complete",
@@ -1630,7 +1630,7 @@ function renderProtocolCapture(note: NotebookNote, protocol: "ctx" | "llm-wiki",
     `title: ${yamlString(note.title)}`,
     `created: ${note.createdAt}`,
     `logical_date: ${note.logicalDate}`,
-    "source: work-continuity-note",
+    "source: agent-notebook-note",
     `source_id: ${yamlString(note.id)}`,
     `protocol: ${protocol}`,
     "status: pending-absorption",
@@ -1641,7 +1641,7 @@ function renderProtocolCapture(note: NotebookNote, protocol: "ctx" | "llm-wiki",
     "",
     note.body,
     "",
-    "> 原始便签由 Work Continuity 写入；后续分类与吸收由目标协议管理。",
+    "> 原始便签由 Agent Notebook 写入；后续分类与吸收由目标协议管理。",
     ""
   ];
   return metadata.join("\n");
@@ -1650,7 +1650,7 @@ function renderProtocolCapture(note: NotebookNote, protocol: "ctx" | "llm-wiki",
 function renderNoteCard(note: NotebookNote): string {
   const lines = wrapCardText(note.body, 25, 12);
   const body = lines.map((line, index) => `<text x="124" y="${286 + index * 54}" class="body">${escapeXml(line)}</text>`).join("");
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1500" viewBox="0 0 1200 1500"><defs><filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="28" stdDeviation="28" flood-color="#3b2619" flood-opacity=".18"/></filter><pattern id="paper" width="12" height="12" patternUnits="userSpaceOnUse"><path d="M0 11.5h12" stroke="#e8ddca" stroke-width="1"/></pattern></defs><rect width="1200" height="1500" fill="#d9c4a4"/><rect x="70" y="62" width="1060" height="1376" rx="26" fill="#fffaf0" filter="url(#shadow)"/><rect x="70" y="62" width="1060" height="1376" rx="26" fill="url(#paper)"/><rect x="70" y="62" width="18" height="1376" rx="9" fill="#b84f32"/><text x="124" y="142" class="meta">WORK CONTINUITY · ${escapeXml(note.logicalDate)}</text><text x="124" y="226" class="title">${escapeXml(note.title)}</text>${body}<line x1="124" y1="1320" x2="1074" y2="1320" stroke="#d7c9b4"/><text x="124" y="1370" class="foot">${escapeXml(note.sourceLabel)} · ${escapeXml(formatCardTime(note.createdAt))}</text><style>.meta,.foot{font:600 22px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:3px;fill:#8d7965}.title{font:600 50px Georgia,'Songti SC',serif;fill:#2a2723}.body{font:400 34px Georgia,'Songti SC',serif;fill:#514a42}</style></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1500" viewBox="0 0 1200 1500"><defs><filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="28" stdDeviation="28" flood-color="#3b2619" flood-opacity=".18"/></filter><pattern id="paper" width="12" height="12" patternUnits="userSpaceOnUse"><path d="M0 11.5h12" stroke="#e8ddca" stroke-width="1"/></pattern></defs><rect width="1200" height="1500" fill="#d9c4a4"/><rect x="70" y="62" width="1060" height="1376" rx="26" fill="#fffaf0" filter="url(#shadow)"/><rect x="70" y="62" width="1060" height="1376" rx="26" fill="url(#paper)"/><rect x="70" y="62" width="18" height="1376" rx="9" fill="#b84f32"/><text x="124" y="142" class="meta">AGENT NOTEBOOK · ${escapeXml(note.logicalDate)}</text><text x="124" y="226" class="title">${escapeXml(note.title)}</text>${body}<line x1="124" y1="1320" x2="1074" y2="1320" stroke="#d7c9b4"/><text x="124" y="1370" class="foot">${escapeXml(note.sourceLabel)} · ${escapeXml(formatCardTime(note.createdAt))}</text><style>.meta,.foot{font:600 22px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:3px;fill:#8d7965}.title{font:600 50px Georgia,'Songti SC',serif;fill:#2a2723}.body{font:400 34px Georgia,'Songti SC',serif;fill:#514a42}</style></svg>`;
 }
 
 function wrapCardText(value: string, width: number, maxLines: number): string[] {

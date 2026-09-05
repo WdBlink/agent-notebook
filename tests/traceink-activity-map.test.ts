@@ -40,7 +40,7 @@ test("today's proven Traceink index becomes five visual activity groups with the
   );
   const index = artifact(rawMarkdown);
   index.evidence = [
-    evidence("e-work-continuity", "019fe682-2ae8-75c0-970c-a3438bd51db1", "/tmp/work-continuity.jsonl"),
+    evidence("e-agent-notebook", "019fe682-2ae8-75c0-970c-a3438bd51db1", "/tmp/agent-notebook.jsonl"),
     evidence("e-loop", "019ff55d-2782-77a0-abb8-f2b11dcd01f2", "/tmp/loop.jsonl"),
     evidence("e-campaign", "01a003a2-f248-7aa0-bbcc-001122334455", "/tmp/campaign.jsonl"),
     evidence("e-adapter", "019fd9f8-48e6-77a2-9775-6f392b570065", "/tmp/adapter.jsonl"),
@@ -70,7 +70,7 @@ test("today's proven Traceink index becomes five visual activity groups with the
   assert.deepEqual(projected.groups.map((group) => group.sessions.length), [1, 1, 1, 1, 1]);
   assert.deepEqual(
     projected.groups.map((group) => [...group.evidenceBySessionIdentity.values()].map((item) => item.id)),
-    [["e-work-continuity"], ["e-loop"], ["e-campaign"], ["e-adapter"], ["e-folo"]]
+    [["e-agent-notebook"], ["e-loop"], ["e-campaign"], ["e-adapter"], ["e-folo"]]
   );
   assert.deepEqual(projected.ungrouped, []);
 });

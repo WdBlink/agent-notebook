@@ -384,7 +384,7 @@ function StructuredCloseoutWorkspace({
         review.workline.worklineId,
         reflectionText
       );
-      setFeedback("你的原文已保存在 Work Continuity 本地数据中，并绑定当前深入分析；没有写入 Wiki、CTX 或项目文件。");
+      setFeedback("你的原文已保存在 Agent Notebook 本地数据中，并绑定当前深入分析；没有写入 Wiki、CTX 或项目文件。");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "你的回顾没有保存成功。");
     } finally {
@@ -449,7 +449,7 @@ function StructuredCloseoutWorkspace({
       <header><span>YOUR REFLECTION</span><h3>先写下你自己的理解</h3><p>这里始终从空白开始；AI 只能在保存之后整理你的原话。</p></header>
       <div className="structured-today-reflection-destination">
         <Database size={17} aria-hidden="true" />
-        <p><strong>保存在本地，绑定当前工作线</strong><span>原文会成为 Work Continuity 的独立用户资产；不会自动写入 Wiki、CTX、项目文件或 Codex 报告。</span></p>
+        <p><strong>保存在本地，绑定当前工作线</strong><span>原文会成为 Agent Notebook 的独立用户资产；不会自动写入 Wiki、CTX、项目文件或 Codex 报告。</span></p>
         <em>LOCAL ONLY</em>
       </div>
       <textarea

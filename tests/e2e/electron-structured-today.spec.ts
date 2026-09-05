@@ -6,7 +6,7 @@ import { createEmptyData } from "../../src/state";
 
 test("real Electron default persists and reloads the complete structured Today closeout chain", async () => {
   test.slow();
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "work-continuity-electron-structured-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agent-notebook-electron-structured-"));
   const home = path.join(root, "home");
   const userData = path.join(root, "user-data");
   const logicalDate = localDateInTimeZone(new Date(), "Asia/Shanghai");
@@ -151,7 +151,7 @@ test("real Electron default persists and reloads the complete structured Today c
     await expect(page.getByRole("dialog").getByText("引用 [1] · Session 级证据", { exact: true })).toBeVisible();
     await page.getByRole("dialog").getByRole("button", { name: "回到证据" }).click();
     await expect(workline.getByText("保存在本地，绑定当前工作线", { exact: true })).toBeVisible();
-    await expect(workline.getByText("原文会成为 Work Continuity 的独立用户资产；不会自动写入 Wiki、CTX、项目文件或 Codex 报告。", { exact: true })).toBeVisible();
+    await expect(workline.getByText("原文会成为 Agent Notebook 的独立用户资产；不会自动写入 Wiki、CTX、项目文件或 Codex 报告。", { exact: true })).toBeVisible();
     await page.setViewportSize({ width: 1600, height: 900 });
     const stickyReflectionLayout = await page.evaluate(async () => {
       const scroller = document.querySelector<HTMLElement>(".today-board-scroll")!;

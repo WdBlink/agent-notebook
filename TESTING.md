@@ -1,6 +1,6 @@
-# Testing Work Continuity
+# Testing Agent Notebook
 
-Work Continuity has four release gates: static and unit checks, desktop browser interaction checks, macOS archive verification, and a short manual Today Board acceptance pass. Legacy Obsidian plugin checks remain available in a separate compatibility section; they are not desktop packaging directions.
+Agent Notebook has four release gates: static and unit checks, desktop browser interaction checks, macOS archive verification, and a short manual Today Board acceptance pass. Legacy Obsidian plugin checks remain available in a separate compatibility section; they are not desktop packaging directions.
 
 ## Prerequisites
 
@@ -47,10 +47,10 @@ npm run dist:macos
 `dist:macos` runs `build:desktop`, then Electron Builder emits four archives under `dist/macos/`:
 
 ```text
-Work Continuity-<version>-macos-arm64.dmg
-Work Continuity-<version>-macos-arm64.zip
-Work Continuity-<version>-macos-x64.dmg
-Work Continuity-<version>-macos-x64.zip
+Agent Notebook-<version>-macos-arm64.dmg
+Agent Notebook-<version>-macos-arm64.zip
+Agent Notebook-<version>-macos-x64.dmg
+Agent Notebook-<version>-macos-x64.zip
 ```
 
 Verify each archive explicitly:
@@ -58,15 +58,15 @@ Verify each archive explicitly:
 ```bash
 VERSION="$(node -p 'require("./package.json").version')"
 
-npm run verify:desktop-release -- --archive "dist/macos/Work Continuity-${VERSION}-macos-arm64.dmg" --arch arm64
-npm run verify:desktop-release -- --archive "dist/macos/Work Continuity-${VERSION}-macos-arm64.zip" --arch arm64
-npm run verify:desktop-release -- --archive "dist/macos/Work Continuity-${VERSION}-macos-x64.dmg" --arch x64
-npm run verify:desktop-release -- --archive "dist/macos/Work Continuity-${VERSION}-macos-x64.zip" --arch x64
+npm run verify:desktop-release -- --archive "dist/macos/Agent Notebook-${VERSION}-macos-arm64.dmg" --arch arm64
+npm run verify:desktop-release -- --archive "dist/macos/Agent Notebook-${VERSION}-macos-arm64.zip" --arch arm64
+npm run verify:desktop-release -- --archive "dist/macos/Agent Notebook-${VERSION}-macos-x64.dmg" --arch x64
+npm run verify:desktop-release -- --archive "dist/macos/Agent Notebook-${VERSION}-macos-x64.zip" --arch x64
 ```
 
 The verifier mounts or extracts the archive and then checks:
 
-- the archive contains `Work Continuity.app` and the required app bundle files;
+- the archive contains `Agent Notebook.app` and the required app bundle files;
 - `CFBundleShortVersionString` matches `package.json`;
 - the executable contains exactly the requested architecture;
 - the packaged main process and preload bridge expose explicit daily-review preparation;
@@ -77,7 +77,7 @@ The verifier mounts or extracts the archive and then checks:
 
 The local `dist:macos` command does not create checksum files. The GitHub macOS workflow creates one checksum per archive before running the same verifier. It builds and tests on native Apple Silicon and Intel runners, then publishes only from the separate publish job after both architecture jobs pass.
 
-Use `dist:macos` for desktop packages. `release:plugin:macos` is only for the deprecated plugin package and is not a Work Continuity desktop release command.
+Use `dist:macos` for desktop packages. `release:plugin:macos` is only for the deprecated plugin package and is not a Agent Notebook desktop release command.
 
 ## Manual Today Board Acceptance
 
@@ -92,11 +92,11 @@ Use `dist:macos` for desktop packages. `release:plugin:macos` is only for the de
 9. Write and save a reflection, open **今日收口**, select zero to three continuation bookmarks, and seal the active generation. If a refresh activates a newer generation while the review is open, both the stale save and stale seal must fail without modifying the newer package.
 10. Reopen the sealed date. Confirm the selected workline package, evidence links, original reflection, and bookmarks are read-only and no model request occurs.
 
-These v0.7.0 archives are unsigned and not notarized. A first manual launch may require Control-clicking **Work Continuity.app** and choosing **Open**.
+These v0.7.0 archives are unsigned and not notarized. A first manual launch may require Control-clicking **Agent Notebook.app** and choosing **Open**.
 
 ## Legacy Obsidian Plugin Compatibility
 
-The following commands intentionally cover the deprecated Agent Whiteboard/Obsidian implementation and shared runtime readers. They remain useful for compatibility maintenance, but they are not the primary Work Continuity product or release path.
+The following commands intentionally cover the deprecated Agent Whiteboard/Obsidian implementation and shared runtime readers. They remain useful for compatibility maintenance, but they are not the primary Agent Notebook product or release path.
 
 ```bash
 npm run build:plugin

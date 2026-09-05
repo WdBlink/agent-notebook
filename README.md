@@ -2,11 +2,11 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="app/desktop/assets/app-icon.png">
     <source media="(prefers-color-scheme: light)" srcset="app/desktop/assets/app-icon.png">
-    <img alt="Work Continuity notebook icon" src="app/desktop/assets/app-icon.png" width="104">
+    <img alt="Agent Notebook notebook icon" src="app/desktop/assets/app-icon.png" width="104">
   </picture>
 
-  <h1>Work Continuity</h1>
-  <p>Recover the shape of a day across local Agent Sessions, then make the judgment yourself.</p>
+  <h1>Agent Notebook</h1>
+  <p>A knowledge notebook co-written by you and your agents.</p>
 </div>
 
 <div align="center">
@@ -27,7 +27,7 @@
 
 ## Why
 
-Agent work rarely fits inside one Session. Codex and Claude Code may advance the same intent across providers, worktrees, failures, and restarts, leaving the person to reconstruct what actually changed. Work Continuity turns those read-only local traces into a small set of evidence-linked worklines while keeping interpretation, reflection, and closeout under human control.
+Agent work rarely fits inside one Session. Codex and Claude Code may advance the same intent across providers, worktrees, failures, and restarts, leaving the person to reconstruct what actually changed. Agent Notebook turns those read-only local traces into a small set of evidence-linked worklines while keeping interpretation, reflection, and closeout under human control.
 
 The primary product is a standalone macOS app. It does not require Obsidian and never edits provider-owned Session files.
 
@@ -43,32 +43,32 @@ The primary product is a standalone macOS app. It does not require Obsidian and 
 
 ## macOS Install
 
-Work Continuity v0.7.1 ships a DMG and ZIP for each current Mac architecture:
+Agent Notebook v0.7.2 ships a DMG and ZIP for each current Mac architecture:
 
 ```text
-dist/macos/Work Continuity-0.7.1-macos-arm64.dmg
-dist/macos/Work Continuity-0.7.1-macos-arm64.zip
-dist/macos/Work Continuity-0.7.1-macos-x64.dmg
-dist/macos/Work Continuity-0.7.1-macos-x64.zip
+dist/macos/agent-notebook-0.7.2-macos-arm64.dmg
+dist/macos/agent-notebook-0.7.2-macos-arm64.zip
+dist/macos/agent-notebook-0.7.2-macos-x64.dmg
+dist/macos/agent-notebook-0.7.2-macos-x64.zip
 ```
 
 Use `arm64` on Apple Silicon and `x64` on Intel. The DMG is the normal install path; the ZIP is a fallback archive of the same app bundle.
 
-These initial builds are unsigned and not notarized. On first launch, macOS may require you to Control-click **Work Continuity.app** and choose **Open**.
+These initial builds are unsigned and not notarized. On first launch, macOS may require you to Control-click **Agent Notebook.app** and choose **Open**.
 
 ## Usage
 
-1. Launch Work Continuity and open **Sources**.
+1. Launch Agent Notebook and open **Sources**.
 2. Enable Codex, Claude Code, or both. The default read roots are `~/.codex/sessions`, `~/.codex/archived_sessions`, and `~/.claude/projects`.
 3. Optionally set **每日自动准备工作脉络** to one local time. It is off by default and runs only while the app remains open.
 4. Choose an uncompiled date. Its Today Board starts in **raw** and shows independent Session lanes plus only activity that can be supported by timestamps and authorship.
 5. Choose **现在整理** when you want to start immediately, or let the configured daily time start the same preparation path. The board remains readable while preparation runs.
 6. In **compiled**, scan the cross-Session workline board. Expand stored Session membership without another model call, use citation chips to open the exact read-only Session, or request one evidence dossier at a time.
 7. If later evidence arrives, the day becomes **stale**. The previous structured index stays readable while new evidence is listed separately; choose **更新工作脉络** only when you want a new revision.
-8. Read the dossier at its document reading scale. The reflection field starts blank and preserves your original words in local Work Continuity data. After save, you may arrange five proposal categories; accept, dismiss, defer, and rewrite record a local disposition only and never write Wiki/CTX/project files, create reports, or start Agent work.
+8. Read the dossier at its document reading scale. The reflection field starts blank and preserves your original words in local Agent Notebook data. After save, you may arrange five proposal categories; accept, dismiss, defer, and rewrite record a local disposition only and never write Wiki/CTX/project files, create reports, or start Agent work.
 9. Review the exact active index, opened dossiers, your writing, proposal dispositions, and any continuation bookmarks, then choose **收笔并封存**. Historical sealed dates reopen without another model call.
 
-Resume actions copy a verified command. Work Continuity never executes that command automatically.
+Resume actions copy a verified command. Agent Notebook never executes that command automatically.
 
 ## Today Board States
 
@@ -112,10 +112,10 @@ npm run dist:macos
 
 Checkpoint recovery data is temporary: successful tasks are cleaned up, and inactive failed/interrupted tasks expire 24 hours after their last activity. Saved Today pages, reflections, and decisions are retained. Expired tasks restart preparation rather than resuming old model outputs. Message-level preview is development-only and disabled in packaged apps.
 
-To physically reclaim a legacy oversized checkpoint database, quit Work Continuity and run from the source checkout after `npm ci`:
+To physically reclaim a legacy oversized checkpoint database, quit Agent Notebook and run from the source checkout after `npm ci`:
 
 ```bash
-node --import tsx scripts/maintain-checkpoints.mjs "$HOME/Library/Application Support/Work Continuity" --apply
+node --import tsx scripts/maintain-checkpoints.mjs "$HOME/Library/Application Support/Agent Notebook" --apply
 ```
 
 This offline command refuses an open database, preserves a compressed `checkpoint-recovery-*` copy in the app data directory, removes expired/completed recovery state, compacts SQLite, and checks saved artifact bytes. The recovery copy can be removed after verifying historical pages. Provider transcript stores are untouched.
@@ -139,11 +139,11 @@ The workflow may prepare basis evidence, but it cannot manufacture commitment. I
 
 The default Today producer is a bounded LangGraph workflow. It digests each main Session family through its source provider with bounded concurrency, includes child-Agent records as family evidence, synthesizes a typed workline index, reveals stored Session membership without another model call, and runs analysis → independent critique → composition only for a selected workline. Every run freezes one provider/model plan; failures never trigger an undeclared provider fallback. Provider-specific JSON Schema dialects are adapted at the CLI boundary, while dynamic enums require exact admitted Session and evidence IDs before local validation.
 
-The default structured Today models are `gpt-5.6-luna` for Codex nodes and `fable` for Claude nodes. Override them with `WORK_CONTINUITY_TODAY_CODEX_MODEL` and `WORK_CONTINUITY_TODAY_CLAUDE_MODEL`; the existing `WORK_CONTINUITY_CODEX_REVIEW_MODEL` and `WORK_CONTINUITY_CLAUDE_REVIEW_MODEL` remain lower-priority compatibility overrides. Set `WORK_CONTINUITY_STRUCTURED_TODAY=0` only to use the preserved legacy Traceink producer.
+The default structured Today models are `gpt-5.6-luna` for Codex nodes and `fable` for Claude nodes. Override them with `AGENT_NOTEBOOK_TODAY_CODEX_MODEL` and `AGENT_NOTEBOOK_TODAY_CLAUDE_MODEL`; the existing `AGENT_NOTEBOOK_CODEX_REVIEW_MODEL` and `AGENT_NOTEBOOK_CLAUDE_REVIEW_MODEL` remain lower-priority compatibility overrides. Set `AGENT_NOTEBOOK_STRUCTURED_TODAY=0` only to use the preserved legacy Traceink producer.
 
 ## Local Model / Smart Session Titles
 
-Work Continuity renders provider metadata first. Low-priority smart titles may be generated only after the current day's workline material is already compiled or sealed, so they cannot compete with the primary review preparation. The default models are `gpt-5.3-codex-spark` and `fable`; override them with `WORK_CONTINUITY_CODEX_SUMMARY_MODEL` and `WORK_CONTINUITY_CLAUDE_SUMMARY_MODEL`, or set `WORK_CONTINUITY_DISABLE_SUMMARIES=1` for metadata-only mode.
+Agent Notebook renders provider metadata first. Low-priority smart titles may be generated only after the current day's workline material is already compiled or sealed, so they cannot compete with the primary review preparation. The default models are `gpt-5.3-codex-spark` and `fable`; override them with `AGENT_NOTEBOOK_CODEX_SUMMARY_MODEL` and `AGENT_NOTEBOOK_CLAUDE_SUMMARY_MODEL`, or set `AGENT_NOTEBOOK_DISABLE_SUMMARIES=1` for metadata-only mode.
 
 These calls use the provider account and network already configured on the Mac. Original Session files remain read-only, generated summaries are cached locally, and failures stay visible instead of selecting a more expensive model silently.
 
@@ -163,7 +163,7 @@ Session recovery is intentionally copy-only. The evidence panel shows the provid
 
 ## Legacy Prototype
 
-The Obsidian plugin releases from v0.2.0 through v0.3.1 are deprecated implementation history, not the current product. Shared readers and compatibility tests remain in the repository, but the standalone Work Continuity app is the only primary release target.
+The Obsidian plugin releases from v0.2.0 through v0.3.1 are deprecated implementation history, not the current product. Shared readers and compatibility tests remain in the repository, but the standalone Agent Notebook app is the only primary release target.
 
 ## Contributing
 

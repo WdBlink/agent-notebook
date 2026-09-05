@@ -4,8 +4,8 @@ import { buildResumeCommand } from "../src/resume";
 import type { AgentWorkSession } from "../src/types";
 
 test("builds a project-aware Codex resume command", () => {
-  const command = buildResumeCommand(session({ projectPath: "/Users/wdblink/Documents/new day board" }));
-  assert.equal(command, "cd '/Users/wdblink/Documents/new day board' && codex resume session-123");
+  const command = buildResumeCommand(session({ projectPath: "/Users/wdblink/Documents/agent-notebook" }));
+  assert.equal(command, "cd /Users/wdblink/Documents/agent-notebook && codex resume session-123");
 });
 
 test("expands a home-relative Claude project path at shell runtime", () => {

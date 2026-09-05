@@ -26,9 +26,9 @@ for (const file of ["main.js", "styles.css", "manifest.json", "runtime/pty-host.
 }
 
 const dist = path.join(repo, "dist", "release");
-const releaseName = `agent-whiteboard-v${version}-macos-${arch}`;
+const releaseName = `agent-notebook-v${version}-macos-${arch}`;
 const releaseRoot = path.join(dist, releaseName);
-const pluginDir = path.join(releaseRoot, "daily-cockpit");
+const pluginDir = path.join(releaseRoot, "agent-notebook");
 const pendingRuntime = path.join(pluginDir, "runtime", "versions", "pending");
 const nodePtySource = path.join(repo, "node_modules", "node-pty");
 const nativeSource = path.join(nodePtySource, "prebuilds", `darwin-${arch}`);
@@ -72,7 +72,7 @@ await fs.writeFile(path.join(pluginDir, "runtime", "active.json"), `${JSON.strin
 
 const installerTemplate = await fs.readFile(path.join(repo, "release", "install-macos.command"), "utf8");
 const installer = installerTemplate.replaceAll("__ARCH__", arch).replaceAll("__VERSION__", version);
-await fs.writeFile(path.join(releaseRoot, "Install Agent Whiteboard.command"), installer, { mode: 0o755 });
+await fs.writeFile(path.join(releaseRoot, "Install Agent Notebook.command"), installer, { mode: 0o755 });
 const readmeTemplate = await fs.readFile(path.join(repo, "release", "README.txt"), "utf8");
 await fs.writeFile(path.join(releaseRoot, "README.txt"), readmeTemplate.replaceAll("__ARCH__", arch).replaceAll("__VERSION__", version), { mode: 0o644 });
 
@@ -87,7 +87,7 @@ const dmg = path.join(dist, `${releaseName}.dmg`);
 await fs.rm(dmg, { force: true });
 await execFileAsync("/usr/bin/hdiutil", [
   "create",
-  "-volname", `Agent Whiteboard ${version} ${arch}`,
+  "-volname", `Agent Notebook ${version} ${arch}`,
   "-srcfolder", releaseRoot,
   "-format", "UDZO",
   "-ov",

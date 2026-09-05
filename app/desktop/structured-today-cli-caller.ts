@@ -48,11 +48,11 @@ export function freezeStructuredTodayProviderPlan(
       ArrangeReflectionProposals: primary
     },
     models: {
-      codex: process.env.WORK_CONTINUITY_TODAY_CODEX_MODEL?.trim() ||
-        process.env.WORK_CONTINUITY_CODEX_REVIEW_MODEL?.trim() ||
+      codex: process.env.AGENT_NOTEBOOK_TODAY_CODEX_MODEL?.trim() ||
+        process.env.AGENT_NOTEBOOK_CODEX_REVIEW_MODEL?.trim() ||
         "gpt-5.6-luna",
-      claude: process.env.WORK_CONTINUITY_TODAY_CLAUDE_MODEL?.trim() ||
-        process.env.WORK_CONTINUITY_CLAUDE_REVIEW_MODEL?.trim() ||
+      claude: process.env.AGENT_NOTEBOOK_TODAY_CLAUDE_MODEL?.trim() ||
+        process.env.AGENT_NOTEBOOK_CLAUDE_REVIEW_MODEL?.trim() ||
         "fable"
     }
   };

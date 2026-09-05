@@ -8,7 +8,7 @@ import {
   COMMAND_QUICK_CAPTURE,
   COMMAND_REFRESH_WORK_SESSIONS,
   VIEW_TYPE_AGENT_WHITEBOARD,
-  VIEW_TYPE_DAILY_COCKPIT
+  VIEW_TYPE_AGENT_NOTEBOOK
 } from "../src/constants";
 import { registerPluginSurface } from "../src/plugin-boundary";
 import { WhiteboardProjectConsumer } from "../src/project-modal";
@@ -20,10 +20,10 @@ import {
 
 const source = fs.readFileSync("src/main.ts", "utf8");
 
-test("plugin registers Daily Cockpit and Agent Whiteboard views", () => {
-  assert.equal(VIEW_TYPE_DAILY_COCKPIT, "daily-cockpit-view");
+test("plugin registers Agent Notebook and Agent Whiteboard views", () => {
+  assert.equal(VIEW_TYPE_AGENT_NOTEBOOK, "agent-notebook-view");
   assert.equal(VIEW_TYPE_AGENT_WHITEBOARD, "agent-whiteboard-view");
-  assert.equal(COMMAND_OPEN_COCKPIT, "open-daily-cockpit");
+  assert.equal(COMMAND_OPEN_COCKPIT, "open-agent-notebook");
   assert.equal(COMMAND_OPEN_AGENT_WHITEBOARD, "open-agent-whiteboard");
   assert.equal(COMMAND_QUICK_CAPTURE, "quick-capture");
   assert.equal(COMMAND_EXPORT_DAILY_NOTE, "export-daily-note");
@@ -56,7 +56,7 @@ test("plugin registers Daily Cockpit and Agent Whiteboard views", () => {
     exportDaily: () => callbacks.push("export"),
     refreshSessions: () => callbacks.push("refresh")
   });
-  assert.deepEqual(views, [VIEW_TYPE_DAILY_COCKPIT, VIEW_TYPE_AGENT_WHITEBOARD]);
+  assert.deepEqual(views, [VIEW_TYPE_AGENT_NOTEBOOK, VIEW_TYPE_AGENT_WHITEBOARD]);
   assert.deepEqual(commands, [
     COMMAND_OPEN_COCKPIT,
     COMMAND_OPEN_AGENT_WHITEBOARD,
@@ -64,7 +64,7 @@ test("plugin registers Daily Cockpit and Agent Whiteboard views", () => {
     COMMAND_EXPORT_DAILY_NOTE,
     COMMAND_REFRESH_WORK_SESSIONS
   ]);
-  assert.deepEqual(ribbons, ["打开 Daily Cockpit", "打开 Agent Whiteboard"]);
+  assert.deepEqual(ribbons, ["打开 Agent Notebook", "打开 Agent Whiteboard"]);
   assert.deepEqual(callbacks, ["daily", "whiteboard", "daily", "whiteboard", "capture", "export", "refresh"]);
 });
 

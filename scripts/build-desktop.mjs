@@ -39,7 +39,7 @@ await fs.writeFile(
   path.join(outdir, "package.json"),
   `${JSON.stringify(
     {
-      name: "work-continuity",
+      name: rootPackage.name,
       version: rootPackage.version,
       description: rootPackage.description,
       main: "main.js",
@@ -81,7 +81,7 @@ const contexts = await Promise.all([
 
 if (watch) {
   await Promise.all(contexts.map((context) => context.watch()));
-  console.log("[agent-whiteboard] watching desktop sources");
+  console.log("[agent-notebook] watching desktop sources");
 } else {
   await Promise.all(contexts.map((context) => context.rebuild()));
   await Promise.all(contexts.map((context) => context.dispose()));

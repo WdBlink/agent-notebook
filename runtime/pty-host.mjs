@@ -14,8 +14,8 @@ const OUTPUT_RESUME_BYTES = 64 * 1024;
 const OUTPUT_BACKPRESSURE_MS = 2_000;
 const TREE_POLL_MS = 25;
 const CLEANUP_BUDGET_MS = 4_900;
-const RUNTIME_TOKEN_KEY = "DAILY_COCKPIT_RUNTIME_TOKEN";
-const HOST_TOKEN_KEY = "DAILY_COCKPIT_HOST_TOKEN";
+const RUNTIME_TOKEN_KEY = "AGENT_NOTEBOOK_RUNTIME_TOKEN";
+const HOST_TOKEN_KEY = "AGENT_NOTEBOOK_HOST_TOKEN";
 const membershipHelper = path.join(path.dirname(fileURLToPath(import.meta.url)), "process-membership");
 const runtimes = new Map();
 let runtimeCounter = 0;
@@ -316,7 +316,7 @@ async function membershipPids(key, token, deadline = Date.now() + 750) {
   let stdout;
   try {
     ({ stdout } = await execFileAsync(membershipHelper, [], {
-      env: { DAILY_COCKPIT_AUDIT_KEY: key, DAILY_COCKPIT_AUDIT_VALUE: token },
+      env: { AGENT_NOTEBOOK_AUDIT_KEY: key, AGENT_NOTEBOOK_AUDIT_VALUE: token },
       timeout,
       maxBuffer: 1024 * 1024
     }));

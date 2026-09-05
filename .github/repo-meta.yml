@@ -1,8 +1,9 @@
-description: "Obsidian cockpit for reviewing yesterday's local Agent work, resuming verified sessions, and planning tomorrow."
-homepage: "https://github.com/WdBlink/daily-cockpit"
+description: "Agent Notebook — a local-first knowledge notebook co-written by you and your agents."
+homepage: "https://github.com/WdBlink/agent-notebook"
 topics:
-  - obsidian
-  - obsidian-plugin
+  - agent-notebook
+  - macos
+  - electron
   - local-first
   - local-ai
   - agent-sessions

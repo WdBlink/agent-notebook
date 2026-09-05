@@ -16,7 +16,7 @@ import type { CliRunRequest } from "../src/agent-summary";
 import { CliProtocolError } from "../src/cli-output-collector";
 
 const passThroughTranscriptFreezer: WorklineTranscriptFreezer = async (sessions, use) => {
-  const frozenRoot = await mkdtemp(path.join(os.tmpdir(), "work-continuity-test-freeze-"));
+  const frozenRoot = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-test-freeze-"));
   try {
     return await use(sessions, frozenRoot);
   } finally {
@@ -25,7 +25,7 @@ const passThroughTranscriptFreezer: WorklineTranscriptFreezer = async (sessions,
 };
 
 test("compile reads only the scanner-admitted prefix from a temporary frozen transcript and removes it afterward", async () => {
-  const temp = await mkdtemp(path.join(os.tmpdir(), "work-continuity-review-freeze-"));
+  const temp = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-review-freeze-"));
   const sourcePath = path.join(temp, "session.jsonl");
   const admittedContent = "captured transcript\n";
   let frozenPath = "";
@@ -96,7 +96,7 @@ test("compile reads only the scanner-admitted prefix from a temporary frozen tra
       }
     });
     assert.deepEqual(review.provenance?.evidence.sourceRefs, review.evidence);
-    assert.equal(JSON.stringify(review).includes("work-continuity-evidence-"), false);
+    assert.equal(JSON.stringify(review).includes("agent-notebook-evidence-"), false);
     await assert.rejects(() => readFile(frozenPath), { code: "ENOENT" });
     await assert.rejects(() => readFile(outputSchemaPath), { code: "ENOENT" });
   } finally {
@@ -118,7 +118,7 @@ function assertStrictTransportSchema(value: unknown): void {
 }
 
 test("compile rejects a covered-prefix mutation even when byte length and mtime are unchanged", async () => {
-  const temp = await mkdtemp(path.join(os.tmpdir(), "work-continuity-review-mutation-"));
+  const temp = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-review-mutation-"));
   const sourcePath = path.join(temp, "session.jsonl");
   const fixedTime = new Date("2026-08-09T10:00:00.000Z");
 
@@ -155,7 +155,7 @@ test("compile rejects a covered-prefix mutation even when byte length and mtime 
 });
 
 test("compile removes its frozen transcript when the model runner fails", async () => {
-  const temp = await mkdtemp(path.join(os.tmpdir(), "work-continuity-review-cleanup-"));
+  const temp = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-review-cleanup-"));
   const sourcePath = path.join(temp, "session.jsonl");
   let frozenPath = "";
   let outputSchemaPath = "";

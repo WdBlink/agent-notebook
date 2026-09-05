@@ -9,11 +9,11 @@ test("desktop CLI runner works in an ESM process and forwards stdin", async () =
   const result = await runDesktopCli({
     command: process.execPath,
     args: ["-e", "process.stdin.setEncoding('utf8'); let s=''; process.stdin.on('data', c => s += c); process.stdin.on('end', () => process.stdout.write(s.toUpperCase()))"],
-    stdin: "work continuity",
+    stdin: "agent notebook",
     cwd: process.cwd(),
     timeoutMs: 5_000
   });
-  assert.equal(result.stdout, "WORK CONTINUITY");
+  assert.equal(result.stdout, "AGENT NOTEBOOK");
   assert.equal(result.stderr, "");
 });
 
@@ -97,7 +97,7 @@ test("desktop CLI runner surfaces Claude errors-array envelopes written only to 
 });
 
 test("desktop CLI runner force-kills a provider that ignores graceful timeout shutdown", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "work-continuity-cli-kill-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-notebook-cli-kill-"));
   const survivorMarker = path.join(tempDir, "survived.txt");
   try {
     await assert.rejects(

@@ -9,7 +9,7 @@ const { normalizeGlobalBoardDocument, validateSchemaTwoDocument } = await tsImpo
   import.meta.url
 );
 
-const pluginId = "daily-cockpit";
+const pluginId = "agent-notebook";
 const defaultSessionScanRoots = [
   "~/.codex/sessions",
   "~/.codex/archived_sessions",
@@ -47,7 +47,7 @@ await copyDestinationFile(path.join(repo, "manifest.json"), path.join(pluginDir,
 const seedData = () => ({
   schemaVersion: 4,
   settings: {
-    dailyNoteFolder: "Daily Cockpit",
+    dailyNoteFolder: "Agent Notebook",
     llmEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
     llmModel: "qwen2.5:7b",
     llmApiKey: "",
@@ -133,7 +133,7 @@ function migrateData(data) {
     ...data,
     schemaVersion: 4,
     settings: {
-      dailyNoteFolder: typeof settings.dailyNoteFolder === "string" && settings.dailyNoteFolder.trim() ? settings.dailyNoteFolder : "Daily Cockpit",
+      dailyNoteFolder: typeof settings.dailyNoteFolder === "string" && settings.dailyNoteFolder.trim() ? settings.dailyNoteFolder : "Agent Notebook",
       llmEndpoint:
         typeof settings.llmEndpoint === "string" && settings.llmEndpoint.trim()
           ? settings.llmEndpoint

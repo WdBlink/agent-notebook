@@ -14,10 +14,10 @@ const goldenTodaySessions = [
     platform: "codex",
     title: "Traceink 核心界面",
     summary: "把 Traceink 的真实产物变成 Work Continuity 的核心界面。",
-    path: "/tmp/traceink-golden-work-continuity.jsonl",
+    path: "/tmp/traceink-golden-agent-notebook.jsonl",
     startedAt: "2026-08-15T09:22:00+08:00",
     updatedAt: "2026-08-15T14:28:00+08:00",
-    projectPath: "/workspace/work-continuity",
+    projectPath: "/workspace/agent-notebook",
     resumable: true,
     summarySource: "codex",
     artifacts: [],
@@ -87,7 +87,7 @@ const goldenTodaySessions = [
     path: "/tmp/traceink-golden-unresolved-child.jsonl",
     startedAt: "2026-08-15T11:42:00+08:00",
     updatedAt: "2026-08-15T12:03:00+08:00",
-    projectPath: "/workspace/work-continuity",
+    projectPath: "/workspace/agent-notebook",
     resumable: false,
     summarySource: "codex",
     artifacts: [],
@@ -107,14 +107,14 @@ const goldenTodayEvidence: TraceinkEvidenceRefV1[] = goldenTodaySessions.map((se
 
 const baseSessions = [
   {
-    id: "019f-work-continuity",
+    id: "019f-agent-notebook",
     platform: "codex",
     title: "迁移第一版视觉骨架",
     summary: "第一版比例、留白和会话入口仍需完整迁入独立应用。",
     path: "/tmp/codex-session.jsonl",
     startedAt: "2026-07-20T09:18:00+08:00",
     updatedAt: "2026-07-20T14:36:00+08:00",
-    projectPath: "/workspace/work-continuity",
+    projectPath: "/workspace/agent-notebook",
     resumable: true,
     summarySource: "codex",
     artifacts: ["app/desktop/renderer.tsx"],
@@ -128,7 +128,7 @@ const baseSessions = [
     path: "/tmp/claude-session.jsonl",
     startedAt: "2026-07-20T10:02:00+08:00",
     updatedAt: "2026-07-20T16:12:00+08:00",
-    projectPath: "/workspace/work-continuity",
+    projectPath: "/workspace/agent-notebook",
     resumable: true,
     summarySource: "claude",
     artifacts: [],
@@ -156,7 +156,7 @@ const baseSessions = [
     path: "/tmp/claude-finished.jsonl",
     startedAt: "2026-07-20T17:46:00+08:00",
     updatedAt: "2026-07-20T18:22:00+08:00",
-    projectPath: "/workspace/work-continuity",
+    projectPath: "/workspace/agent-notebook",
     resumable: false,
     summarySource: "claude",
     artifacts: [],
@@ -226,16 +226,16 @@ async function installDesktopApi(page: Page): Promise<void> {
         id: "artifact:legacy:daily-review-notes",
         kind: "artifact",
         label: "旧项目文档.md",
-        path: "/workspace/work-continuity/旧项目文档.md",
+        path: "/workspace/agent-notebook/旧项目文档.md",
         platform: "codex",
-        sessionId: "019f-work-continuity"
+        sessionId: "019f-agent-notebook"
       }, ...(includeDuplicate ? [{
-        id: "session:codex:019f-work-continuity:alternate",
+        id: "session:codex:019f-agent-notebook:alternate",
         kind: "session",
         label: "同 ID 的另一条路径",
         path: "/tmp/codex-session-alternate.jsonl",
         platform: "codex",
-        sessionId: "019f-work-continuity",
+        sessionId: "019f-agent-notebook",
         startedAt: `${activeDate}T08:00:00+08:00`,
         updatedAt: `${activeDate}T08:30:00+08:00`
       }] : [])],
@@ -245,7 +245,7 @@ async function installDesktopApi(page: Page): Promise<void> {
           title: "Daily Review · 产品方向",
           summary: "真实使用否定了 Session 看板，产品重新聚焦人的日终理解。",
           status: "needs-judgment",
-          sourceSessionIds: ["codex:019f-work-continuity", "claude:claude-map-review", "claude:claude-finished"],
+          sourceSessionIds: ["codex:019f-agent-notebook", "claude:claude-map-review", "claude:claude-finished"],
           startedAt: `${activeDate}T09:18:00+08:00`,
           endedAt: `${activeDate}T18:22:00+08:00`,
           participation: [
@@ -256,8 +256,8 @@ async function installDesktopApi(page: Page): Promise<void> {
             title: "从 Agent 看板转向人的日终回看工作簿",
             dek: "由 3 条跨平台会话按发生顺序重建；这里只呈现材料，不替用户下结论。",
             blocks: [
-              { id: "prior", kind: "prior-assumption", label: "原来的判断", title: "首页需要展示 Agent 的运行状态", body: "最初把 Session、运行状态和项目摘要放在同一主界面。", evidenceIds: ["session:codex:019f-work-continuity", "artifact:legacy:daily-review-notes"], payload: {} },
-              { id: "change", kind: "evidence-change", label: "发生了什么", title: "真实使用仍需要重新翻 Session", body: "薄摘要没有减少理解成本，用户无法形成自己的判断。", evidenceIds: ["session:codex:019f-work-continuity", "session:claude:claude-map-review"], payload: {} },
+              { id: "prior", kind: "prior-assumption", label: "原来的判断", title: "首页需要展示 Agent 的运行状态", body: "最初把 Session、运行状态和项目摘要放在同一主界面。", evidenceIds: ["session:codex:019f-agent-notebook", "artifact:legacy:daily-review-notes"], payload: {} },
+              { id: "change", kind: "evidence-change", label: "发生了什么", title: "真实使用仍需要重新翻 Session", body: "薄摘要没有减少理解成本，用户无法形成自己的判断。", evidenceIds: ["session:codex:019f-agent-notebook", "session:claude:claude-map-review"], payload: {} },
               { id: "scope", kind: "scope-tension", label: "未来观察", title: "十五分钟内能否完成一条工作线的回看", body: "如果材料包有效，用户应能少翻原始 Session，同时仍亲自完成思考。", evidenceIds: ["session:claude:claude-finished"], payload: { futureField: "preserved" } }
             ],
             question: { prompt: "这套材料是否已经足以让你亲自想明白？", context: "AI 不能替用户决定产品方向。" }
@@ -512,11 +512,11 @@ async function installDesktopApi(page: Page): Promise<void> {
       activeDate,
       activityDates: ["2026-07-20", "2026-07-19", "2026-07-18"],
       appVersion: "0.4.0-test",
-      userDataPath: "/tmp/work-continuity-test",
+      userDataPath: "/tmp/agent-notebook-test",
       data: {
         schemaVersion: 4,
         settings: {
-          dailyNoteFolder: "Daily Cockpit",
+          dailyNoteFolder: "Agent Notebook",
           llmEndpoint: "",
           llmModel: "",
           sessionScanRoots: ["~/.codex/sessions", "~/.claude/projects"],
@@ -877,7 +877,7 @@ async function installDesktopApi(page: Page): Promise<void> {
       },
       routeNotebookNoteToProject: async (noteId: string) => {
         sideEffectCounts.ctx += 1;
-        return { notebook: state.notebook, path: `/workspace/work-continuity/ctx/scratch/inbox/${noteId}.md` };
+        return { notebook: state.notebook, path: `/workspace/agent-notebook/ctx/scratch/inbox/${noteId}.md` };
       },
       prepareDailyReview: async (_date: string, _mode: "compile" | "refresh") => {
         prepareCalls += 1;
@@ -1000,11 +1000,11 @@ async function installDesktopApi(page: Page): Promise<void> {
       },
       getProjectContext: async (projectPath: string) => ({
         projectPath,
-        storePath: "/workspace/work-continuity-ctx",
+        storePath: "/workspace/agent-notebook-ctx",
         warnings: [],
         documents: [
-          { id: "overview.md", kind: "overview", label: "产品总览", path: "/workspace/work-continuity-ctx/overview.md", relativePath: "overview.md", content: "# 产品总览\n\n这是 Agent-native work continuity 的当前事实源。", updatedAt: "2026-07-20T18:00:00+08:00" },
-          { id: "spec/brief.md", kind: "spec", label: "每日工作简报", path: "/workspace/work-continuity-ctx/spec/brief.md", relativePath: "spec/brief.md", content: "# 每日工作简报\n\n最多显示三条智能接续建议。", updatedAt: "2026-07-20T18:00:00+08:00" }
+          { id: "overview.md", kind: "overview", label: "产品总览", path: "/workspace/agent-notebook-ctx/overview.md", relativePath: "overview.md", content: "# 产品总览\n\n这是 Agent-native work continuity 的当前事实源。", updatedAt: "2026-07-20T18:00:00+08:00" },
+          { id: "spec/brief.md", kind: "spec", label: "每日工作简报", path: "/workspace/agent-notebook-ctx/spec/brief.md", relativePath: "spec/brief.md", content: "# 每日工作简报\n\n最多显示三条智能接续建议。", updatedAt: "2026-07-20T18:00:00+08:00" }
         ]
       }),
       getSessionTranscript: async (request: { id: string; platform: string; path: string; packageRef?: { logicalDate: string; generationId: string; evidenceId: string } }) => {
@@ -1057,7 +1057,7 @@ test.beforeEach(async ({ page }) => {
 test("today board keeps raw Sessions as independent evidence lanes", async ({ page }) => {
   const board = page.locator(".today-board");
   await expect(board.getByRole("list", { name: "今日会话" }).locator(".today-session-lane")).toHaveCount(4);
-  for (const sessionId of ["019f-work-continuity", "claude-map-review", "019f-trading", "claude-finished"]) {
+  for (const sessionId of ["019f-agent-notebook", "claude-map-review", "019f-trading", "claude-finished"]) {
     await expect(board.getByText(sessionId, { exact: true })).toBeVisible();
   }
   await expect(board.locator(".session-activity-track")).toHaveCount(4);
@@ -1194,7 +1194,7 @@ test("today's proven Traceink result stays complete through activity, evidence, 
   expect(await page.evaluate(() => (window as unknown as {
     transcriptRequests: Array<{ path: string; packageRef?: unknown; traceinkRef?: unknown }>;
   }).transcriptRequests.at(-1))).toMatchObject({
-    path: "/tmp/traceink-golden-work-continuity.jsonl",
+    path: "/tmp/traceink-golden-agent-notebook.jsonl",
     traceinkRef: {
       logicalDate: "2026-08-15",
       artifactId: "traceink-index-2026-08-15",
@@ -1417,9 +1417,9 @@ test("sealed board is read-only and transcript actions send the exact stored pac
   await expect(board.locator(".today-workline").getByText("封页以后仍保留人的原始判断。", { exact: true })).toBeVisible();
   const continuation = board.getByRole("region", { name: "封存续上" });
   await expect(continuation).toContainText("迁移第一版视觉骨架");
-  await expect(continuation).toContainText("codex resume 019f-work-continuity");
+  await expect(continuation).toContainText("codex resume 019f-agent-notebook");
   await continuation.getByRole("button", { name: /复制续上命令/ }).click();
-  expect(await page.evaluate(() => (window as unknown as { copiedTexts: string[] }).copiedTexts)).toEqual(["codex resume 019f-work-continuity"]);
+  expect(await page.evaluate(() => (window as unknown as { copiedTexts: string[] }).copiedTexts)).toEqual(["codex resume 019f-agent-notebook"]);
   await expect(board.getByRole("region", { name: "整页墨迹" })).toContainText("封页以后仍保留人的原始判断。");
 
   const direction = board.locator(".today-workline").filter({ hasText: "Daily Review · 产品方向" });
@@ -1431,7 +1431,7 @@ test("sealed board is read-only and transcript actions send the exact stored pac
   expect(await page.evaluate(() => (window as unknown as { transcriptRequests: Array<{ packageRef?: unknown }> }).transcriptRequests.at(-1)?.packageRef)).toEqual({
     logicalDate: "2026-07-20",
     generationId: "generation-2026-07-20-1",
-    evidenceId: "session:codex:019f-work-continuity"
+    evidenceId: "session:codex:019f-agent-notebook"
   });
 });
 
@@ -1441,7 +1441,7 @@ test("legacy sealed board shows whole-page ink without requiring a package gener
   const board = page.locator(".today-board");
   await expect(board.getByText("已封存", { exact: true }).first()).toBeVisible();
   await expect(board.getByRole("region", { name: "整页墨迹" })).toContainText("只有旧版整页墨迹。");
-  await expect(board.getByRole("region", { name: "封存续上" })).toContainText("codex resume 019f-work-continuity");
+  await expect(board.getByRole("region", { name: "封存续上" })).toContainText("codex resume 019f-agent-notebook");
 });
 
 test("today board keeps the native shell and independently scrolling evidence regions", async ({ page }) => {
@@ -1551,7 +1551,7 @@ test("map keeps node identity while focusing and exposes current project source"
   await expect(openInDefaultApp).toHaveCSS("color", "rgb(251, 250, 246)");
   await expect(openInDefaultApp).toHaveCSS("background-color", "rgb(32, 33, 30)");
   await openInDefaultApp.click();
-  expect(await page.evaluate(() => (window as unknown as { openedPaths: string[] }).openedPaths)).toContain("/workspace/work-continuity-ctx/overview.md");
+  expect(await page.evaluate(() => (window as unknown as { openedPaths: string[] }).openedPaths)).toContain("/workspace/agent-notebook-ctx/overview.md");
   await page.getByRole("button", { name: "项目文档", exact: true }).click();
   await page.getByRole("button", { name: "阅读完整原文" }).click();
   await expect(page.locator(".document-drawer pre")).toContainText("Agent-native work continuity");

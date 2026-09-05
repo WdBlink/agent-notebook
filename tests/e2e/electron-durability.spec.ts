@@ -25,7 +25,7 @@ const ORIGINAL_REFLECTION = "我确认 Traceink 原文应该继续作为语义�
 
 test("real Electron rollback mode preserves the complete Traceink golden review chain", async () => {
   test.slow();
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "work-continuity-electron-golden-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agent-notebook-electron-golden-"));
   const home = path.join(root, "home");
   const userData = path.join(root, "user-data");
   const logicalDate = localDateInTimeZone(new Date(), "Asia/Shanghai");
@@ -105,7 +105,7 @@ test("real Electron rollback mode preserves the complete Traceink golden review 
 
   const launchOptions = {
     args: [`--user-data-dir=${userData}`, path.resolve("dist/desktop")],
-    env: { ...process.env, HOME: home, TZ: "Asia/Shanghai", WORK_CONTINUITY_STRUCTURED_TODAY: "0" }
+    env: { ...process.env, HOME: home, TZ: "Asia/Shanghai", AGENT_NOTEBOOK_STRUCTURED_TODAY: "0" }
   };
   let electronApp: ElectronApplication | undefined;
   try {

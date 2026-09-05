@@ -622,7 +622,7 @@ function createSeedWorkSessionSnapshot(): AgentWorkSnapshot {
         summary: "Codex 已经把意图拆解、Markdown 导出和会话恢复串起来。",
         path: "~/.codex/archived_sessions/rollout-2026-07-02-seed.jsonl",
         updatedAt: "2026-07-02T22:20:00.000Z",
-        projectPath: "~/Documents/new day board",
+        projectPath: "~/Documents/agent-notebook",
         resumeHint: "codex resume seed-codex-session",
         resumable: true,
         summarySource: "codex",

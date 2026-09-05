@@ -1,10 +1,10 @@
 import type { CockpitSettings, SessionProvider, TaskCategory, TaskPriority } from "./types";
 
-export const PLUGIN_ID = "daily-cockpit";
-export const VIEW_TYPE_DAILY_COCKPIT = "daily-cockpit-view";
+export const PLUGIN_ID = "agent-notebook";
+export const VIEW_TYPE_AGENT_NOTEBOOK = "agent-notebook-view";
 export const VIEW_TYPE_AGENT_WHITEBOARD = "agent-whiteboard-view";
 
-export const COMMAND_OPEN_COCKPIT = "open-daily-cockpit";
+export const COMMAND_OPEN_COCKPIT = "open-agent-notebook";
 export const COMMAND_QUICK_CAPTURE = "quick-capture";
 export const COMMAND_EXPORT_DAILY_NOTE = "export-daily-note";
 export const COMMAND_REFRESH_WORK_SESSIONS = "refresh-work-sessions";
@@ -39,7 +39,7 @@ export const LEGACY_SESSION_SCAN_ROOTS = [
 ];
 
 export const DEFAULT_SETTINGS: CockpitSettings = {
-  dailyNoteFolder: "Daily Cockpit",
+  dailyNoteFolder: "Agent Notebook",
   llmEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
   llmModel: "qwen2.5:7b",
   llmApiKey: "",

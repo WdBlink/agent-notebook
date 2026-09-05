@@ -282,7 +282,7 @@ export const withFrozenSessionTranscripts: WorklineTranscriptFreezer = async <T>
   use: (frozenSessions: AgentWorkSession[], frozenRoot: string) => Promise<T>
 ): Promise<T> => {
   for (const session of sessions) requireCompleteTranscriptCapture(session);
-  const frozenRoot = await fs.mkdtemp(path.join(os.tmpdir(), "work-continuity-evidence-"));
+  const frozenRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agent-notebook-evidence-"));
   try {
     await fs.chmod(frozenRoot, 0o700);
     const frozenSessions: AgentWorkSession[] = [];
@@ -918,8 +918,8 @@ function compilerProviderLabel(provider: SessionProvider): string {
 function defaultModel(provider: SessionProvider): string {
   const environment = typeof process !== "undefined" ? process.env : {};
   return provider === "codex"
-    ? environment.WORK_CONTINUITY_CODEX_REVIEW_MODEL?.trim() || environment.WORK_CONTINUITY_CODEX_SUMMARY_MODEL?.trim() || "gpt-5.3-codex-spark"
-    : environment.WORK_CONTINUITY_CLAUDE_REVIEW_MODEL?.trim() || environment.WORK_CONTINUITY_CLAUDE_SUMMARY_MODEL?.trim() || "fable";
+    ? environment.AGENT_NOTEBOOK_CODEX_REVIEW_MODEL?.trim() || environment.AGENT_NOTEBOOK_CODEX_SUMMARY_MODEL?.trim() || "gpt-5.3-codex-spark"
+    : environment.AGENT_NOTEBOOK_CLAUDE_REVIEW_MODEL?.trim() || environment.AGENT_NOTEBOOK_CLAUDE_SUMMARY_MODEL?.trim() || "fable";
 }
 
 function sessionKey(session: Pick<AgentWorkSession, "platform" | "id">): string {

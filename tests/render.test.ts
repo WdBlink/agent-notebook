@@ -8,8 +8,8 @@ import type { RendererActions, RendererState } from "../src/types";
 test("renderer puts the previous-work board before the compact intent form", () => {
   const { root } = installDom();
   renderCockpit(root, { data: createEmptyData(), processing: false }, noopActions());
-  const sessions = root.querySelector(".daily-cockpit-sessions");
-  const form = root.querySelector(".daily-cockpit-intent");
+  const sessions = root.querySelector(".agent-notebook-sessions");
+  const form = root.querySelector(".agent-notebook-intent");
   assert.ok(sessions && form);
   assert.equal(Boolean(sessions.compareDocumentPosition(form) & 4), true);
   const textarea = root.querySelector("textarea");
@@ -21,8 +21,8 @@ test("renderer groups sessions by project and exposes practical recovery actions
   const { root } = installDom();
   renderCockpit(root, { data: createSeedData(), processing: false }, noopActions());
   assert.ok(root.textContent?.includes("昨日项目"));
-  assert.ok(root.textContent?.includes("new day board"));
-  assert.ok(root.querySelector('[aria-label="打开项目目录：new day board"]'));
+  assert.ok(root.textContent?.includes("agent-notebook"));
+  assert.ok(root.querySelector('[aria-label="打开项目目录：agent-notebook"]'));
   assert.ok(root.querySelector('[aria-label="查看产物：src/render.ts"]'));
   assert.ok(root.querySelector('[aria-label="查看会话过程：实现每日看板连续性原型"]'));
   assert.ok(root.querySelector('[aria-label="续上会话：实现每日看板连续性原型"]'));
@@ -115,7 +115,7 @@ function noopActions(): RendererActions {
       return true;
     },
     async exportDailyNote() {
-      return { ok: true, data: { path: "Daily Cockpit/2026-07-04.md" } };
+      return { ok: true, data: { path: "Agent Notebook/2026-07-04.md" } };
     },
     clearError() {}
   };

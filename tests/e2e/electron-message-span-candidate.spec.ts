@@ -6,7 +6,7 @@ import { createEmptyData } from "../../src/state";
 
 test("Electron V2 candidate generates exact index and dossier spans without rotating V1", async () => {
   test.slow();
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "work-continuity-message-span-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agent-notebook-message-span-"));
   const home = path.join(root, "home");
   const userData = path.join(root, "user-data");
   const logicalDate = localDateInTimeZone(new Date(), "Asia/Shanghai");
@@ -37,7 +37,7 @@ test("Electron V2 candidate generates exact index and dossier spans without rota
   await fs.writeFile(path.join(userData, "cockpit-data.json"), `${JSON.stringify(cockpit, null, 2)}\n`, "utf8");
   const launchOptions = {
     args: [`--user-data-dir=${userData}`, path.resolve("dist/desktop")],
-    env: { ...process.env, HOME: home, TZ: "Asia/Shanghai", WORK_CONTINUITY_MESSAGE_SPANS: "1" }
+    env: { ...process.env, HOME: home, TZ: "Asia/Shanghai", AGENT_NOTEBOOK_MESSAGE_SPANS: "1" }
   };
   let application: ElectronApplication | undefined;
   try {
@@ -141,7 +141,7 @@ test("Electron V2 candidate generates exact index and dossier spans without rota
     application = undefined;
     application = await electron.launch({
       ...launchOptions,
-      env: { ...launchOptions.env, WORK_CONTINUITY_MESSAGE_SPANS: "0" }
+      env: { ...launchOptions.env, AGENT_NOTEBOOK_MESSAGE_SPANS: "0" }
     });
     page = await readyWindow(application);
     const disabledState = await page.evaluate(() => window.agentWhiteboard.getState());

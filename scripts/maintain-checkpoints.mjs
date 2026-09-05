@@ -21,7 +21,7 @@ for (const suffix of ["", "-wal", "-shm"]) {
 }
 const owners = spawnSync("lsof", ["-t", ...paths], { encoding: "utf8" });
 if (owners.error || (owners.status !== 0 && owners.status !== 1)) throw new Error("Cannot verify database ownership.");
-if (owners.stdout.trim()) throw new Error("Close Work Continuity and other checkpoint readers before offline maintenance.");
+if (owners.stdout.trim()) throw new Error("Close Agent Notebook and other checkpoint readers before offline maintenance.");
 const before = (await fs.stat(databasePath)).size;
 const space = await fs.statfs(root);
 if (space.bavail * space.bsize < before * 2 + 100 * 1024 * 1024) throw new Error("Insufficient free space for recovery copy and SQLite compaction.");
