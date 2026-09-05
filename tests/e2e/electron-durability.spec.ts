@@ -23,7 +23,7 @@ const GOLDEN_SESSIONS = [
 
 const ORIGINAL_REFLECTION = "我确认 Traceink 原文应该继续作为语义权威，但明天必须在重新构建的客户端里验证五条线和原始证据都能重开。";
 
-test("real Electron persists and reloads the complete Traceink golden review chain without creating a legacy page", async () => {
+test("real Electron rollback mode preserves the complete Traceink golden review chain", async () => {
   test.slow();
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "work-continuity-electron-golden-"));
   const home = path.join(root, "home");
@@ -76,9 +76,10 @@ test("real Electron persists and reloads the complete Traceink golden review cha
   await Promise.all(GOLDEN_SESSIONS.map(([id, startedAt, answeredAt, userText, assistantText], index) => fs.writeFile(
     sessionPaths[index]!,
     [
-      JSON.stringify({ timestamp: timestampOnDate(logicalDate, startedAt), type: "session_meta", payload: { id, cwd: path.join(home, `project-${index + 1}`) } }),
+      JSON.stringify({ timestamp: timestampOnDate(logicalDate, startedAt), type: "session_meta", payload: { id, cwd: path.join(home, `project-${index + 1}`), source: "cli" } }),
       JSON.stringify({ timestamp: timestampOnDate(logicalDate, startedAt), type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: userText }] } }),
-      JSON.stringify({ timestamp: timestampOnDate(logicalDate, answeredAt), type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: assistantText }] } })
+      JSON.stringify({ timestamp: timestampOnDate(logicalDate, answeredAt), type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: assistantText }] } }),
+      JSON.stringify({ timestamp: timestampOnDate(logicalDate, answeredAt), type: "event_msg", payload: { type: "task_complete", started_at: timestampOnDate(logicalDate, startedAt), completed_at: timestampOnDate(logicalDate, answeredAt) } })
     ].join("\n"), "utf8"
   )));
   const canonicalSessionPaths = await Promise.all(sessionPaths.map((sessionPath) => fs.realpath(sessionPath)));
@@ -89,7 +90,7 @@ test("real Electron persists and reloads the complete Traceink golden review cha
     "const append = value => fs.appendFileSync(logPath, JSON.stringify(value) + '\\n');",
     "if (args[0] === 'features' && args[1] === 'list') { append({kind:'features',args}); process.stdout.write('shell_tool stable true\\nunified_exec stable true\\nview_image stable true\\nskill_search stable true\\n'); process.exit(0); }",
     "const stdin = fs.readFileSync(0, 'utf8');",
-    "const stage = stdin.includes('Execute only Traceink workflow step 5') ? 'proposals' : stdin.includes('Execute only Traceink workflow steps 4–5') ? 'dossier' : 'index';",
+    "const stage = stdin.includes('Execute only Traceink workflow step 5') ? 'proposals' : stdin.includes('Execute only Traceink workflow step 4 for this selected workline') ? 'dossier' : 'index';",
     "append({kind:'model',stage,args});",
     `const transports = ${JSON.stringify({ index: { rawMarkdown, transportComplete: true }, dossier: { rawMarkdown: dossierMarkdown, transportComplete: true }, proposals: proposalTransport })};`,
     "const text = JSON.stringify(transports[stage]);",
@@ -102,7 +103,10 @@ test("real Electron persists and reloads the complete Traceink golden review cha
   });
   await fs.writeFile(path.join(userData, "cockpit-data.json"), `${JSON.stringify(cockpit, null, 2)}\n`, "utf8");
 
-  const launchOptions = { args: [`--user-data-dir=${userData}`, path.resolve("dist/desktop")], env: { ...process.env, HOME: home, TZ: "Asia/Shanghai" } };
+  const launchOptions = {
+    args: [`--user-data-dir=${userData}`, path.resolve("dist/desktop")],
+    env: { ...process.env, HOME: home, TZ: "Asia/Shanghai", WORK_CONTINUITY_STRUCTURED_TODAY: "0" }
+  };
   let electronApp: ElectronApplication | undefined;
   try {
     electronApp = await electron.launch(launchOptions);
@@ -216,7 +220,7 @@ test("real Electron persists and reloads the complete Traceink golden review cha
     expect(modelInvocationsBeforeRestart.map((entry) => entry.stage)).toEqual(["index", "dossier", "proposals"]);
     for (const invocation of modelInvocationsBeforeRestart) expect(invocation.args).toContain("gpt-5.6-sol");
 
-    await electronApp.close();
+    await closeElectronApplication(electronApp);
     electronApp = undefined;
     electronApp = await electron.launch(launchOptions);
     const reloadedPage = await readyWindow(electronApp);
@@ -238,7 +242,7 @@ test("real Electron persists and reloads the complete Traceink golden review cha
     expect(JSON.parse(await fs.readFile(assetPath, "utf8"))).toEqual(storedBeforeRestart);
     expect(await readInvocations(invocationLog)).toEqual(invocationsBeforeRestart);
   } finally {
-    await electronApp?.close().catch(() => undefined);
+    if (electronApp) await closeElectronApplication(electronApp);
     await fs.rm(root, { recursive: true, force: true });
   }
 });
@@ -247,6 +251,12 @@ async function readyWindow(electronApp: ElectronApplication): Promise<Page> {
   const page = await electronApp.firstWindow();
   await expect(page.locator(".today-board")).toBeVisible();
   return page;
+}
+
+async function closeElectronApplication(application: ElectronApplication): Promise<void> {
+  const child = application.process();
+  await application.close().catch(() => undefined);
+  if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
 }
 
 async function readInvocations(invocationLog: string): Promise<Array<{ kind: string; stage?: string; args: string[] }>> {

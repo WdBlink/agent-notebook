@@ -5,7 +5,7 @@ export type ActivityConfidence = "observed" | "uncertain";
 
 export interface SessionActivitySource {
   session: AgentWorkSession;
-  transcript: Pick<SessionTranscriptState, "messages" | "truncated" | "warning">;
+  transcript: Pick<SessionTranscriptState, "messages" | "activityWindows" | "omittedToolEvents" | "truncated" | "warning">;
 }
 
 export interface UserIntervention {
@@ -17,7 +17,7 @@ export interface AgentActivityWindow {
   start: string;
   end: string;
   durationMs: number;
-  basis: "timestamped-user-to-assistant";
+  basis: "provider-task" | "provider-item" | "tool-execution";
   coverage: "observed";
 }
 
@@ -42,9 +42,9 @@ export interface DailyActivityFacts {
   contextSwitchCount: number;
   confidence: ActivityConfidence;
   basis: {
-    userInterventions: "timestamped-user-messages";
-    agentActivity: "union-of-timestamped-user-to-assistant-response-windows";
-    concurrency: "overlap-of-observed-agent-response-windows";
+    userInterventions: "host-classified-human-main-session-messages";
+    agentActivity: "union-of-provider-events-and-tool-windows";
+    concurrency: "overlap-of-provider-activity-windows";
     contextSwitches: "chronological-timestamped-user-session-transitions";
   };
 }
@@ -98,9 +98,9 @@ export function summarizeDailySessionActivity(input: {
     contextSwitchCount: countContextSwitches(chronologicalUserEvents),
     confidence: lanes.every((lane) => lane.confidence === "observed") ? "observed" : "uncertain",
     basis: {
-      userInterventions: "timestamped-user-messages",
-      agentActivity: "union-of-timestamped-user-to-assistant-response-windows",
-      concurrency: "overlap-of-observed-agent-response-windows",
+      userInterventions: "host-classified-human-main-session-messages",
+      agentActivity: "union-of-provider-events-and-tool-windows",
+      concurrency: "overlap-of-provider-activity-windows",
       contextSwitches: "chronological-timestamped-user-session-transitions"
     }
   };
@@ -118,17 +118,42 @@ function projectLane(logicalDate: string, source: SessionActivitySource, timeZon
   if (source.transcript.truncated) warnings.push("会话记录为有界读取，活动覆盖不完整。");
   if (hasNoMessages) warnings.push("没有可用于活动判断的用户或助手消息。");
   if (hasMissingTimestamp) warnings.push("部分用户或助手消息缺少可用时间戳，无法推断持续时间。");
-  if (hasReversedTimestamp) warnings.push("会话时间戳顺序异常，无法推断持续时间。");
+  if (hasReversedTimestamp) warnings.push("部分消息时间戳顺序异常；有效 provider 活动窗口仍单独计量。");
 
   const dailyMessages = parsed.filter((message) => message.time !== undefined && dateInTimeZone(message.time, timeZone) === logicalDate);
   const userInterventions = dailyMessages
-    .filter((message) => message.role === "user")
+    .filter((message) =>
+      message.role === "user" &&
+      message.authorKind === "human" &&
+      source.session.lineage?.origin === "primary"
+    )
     .map((message) => ({ id: message.id, timestamp: message.timestamp as string }));
-  const usableForWindows = !hasMissingTimestamp && !hasReversedTimestamp && !source.transcript.truncated;
-  const agentActivityWindows = usableForWindows ? responseWindows(dailyMessages) : [];
-  const observedTimes = dailyMessages.map((message) => message.time as number);
+  const day = logicalDayBounds(logicalDate, timeZone);
+  const providerActivityWindows = source.transcript.activityWindows ?? [];
+  const agentActivityWindows = providerActivityWindows.flatMap((window) => {
+    const start = Date.parse(window.start);
+    const end = Date.parse(window.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return [];
+    const clippedStart = Math.max(start, day.start);
+    const clippedEnd = Math.min(end, day.end);
+    if (clippedEnd <= clippedStart) return [];
+    return [{
+      start: new Date(clippedStart).toISOString(),
+      end: new Date(clippedEnd).toISOString(),
+      durationMs: clippedEnd - clippedStart,
+      basis: window.basis,
+      coverage: "observed" as const
+    }];
+  });
+  if (source.transcript.omittedToolEvents > 0 && !providerActivityWindows.some((window) => window.basis === "tool-execution")) {
+    warnings.push("检测到工具事件，但 provider 记录没有提供可配对的完整工具执行窗口。");
+  }
+  const observedTimes = [
+    ...dailyMessages.map((message) => message.time as number),
+    ...agentActivityWindows.flatMap((window) => [Date.parse(window.start), Date.parse(window.end)])
+  ].sort((left, right) => left - right);
   const timeRange = observedTimes.length > 0
-    ? { start: dailyMessages[0]?.timestamp as string, end: dailyMessages.at(-1)?.timestamp as string }
+    ? { start: new Date(observedTimes[0]!).toISOString(), end: new Date(observedTimes.at(-1)!).toISOString() }
     : undefined;
   const confidence: ActivityConfidence = hasNoMessages || hasMissingTimestamp || hasReversedTimestamp || source.transcript.truncated || (messages.length > 0 && observedTimes.length === 0)
     ? "uncertain"
@@ -147,24 +172,6 @@ function projectLane(logicalDate: string, source: SessionActivitySource, timeZon
     agentActivityWindows,
     warnings
   };
-}
-
-function responseWindows(messages: Array<{ id: string; role: "user" | "assistant"; timestamp?: string; time: number | undefined }>): AgentActivityWindow[] {
-  const windows: AgentActivityWindow[] = [];
-  for (let index = 1; index < messages.length; index += 1) {
-    const previous = messages[index - 1];
-    const current = messages[index];
-    if (!previous || !current || previous.role !== "user" || current.role !== "assistant" || previous.time === undefined || current.time === undefined) continue;
-    if (current.time <= previous.time) continue;
-    windows.push({
-      start: previous.timestamp as string,
-      end: current.timestamp as string,
-      durationMs: current.time - previous.time,
-      basis: "timestamped-user-to-assistant",
-      coverage: "observed"
-    });
-  }
-  return windows;
 }
 
 function hasReverseTimestamp(messages: Array<{ time: number | undefined }>): boolean {
@@ -187,6 +194,43 @@ function dateInTimeZone(time: number, timeZone: string): string {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(time));
   const values = new Map(parts.map((part) => [part.type, part.value]));
   return `${values.get("year")}-${values.get("month")}-${values.get("day")}`;
+}
+
+function logicalDayBounds(logicalDate: string, timeZone: string): { start: number; end: number } {
+  const start = zonedMidnight(logicalDate, timeZone);
+  const next = new Date(`${logicalDate}T00:00:00.000Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  const nextDate = next.toISOString().slice(0, 10);
+  return { start, end: zonedMidnight(nextDate, timeZone) };
+}
+
+function zonedMidnight(logicalDate: string, timeZone: string): number {
+  const [year, month, day] = logicalDate.split("-").map(Number);
+  const desired = Date.UTC(year!, month! - 1, day!);
+  let guess = desired;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23"
+    }).formatToParts(new Date(guess));
+    const values = new Map(parts.map((part) => [part.type, part.value]));
+    const represented = Date.UTC(
+      Number(values.get("year")),
+      Number(values.get("month")) - 1,
+      Number(values.get("day")),
+      Number(values.get("hour")),
+      Number(values.get("minute")),
+      Number(values.get("second"))
+    );
+    guess += desired - represented;
+  }
+  return guess;
 }
 
 function sessionIdentity(session: AgentWorkSession): string {

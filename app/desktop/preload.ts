@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { DailyDraftInput, DailyReviewPreparationMode, DailySealInput, DesktopApi, DesktopNotebookState, DesktopSettingsPatch, DesktopState, NotebookNote, NotebookNoteInput, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState, TraceinkProposalDispositionInput } from "./api";
+import type { DailyDraftInput, DailyReviewPreparationMode, DailySealInput, DesktopApi, DesktopNotebookState, DesktopSettingsPatch, DesktopState, NotebookNote, NotebookNoteInput, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState, StructuredTodaySealInput, StructuredTodaySpanRequest, StructuredTodaySpanState, TraceinkProposalDispositionInput } from "./api";
 import type { TraceinkArtifactReferenceV1, TraceinkWorklineSelectionV1, UserReflectionAssetReferenceV1 } from "../../src/traceink-review-assets";
+import type { StructuredTodayIndexReferenceV1 } from "./traceink-asset-store";
 
 const api: DesktopApi = {
   getState(date?: string): Promise<DesktopState> {
@@ -36,6 +37,49 @@ const api: DesktopApi = {
   prepareTraceinkDossier(date: string, selection: TraceinkWorklineSelectionV1): Promise<DesktopState> {
     return ipcRenderer.invoke("desktop:prepare-traceink-dossier", date, selection) as Promise<DesktopState>;
   },
+  prepareStructuredTodayDossier(
+    date: string,
+    index: StructuredTodayIndexReferenceV1,
+    worklineId: string
+  ): Promise<DesktopState> {
+    return ipcRenderer.invoke("desktop:prepare-structured-today-dossier", date, index, worklineId) as Promise<DesktopState>;
+  },
+  prepareStructuredTodayV2Candidate(date: string): Promise<DesktopState> {
+    return ipcRenderer.invoke("desktop:prepare-structured-today-v2-candidate", date) as Promise<DesktopState>;
+  },
+  prepareStructuredTodayV2DossierCandidate(
+    date: string,
+    index: StructuredTodayIndexReferenceV1,
+    worklineId: string
+  ): Promise<DesktopState> {
+    return ipcRenderer.invoke("desktop:prepare-structured-today-v2-dossier-candidate", date, index, worklineId) as Promise<DesktopState>;
+  },
+  saveStructuredTodayReflection(
+    date: string,
+    index: StructuredTodayIndexReferenceV1,
+    worklineId: string,
+    text: string
+  ): Promise<DesktopState> {
+    return ipcRenderer.invoke("desktop:save-structured-today-reflection", date, index, worklineId, text) as Promise<DesktopState>;
+  },
+  prepareStructuredTodayProposals(
+    date: string,
+    index: StructuredTodayIndexReferenceV1,
+    worklineId: string
+  ): Promise<DesktopState> {
+    return ipcRenderer.invoke("desktop:prepare-structured-today-proposals", date, index, worklineId) as Promise<DesktopState>;
+  },
+  disposeStructuredTodayProposal(
+    date: string,
+    proposalArtifact: { artifactId: string; revision: number; contentHash: string },
+    proposalId: string,
+    input: { action: "accept" | "dismiss" | "defer" | "rewrite"; rewriteText?: string }
+  ): Promise<DesktopState> {
+    return ipcRenderer.invoke("desktop:dispose-structured-today-proposal", date, proposalArtifact, proposalId, input) as Promise<DesktopState>;
+  },
+  sealStructuredTodayPage(date: string, input: StructuredTodaySealInput): Promise<DesktopState> {
+    return ipcRenderer.invoke("desktop:seal-structured-today-page", date, input) as Promise<DesktopState>;
+  },
   saveTraceinkReflection(date: string, dossier: TraceinkArtifactReferenceV1 & { stage: "dossier" }, text: string): Promise<DesktopState> {
     return ipcRenderer.invoke("desktop:save-traceink-reflection", date, dossier, text) as Promise<DesktopState>;
   },
@@ -64,6 +108,9 @@ const api: DesktopApi = {
   },
   getSessionTranscript(request: SessionTranscriptRequest): Promise<SessionTranscriptState> {
     return ipcRenderer.invoke("desktop:get-session-transcript", request) as Promise<SessionTranscriptState>;
+  },
+  getStructuredTodaySpan(request: StructuredTodaySpanRequest): Promise<StructuredTodaySpanState> {
+    return ipcRenderer.invoke("desktop:get-structured-today-span", request) as Promise<StructuredTodaySpanState>;
   },
   chooseDirectory(): Promise<string | null> {
     return ipcRenderer.invoke("desktop:choose-directory") as Promise<string | null>;

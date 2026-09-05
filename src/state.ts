@@ -823,7 +823,22 @@ function normalizeWorkSession(session: unknown): AgentWorkSession | null {
   if (resumeHint) normalized.resumeHint = resumeHint;
   const transcriptCapture = normalizeTranscriptCapture(source.transcriptCapture);
   if (transcriptCapture?.canonicalPath === path) normalized.transcriptCapture = transcriptCapture;
+  const lineage = normalizeSessionLineage(source.lineage);
+  if (lineage) normalized.lineage = lineage;
   return normalized;
+}
+
+function normalizeSessionLineage(value: unknown): AgentWorkSession["lineage"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const source = value as Record<string, unknown>;
+  const origin = source.origin;
+  if (origin !== "primary" && origin !== "subagent" && origin !== "automation" && origin !== "unknown") return undefined;
+  const lineage: NonNullable<AgentWorkSession["lineage"]> = { origin };
+  for (const field of ["parentSessionId", "agentPath", "agentNickname", "agentRole"] as const) {
+    const text = cleanText(source[field], "");
+    if (text) lineage[field] = text;
+  }
+  return lineage;
 }
 
 function normalizeTranscriptCapture(value: unknown): AgentTranscriptCapture | undefined {

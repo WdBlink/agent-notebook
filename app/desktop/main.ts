@@ -4,6 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCliSessionSummarizer } from "../../src/agent-summary";
+import { NodeSqliteSaver } from "../../src/langgraph-node-sqlite-checkpointer";
+import { projectStructuredTodayReview } from "../../src/structured-today-review-state";
+import type { StructuredTodayReviewProjection } from "../../src/structured-today-review-state";
+import type { TodayBoardMode } from "../../src/today-board";
 import { compileTraceinkDossier, compileTraceinkIndex, compileTraceinkProposals } from "../../src/traceink-review";
 import { traceinkArtifactReference, userReflectionAssetReference, type TraceinkArtifactReferenceV1, type TraceinkIndexArtifactV1, type TraceinkWorklineSelectionV1, type UserReflectionAssetReferenceV1 } from "../../src/traceink-review-assets";
 import { loadAgentWorkSnapshot, mergeSessionSummaries, type RuntimeFileStat, type RuntimeFileSystem } from "../../src/agent-sessions";
@@ -11,7 +15,7 @@ import { DEFAULT_SESSION_SCAN_ROOTS, MAX_WORK_SESSION_SNAPSHOT_SESSIONS } from "
 import { createEmptyData, localDateString, normalizeData, setWorkSessionSnapshot } from "../../src/state";
 import { deriveDailyReviewPreparationState, normalizeDailyReviewScheduleTime, shouldScheduleSessionSummaries, shouldStartAutomaticDailyReview, type DailyReviewPreparationTrigger } from "../../src/daily-review-schedule";
 import type { AgentWorkSession, AgentWorkSnapshot, CockpitData, SessionProvider } from "../../src/types";
-import type { DailyDraftInput, DailyReviewPreparationMode, DailySealInput, DesktopNotebookState, DesktopSettingsPatch, DesktopState, DesktopSummaryJob, NotebookNote, NotebookNoteInput, ProjectContextDocument, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState, TraceinkProposalDispositionInput } from "./api";
+import type { DailyDraftInput, DailyReviewPreparationMode, DailySealInput, DesktopNotebookState, DesktopSettingsPatch, DesktopState, DesktopSummaryJob, NotebookNote, NotebookNoteInput, ProjectContextDocument, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState, StructuredTodayProgressState, StructuredTodayRunProgress, StructuredTodaySpanRequest, StructuredTodaySpanState, TraceinkProposalDispositionInput } from "./api";
 import { DailyReviewBackgroundCoordinator } from "./daily-review-background";
 import { desktopCliRunner } from "./cli-runner";
 import {
@@ -24,6 +28,7 @@ import {
   notebookStateForDate,
   saveDailyDraft,
   sealDailyPage,
+  sealStructuredTodayPage,
   setKnowledgeRoot,
   updateNotebookNote,
   type NotebookDocument
@@ -41,6 +46,7 @@ import {
 } from "./session-summary-cache";
 import { parseSessionTranscript } from "./transcript-reader";
 import { createSessionActivityCache } from "./session-activity-cache";
+import { sessionUserAuthorKind } from "./session-authority";
 import {
   createTraceinkAssetRepository,
   traceinkAssetStorePath,
@@ -52,13 +58,28 @@ import {
   appendTraceinkProposalDisposition,
   appendTraceinkProposalsRevision,
   appendTraceinkReflectionRevision,
+  appendStructuredTodayProposalDisposition,
+  appendStructuredTodayReflectionRevision,
   currentTraceinkWorklineLineage,
   findTraceinkArtifact,
   findTraceinkReflection,
   latestTraceinkDossier,
+  activeStructuredTodayIndexReferenceForDate,
+  findStructuredTodayIndex,
+  findStructuredTodayIndexV2Candidate,
+  findStructuredTodayDossierV2Candidate,
+  latestStructuredTodayDossier,
+  latestStructuredTodayProposalDispositions,
+  latestStructuredTodayProposals,
+  latestStructuredTodayReflection,
+  latestStructuredTodayIndexV2Candidate,
   sameTraceinkArtifactReference,
-  sameTraceinkReflectionReference
+  sameTraceinkReflectionReference,
+  structuredTodayDossierReference,
+  structuredTodayReflectionReference,
+  type StructuredTodayIndexReferenceV1
 } from "./traceink-asset-store";
+import { readStructuredTodaySpanTarget } from "./structured-today-span-access";
 import { runTraceinkReviewPreparation } from "./traceink-review-preparation";
 import {
   automaticTraceinkEligibilityMode,
@@ -68,12 +89,24 @@ import {
   traceinkActivityDates,
   traceinkScopeFromSnapshot
 } from "./traceink-desktop-state";
+import {
+  runStructuredTodayDossierPreparation,
+  runStructuredTodayIndexPreparation,
+  runStructuredTodayProposalPreparation
+} from "./structured-today-runtime";
+import { runStructuredTodayIndexV2CandidatePreparation } from "./structured-today-v2-runtime";
+import { runStructuredTodayDossierV2CandidatePreparation } from "./structured-today-v2-dossier-runtime";
+import { projectStructuredTodayProgress } from "./structured-today-progress";
+import { structuredTodaySessionFamilies } from "./structured-today-input";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.AGENT_WHITEBOARD_DEV === "1";
+const structuredTodayProducerEnabled = process.env.WORK_CONTINUITY_STRUCTURED_TODAY !== "0";
+const messageSpanCandidateEnabled = !app.isPackaged && process.env.WORK_CONTINUITY_MESSAGE_SPANS === "1";
 const storeFileName = "cockpit-data.json";
 const summaryCacheFileName = "session-summary-cache-v1.json";
 const notebookFileName = "notebook-v1.json";
+const structuredTodayCheckpointFileName = "structured-today-workflows-v1.sqlite";
 const summaryModels: SummaryModelMap = {
   codex: process.env.WORK_CONTINUITY_CODEX_SUMMARY_MODEL?.trim() || "gpt-5.3-codex-spark",
   claude: process.env.WORK_CONTINUITY_CLAUDE_SUMMARY_MODEL?.trim() || "fable"
@@ -87,7 +120,11 @@ let summaryCache = createEmptySessionSummaryCache();
 let summaryRunId = 0;
 let summaryJob: DesktopSummaryJob = { status: "idle", total: 0, completed: 0, models: summaryModels };
 let traceinkAssetRepository: TraceinkAssetRepository | undefined;
+let structuredTodayCheckpointer: NodeSqliteSaver | undefined;
 const traceinkReviewErrors = new Map<string, string>();
+const structuredTodayProgressByDate = new Map<string, StructuredTodayProgressState>();
+const structuredTodayDossierRuns = new Map<string, Promise<void>>();
+const structuredTodayProposalRuns = new Map<string, Promise<void>>();
 const sessionActivityCache = createSessionActivityCache({
   async readTranscript(session) {
     const source = await readBoundedTranscriptSource(session.path, {
@@ -100,7 +137,8 @@ const sessionActivityCache = createSessionActivityCache({
       sessionId: session.id,
       title: session.title,
       path: session.path,
-      truncated: source.truncated
+      truncated: source.truncated,
+      userAuthorKind: sessionUserAuthorKind(session)
     });
   }
 });
@@ -127,6 +165,8 @@ const runtimeFs: RuntimeFileSystem = {
 };
 
 app.setName("Work Continuity");
+if (!app.requestSingleInstanceLock()) app.exit(0);
+app.on("second-instance", () => { mainWindow?.show(); mainWindow?.focus(); });
 
 void app.whenReady().then(async () => {
   traceinkAssetRepository = createTraceinkAssetRepository({
@@ -138,6 +178,12 @@ void app.whenReady().then(async () => {
     loadSummaryCache(),
     traceinkAssetRepository.load()
   ]);
+  try {
+    const assets = await traceinkAssetRepository.load();
+    await requireStructuredTodayCheckpointer().prune((assets.structuredRuns ?? []).filter((run) => run.status === "ready").map((run) => run.runId));
+  } catch {
+    console.warn("Checkpoint startup maintenance deferred.");
+  }
   await refreshSnapshot(activeDate);
   if (process.platform === "darwin") app.dock?.setIcon(path.join(__dirname, "app-icon.png"));
   createWindow();
@@ -155,6 +201,13 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   if (dailyReviewScheduleTimer) clearInterval(dailyReviewScheduleTimer);
+  try {
+    structuredTodayCheckpointer?.close();
+  } catch {
+    // Shutdown must not be held open by an already-closed checkpoint handle.
+  } finally {
+    structuredTodayCheckpointer = undefined;
+  }
 });
 
 ipcMain.handle("desktop:get-state", async (_event, date?: string) => {
@@ -294,6 +347,332 @@ ipcMain.handle("desktop:prepare-traceink-dossier", async (_event, date: string, 
   return buildState();
 });
 
+ipcMain.handle("desktop:prepare-structured-today-dossier", async (
+  _event,
+  date: string,
+  indexReference: StructuredTodayIndexReferenceV1,
+  worklineId: string
+) => {
+  const logicalDate = cleanDate(date, activeDate);
+  const repository = requireTraceinkAssetRepository();
+  const store = repository.snapshot();
+  const active = activeStructuredTodayIndexReferenceForDate(store, logicalDate);
+  const cleanWorklineId = cleanIdentifier(worklineId);
+  if (!active || !sameStructuredTodayReference(active, indexReference)) {
+    throw new Error("工作脉络已经更新，请从当前版本重新选择。");
+  }
+  if (!findStructuredTodayIndex(store, active)?.worklines.some((item) => item.worklineId === cleanWorklineId)) {
+    throw new Error("选择的工作线不属于当前结构化索引。");
+  }
+  if (latestStructuredTodayDossier(store, active, cleanWorklineId)) return buildState();
+  const runKey = `${logicalDate}:${active.artifactId}:${active.revision}:${cleanWorklineId}`;
+  if (!structuredTodayDossierRuns.has(runKey)) {
+    const current = await ensureLoaded();
+    setStructuredDossierProgress(logicalDate, cleanWorklineId, {
+      runId: runKey,
+      status: "queued",
+      stage: "gather-evidence",
+      completed: 0,
+      total: 4,
+      message: "正在准备所选工作线的证据档案。"
+    });
+    const completion = Promise.resolve().then(async () => {
+      setStructuredDossierProgress(logicalDate, cleanWorklineId, {
+        runId: runKey,
+        status: "running",
+        stage: "gather-evidence",
+        completed: 0,
+        total: 4
+      });
+      await broadcastState();
+      try {
+        await runStructuredTodayDossierPreparation({
+          logicalDate,
+          indexReference: active,
+          worklineId: cleanWorklineId,
+          settings: current.settings,
+          repository,
+          checkpointer: requireStructuredTodayCheckpointer(),
+          runner: desktopCliRunner,
+          onProgress(progress) {
+            const currentProgress = structuredTodayProgressByDate.get(logicalDate)?.dossierByWorklineId[cleanWorklineId];
+            const ready = progress.status === "ready";
+            setStructuredDossierProgress(logicalDate, cleanWorklineId, {
+              runId: runKey,
+              status: progress.status === "failed" ? "failed" : "running",
+              stage: progress.stage,
+              completed: Math.min(4, (currentProgress?.completed ?? 0) + (ready ? 1 : 0)),
+              total: 4
+            });
+            void broadcastState();
+          }
+        });
+        setStructuredDossierProgress(logicalDate, cleanWorklineId, {
+          runId: runKey,
+          status: "ready",
+          stage: "ready",
+          completed: 4,
+          total: 4
+        });
+      } catch (error) {
+        setStructuredDossierProgress(logicalDate, cleanWorklineId, {
+          runId: runKey,
+          status: "failed",
+          stage: "failed",
+          completed: 0,
+          total: 4,
+          message: boundedTraceinkError(error)
+        });
+      } finally {
+        structuredTodayDossierRuns.delete(runKey);
+        await broadcastState();
+      }
+    });
+    structuredTodayDossierRuns.set(runKey, completion);
+  }
+  return buildState();
+});
+
+ipcMain.handle("desktop:prepare-structured-today-v2-candidate", async (_event, date: string) => {
+  if (!messageSpanCandidateEnabled) throw new Error("消息级 evidence span 候选功能尚未启用。");
+  const logicalDate = cleanDate(date, activeDate);
+  const current = await ensureLoaded();
+  const snapshot = current.workSessionSnapshot.date === logicalDate
+    ? structuredClone(current.workSessionSnapshot)
+    : await refreshSnapshot(logicalDate, { scheduleSummaries: false, publish: logicalDate === activeDate });
+  await runStructuredTodayIndexV2CandidatePreparation({
+    logicalDate,
+    snapshot,
+    settings: current.settings,
+    repository: requireTraceinkAssetRepository(),
+    checkpointer: requireStructuredTodayCheckpointer(),
+    runner: desktopCliRunner
+  });
+  return buildState();
+});
+
+ipcMain.handle("desktop:prepare-structured-today-v2-dossier-candidate", async (
+  _event,
+  date: string,
+  indexReference: StructuredTodayIndexReferenceV1,
+  worklineId: string
+) => {
+  if (!messageSpanCandidateEnabled) throw new Error("消息级 evidence span 候选功能尚未启用。");
+  const logicalDate = cleanDate(date, activeDate);
+  const store = requireTraceinkAssetRepository().snapshot();
+  const index = findStructuredTodayIndexV2Candidate(store, indexReference);
+  if (!index || index.logicalDate !== logicalDate) throw new Error("指定 V2 index candidate 无法精确解析。");
+  await runStructuredTodayDossierV2CandidatePreparation({
+    sourceIndex: indexReference,
+    worklineId: cleanIdentifier(worklineId),
+    settings: (await ensureLoaded()).settings,
+    repository: requireTraceinkAssetRepository(),
+    checkpointer: requireStructuredTodayCheckpointer(),
+    runner: desktopCliRunner
+  });
+  return buildState();
+});
+
+ipcMain.handle("desktop:save-structured-today-reflection", async (
+  _event,
+  date: string,
+  indexReference: StructuredTodayIndexReferenceV1,
+  worklineId: string,
+  text: string
+) => {
+  const logicalDate = cleanDate(date, activeDate);
+  const cleanWorklineId = cleanIdentifier(worklineId);
+  const repository = requireTraceinkAssetRepository();
+  await repository.mutate((document) => {
+    const active = activeStructuredTodayIndexReferenceForDate(document, logicalDate);
+    const dossier = active && sameStructuredTodayReference(active, indexReference)
+      ? latestStructuredTodayDossier(document, active, cleanWorklineId)
+      : undefined;
+    if (!dossier) throw new Error("结构化证据档案已经变化，请重新打开后再保存。");
+    return appendStructuredTodayReflectionRevision(
+      document,
+      dossier,
+      String(text ?? ""),
+      new Date().toISOString()
+    );
+  });
+  return buildState();
+});
+
+ipcMain.handle("desktop:prepare-structured-today-proposals", async (
+  _event,
+  date: string,
+  indexReference: StructuredTodayIndexReferenceV1,
+  worklineId: string
+) => {
+  const logicalDate = cleanDate(date, activeDate);
+  const cleanWorklineId = cleanIdentifier(worklineId);
+  const repository = requireTraceinkAssetRepository();
+  const starting = repository.snapshot();
+  const active = activeStructuredTodayIndexReferenceForDate(starting, logicalDate);
+  const dossier = active && sameStructuredTodayReference(active, indexReference)
+    ? latestStructuredTodayDossier(starting, active, cleanWorklineId)
+    : undefined;
+  const reflection = dossier ? latestStructuredTodayReflection(starting, dossier) : undefined;
+  if (!active || !dossier || !reflection) throw new Error("请先保存这条工作线的个人回顾。");
+  if (latestStructuredTodayProposals(starting, reflection)) return buildState();
+  const runKey = `${logicalDate}:${reflection.reflectionId}:${reflection.revision}`;
+  if (!structuredTodayProposalRuns.has(runKey)) {
+    const current = await ensureLoaded();
+    setStructuredProposalProgress(logicalDate, cleanWorklineId, {
+      runId: runKey,
+      status: "queued",
+      stage: "proposal-arrange",
+      completed: 0,
+      total: 1,
+      message: "正在把你的原始回顾整理为五类待选提案。"
+    });
+    const completion = Promise.resolve().then(async () => {
+      try {
+        await runStructuredTodayProposalPreparation({
+          logicalDate,
+          indexReference: active,
+          worklineId: cleanWorklineId,
+          reflection,
+          settings: current.settings,
+          repository,
+          checkpointer: requireStructuredTodayCheckpointer(),
+          runner: desktopCliRunner,
+          onProgress(progress) {
+            setStructuredProposalProgress(logicalDate, cleanWorklineId, {
+              runId: runKey,
+              status: progress.status === "failed" ? "failed" : "running",
+              stage: progress.stage,
+              completed: progress.status === "ready" ? 1 : 0,
+              total: 1
+            });
+            void broadcastState();
+          }
+        });
+        setStructuredProposalProgress(logicalDate, cleanWorklineId, {
+          runId: runKey,
+          status: "ready",
+          stage: "ready",
+          completed: 1,
+          total: 1
+        });
+      } catch (error) {
+        setStructuredProposalProgress(logicalDate, cleanWorklineId, {
+          runId: runKey,
+          status: "failed",
+          stage: "failed",
+          completed: 0,
+          total: 1,
+          message: boundedTraceinkError(error)
+        });
+      } finally {
+        structuredTodayProposalRuns.delete(runKey);
+        await broadcastState();
+      }
+    });
+    structuredTodayProposalRuns.set(runKey, completion);
+  }
+  return buildState();
+});
+
+ipcMain.handle("desktop:dispose-structured-today-proposal", async (
+  _event,
+  date: string,
+  proposalReference: { artifactId: string; revision: number; contentHash: string },
+  proposalId: string,
+  input: { action: "accept" | "dismiss" | "defer" | "rewrite"; rewriteText?: string }
+) => {
+  const logicalDate = cleanDate(date, activeDate);
+  const repository = requireTraceinkAssetRepository();
+  await repository.mutate((document) => {
+    const proposalArtifact = (document.structuredProposals ?? []).find((artifact) =>
+      artifact.artifactId === proposalReference?.artifactId &&
+      artifact.revision === proposalReference?.revision &&
+      artifact.contentHash === proposalReference?.contentHash &&
+      artifact.logicalDate === logicalDate
+    );
+    if (!proposalArtifact) throw new Error("结构化回顾提案已经变化，请重新打开后再处理。");
+    return appendStructuredTodayProposalDisposition(
+      document,
+      proposalArtifact,
+      cleanIdentifier(proposalId),
+      {
+        action: input?.action,
+        ...(input?.rewriteText !== undefined ? { rewriteText: input.rewriteText } : {}),
+        decidedAt: new Date().toISOString()
+      }
+    );
+  });
+  return buildState();
+});
+
+ipcMain.handle("desktop:seal-structured-today-page", async (
+  _event,
+  date: string,
+  input: { index: StructuredTodayIndexReferenceV1; bookmarkIds: string[] }
+) => {
+  const logicalDate = cleanDate(date, activeDate);
+  const repository = requireTraceinkAssetRepository();
+  const store = repository.snapshot();
+  const active = activeStructuredTodayIndexReferenceForDate(store, logicalDate);
+  if (!active || !sameStructuredTodayReference(active, input?.index)) {
+    throw new Error("结构化工作脉络已经变化，请重新查看后再封页。");
+  }
+  const index = findStructuredTodayIndex(store, active);
+  if (!index) throw new Error("当前结构化工作脉络无法读取。");
+  const dossiers = index.worklines.flatMap((workline) => {
+    const dossier = latestStructuredTodayDossier(store, active, workline.worklineId);
+    return dossier ? [dossier] : [];
+  });
+  const reflections = dossiers.flatMap((dossier) => {
+    const reflection = latestStructuredTodayReflection(store, dossier);
+    return reflection ? [reflection] : [];
+  });
+  const proposals = reflections.flatMap((reflection) => {
+    const proposal = latestStructuredTodayProposals(store, reflection);
+    if (!proposal) throw new Error("已保存的个人回顾还没有完成五类提案整理。");
+    return [proposal];
+  });
+  const dispositions = proposals.flatMap((proposal) => {
+    const latest = latestStructuredTodayProposalDispositions(store, proposal);
+    if (latest.length !== proposal.proposals.length) {
+      throw new Error("仍有结构化回顾提案尚未明确处理，不能封页。");
+    }
+    return latest;
+  });
+  const current = await ensureLoaded();
+  const sessions = current.workSessionSnapshot.date === logicalDate
+    ? structuredClone(current.workSessionSnapshot.sessions)
+    : [];
+  const candidates = notebookStateForDate(notebook, logicalDate, sessions).continuationCandidates;
+  await mutateNotebook(logicalDate, (document) => sealStructuredTodayPage(
+    document,
+    logicalDate,
+    index,
+    reflections,
+    {
+      index: active,
+      dossiers: dossiers.map((dossier) => ({ ...structuredTodayDossierReference(dossier), worklineId: dossier.worklineId })),
+      reflections: reflections.map((reflection) => ({ ...structuredTodayReflectionReference(reflection), worklineId: reflection.worklineId })),
+      proposals: proposals.map((proposal) => ({
+        artifactId: proposal.artifactId,
+        revision: proposal.revision,
+        contentHash: proposal.contentHash,
+        worklineId: proposal.worklineId
+      })),
+      dispositions: dispositions.map((disposition) => ({
+        dispositionId: disposition.dispositionId,
+        revision: disposition.revision,
+        proposalId: disposition.proposalId
+      }))
+    },
+    candidates,
+    input.bookmarkIds
+  ), sessions);
+  await broadcastState();
+  return buildState();
+});
+
 ipcMain.handle("desktop:save-traceink-reflection", async (_event, date: string, dossier: TraceinkArtifactReferenceV1 & { stage: "dossier" }, text: string) => {
   const logicalDate = cleanDate(date, activeDate);
   const repository = requireTraceinkAssetRepository();
@@ -421,6 +800,63 @@ ipcMain.handle("desktop:get-session-transcript", async (_event, request: Session
   return loadSessionTranscript(request);
 });
 
+ipcMain.handle("desktop:get-structured-today-span", async (
+  _event,
+  request: StructuredTodaySpanRequest
+): Promise<StructuredTodaySpanState> => {
+  if (!messageSpanCandidateEnabled) throw new Error("消息级 evidence span 候选功能尚未启用。");
+  const ownerInput = request?.owner;
+  if (!ownerInput || !/^\d{4}-\d{2}-\d{2}$/u.test(ownerInput.logicalDate)) {
+    throw new Error("消息级引用的 owner date 无效。");
+  }
+  const logicalDate = ownerInput.logicalDate;
+  const reference = {
+    artifactId: cleanIdentifier(ownerInput?.artifactId),
+    revision: Number(ownerInput?.revision),
+    contentHash: String(ownerInput?.contentHash ?? "")
+  };
+  if (!Number.isSafeInteger(reference.revision) || reference.revision < 1 || !/^[a-f0-9]{64}$/u.test(reference.contentHash)) {
+    throw new Error("消息级引用的 owner reference 无效。");
+  }
+  const store = requireTraceinkAssetRepository().snapshot();
+  const owner = ownerInput?.kind === "index-v2-candidate"
+    ? findStructuredTodayIndexV2Candidate(store, reference)
+    : ownerInput?.kind === "dossier-v2-candidate"
+      ? findStructuredTodayDossierV2Candidate(store, reference)
+      : undefined;
+  if (!owner || owner.logicalDate !== logicalDate) throw new Error("消息级引用的 owner artifact 无法精确解析。");
+  const target = await readStructuredTodaySpanTarget({
+    owner,
+    statementId: cleanIdentifier(request?.statementId),
+    spanId: cleanIdentifier(request?.spanId)
+  });
+  return {
+    status: "exact",
+    owner: {
+      kind: ownerInput.kind,
+      logicalDate,
+      artifactId: owner.artifactId,
+      revision: owner.revision,
+      contentHash: owner.contentHash
+    },
+    statementId: target.statementId,
+    spanId: target.spanId,
+    evidenceId: target.evidenceId,
+    provider: target.provider,
+    sessionId: target.sessionId,
+    role: target.role,
+    authorKind: target.authorKind,
+    messageKey: target.messageKey,
+    messageLocatorId: target.messageLocatorId,
+    content: target.content,
+    utf16Start: target.utf16Start,
+    utf16End: target.utf16End,
+    messages: target.messages,
+    omittedBefore: target.omittedBefore,
+    omittedAfter: target.omittedAfter
+  };
+});
+
 ipcMain.handle("desktop:choose-directory", async () => {
   const options: OpenDialogOptions = {
     properties: ["openDirectory", "createDirectory"]
@@ -464,13 +900,20 @@ async function startDailyReviewForDate(
   if (activeRun && activeRun.logicalDate !== logicalDate) throw new Error("另一天的工作脉络正在准备，请稍后再试。");
   const existingBoard = notebookView(logicalDate).todayBoard;
   const current = await ensureLoaded();
-  const effective = effectiveTraceinkReviewState(
-    requireTraceinkAssetRepository().snapshot(),
+  const assetStore = requireTraceinkAssetRepository().snapshot();
+  const structured = projectStructuredTodayReview(
+    assetStore,
+    logicalDate,
+    current.workSessionSnapshot.sessions
+  );
+  const legacy = effectiveTraceinkReviewState(
+    assetStore,
     logicalDate,
     current.workSessionSnapshot.sessions,
     existingBoard.mode
   );
-  if (effective.boardMode === "sealed") throw new Error("这一天已经封页，不能重新整理。");
+  const boardMode = effectiveStructuredBoardMode(logicalDate, structured, legacy.boardMode);
+  if (boardMode === "sealed") throw new Error("这一天已经封页，不能重新整理。");
   if (!activeRun) traceinkReviewErrors.delete(logicalDate);
   dailyReviewCoordinator.start({
     logicalDate,
@@ -495,36 +938,96 @@ async function performDailyReviewForDate(
     if (snapshot.date !== logicalDate) throw new Error("工作脉络的 Session 快照日期不匹配。");
     const current = await ensureLoaded();
     const capturedSessions = structuredClone(snapshot.sessions);
-    const scope = traceinkScopeFromSnapshot(snapshot, logicalDate);
     const legacyBoard = notebookStateForDate(notebook, logicalDate, capturedSessions).todayBoard;
     const repository = requireTraceinkAssetRepository();
-    const canonical = effectiveTraceinkReviewState(
-      repository.snapshot(),
+    const assetStore = repository.snapshot();
+    const structured = projectStructuredTodayReview(
+      assetStore,
       logicalDate,
-      capturedSessions,
-      legacyBoard.mode
+      capturedSessions
     );
-    if (canonical.boardMode === "sealed") throw new Error("这一天已经封页，不能重新整理。");
-    await runTraceinkReviewPreparation({
+    const legacy = effectiveTraceinkReviewState(assetStore, logicalDate, capturedSessions, legacyBoard.mode);
+    const boardMode = effectiveStructuredBoardMode(logicalDate, structured, legacy.boardMode);
+    if (boardMode === "sealed") throw new Error("这一天已经封页，不能重新整理。");
+    if (!structuredTodayProducerEnabled && !structured.activeIndex) {
+      const scope = traceinkScopeFromSnapshot(snapshot, logicalDate);
+      await runTraceinkReviewPreparation({
+        logicalDate,
+        mode: legacy.projection.mode,
+        snapshotDate: snapshot.date,
+        evidenceCutoff: scope.evidenceCutoff,
+        sessions: capturedSessions
+      }, {
+        repository,
+        compile({ logicalDate: date, capturedSessions: sessions }) {
+          return compileTraceinkIndex(current.settings, date, sessions, {
+            runner: desktopCliRunner,
+            scope,
+            coverage: structuredClone(snapshot.evidenceCoverage ?? []),
+            timeoutMs: 30 * 60 * 1_000
+          });
+        }
+      });
+      traceinkReviewErrors.delete(logicalDate);
+      return;
+    }
+    const runId = `structured-today-index:${logicalDate}:${snapshot.generatedAt}`;
+    const digestFamilyCount = structuredTodaySessionFamilies(capturedSessions.flatMap((session) =>
+      session.platform === "codex" || session.platform === "claude" ? [session] : []
+    )).length;
+    const progressTotal = digestFamilyCount + 2;
+    setStructuredIndexProgress(logicalDate, {
+      runId,
+      status: "running",
+      stage: "capture-evidence",
+      completed: 0,
+      total: progressTotal,
+      message: `正在冻结 ${digestFamilyCount} 个主会话家族并生成结构化工作脉络。`
+    });
+    await runStructuredTodayIndexPreparation({
       logicalDate,
-      mode: canonical.projection.mode,
-      snapshotDate: snapshot.date,
-      evidenceCutoff: scope.evidenceCutoff,
-      sessions: capturedSessions
-    }, {
+      snapshot,
+      settings: current.settings,
       repository,
-      compile({ logicalDate: date, evidenceCutoff, capturedSessions: sessions }) {
-        return compileTraceinkIndex(current.settings, date, sessions, {
-          runner: desktopCliRunner,
-          scope,
-          coverage: structuredClone(snapshot.evidenceCoverage ?? []),
-          timeoutMs: 30 * 60 * 1_000
+      checkpointer: requireStructuredTodayCheckpointer(),
+      runner: desktopCliRunner,
+      onProgress(progress) {
+        const existing = structuredTodayProgressByDate.get(logicalDate)?.index;
+        const terminalDigest = progress.stage === "digest" &&
+          (progress.status === "ready" || progress.status === "failed" || progress.status === "excluded");
+        const synthesisReady = progress.stage === "index-synthesis" && progress.status === "ready";
+        setStructuredIndexProgress(logicalDate, {
+          runId,
+          status: progress.status === "failed" ? "failed" : "running",
+          stage: progress.stage,
+          completed: Math.min(
+            progressTotal,
+            (existing?.completed ?? 0) + (terminalDigest || synthesisReady ? 1 : 0)
+          ),
+          total: progressTotal
         });
+        void broadcastState();
       }
+    });
+    setStructuredIndexProgress(logicalDate, {
+      runId,
+      status: "ready",
+      stage: "ready",
+      completed: progressTotal,
+      total: progressTotal
     });
     traceinkReviewErrors.delete(logicalDate);
   } catch (error) {
     traceinkReviewErrors.set(logicalDate, boundedTraceinkError(error));
+    const existing = structuredTodayProgressByDate.get(logicalDate)?.index;
+    setStructuredIndexProgress(logicalDate, {
+      runId: existing?.runId ?? `structured-today-index:${logicalDate}:failed`,
+      status: "failed",
+      stage: "failed",
+      completed: existing?.completed ?? 0,
+      total: existing?.total ?? 0,
+      message: boundedTraceinkError(error)
+    });
     throw error;
   }
 }
@@ -658,12 +1161,15 @@ async function refreshSnapshot(
   const cached = readCachedSessionSummaries(summaryCache, date, snapshot.sessions, summaryModels);
   const cachedSnapshot = { ...snapshot, sessions: mergeSessionSummaries(snapshot.sessions, cached.summaries) };
   const legacyBoardMode = notebookStateForDate(notebook, date, cachedSnapshot.sessions).todayBoard.mode;
-  const reviewMode = effectiveTraceinkReviewState(
-    requireTraceinkAssetRepository().snapshot(),
+  const assetStore = requireTraceinkAssetRepository().snapshot();
+  const structuredReview = projectStructuredTodayReview(assetStore, date, cachedSnapshot.sessions);
+  const legacyReviewMode = effectiveTraceinkReviewState(
+    assetStore,
     date,
     cachedSnapshot.sessions,
     legacyBoardMode
   ).boardMode;
+  const reviewMode = effectiveStructuredBoardMode(date, structuredReview, legacyReviewMode);
   if (options.publish !== false) {
     data = normalizeData(setWorkSessionSnapshot(current, cachedSnapshot));
     await persistStore(data);
@@ -789,18 +1295,53 @@ async function buildState(): Promise<DesktopState> {
     findActivityDates(current.settings.sessionScanRoots, current.settings.enabledSessionProviders),
     loadDailySessionActivity(requestDate, current.workSessionSnapshot.sessions)
   ]);
+  const assetStore = requireTraceinkAssetRepository().snapshot();
   const activityDates = Array.from(new Set([
     ...providerActivityDates,
     ...notebook.notes.map((note) => note.logicalDate),
     ...Object.keys(notebook.pages),
-    ...traceinkActivityDates(requireTraceinkAssetRepository().snapshot())
+    ...traceinkActivityDates(assetStore)
   ])).sort((a, b) => b.localeCompare(a)).slice(0, 70);
   const notebookState = notebookStateForDate(notebook, requestDate, current.workSessionSnapshot.sessions);
   const traceinkState = effectiveTraceinkReviewState(
-    requireTraceinkAssetRepository().snapshot(),
+    assetStore,
     requestDate,
     current.workSessionSnapshot.sessions,
     notebookState.todayBoard.mode
+  );
+  const structuredTodayReview = projectStructuredTodayReview(
+    assetStore,
+    requestDate,
+    current.workSessionSnapshot.sessions
+  );
+  const structuredTodayV2Index = messageSpanCandidateEnabled
+    ? latestStructuredTodayIndexV2Candidate(assetStore, requestDate)
+    : undefined;
+  const structuredTodayV2Dossiers = structuredTodayV2Index
+    ? (assetStore.structuredDossierV2Candidates ?? []).filter((dossier) =>
+        dossier.sourceIndex.artifactId === structuredTodayV2Index.artifactId &&
+        dossier.sourceIndex.revision === structuredTodayV2Index.revision &&
+        dossier.sourceIndex.contentHash === structuredTodayV2Index.contentHash
+      )
+    : [];
+  const structuredTodayV2Issues = structuredTodayV2Index
+    ? [
+        structuredTodayV2Index.worklines.length > 0 ? "" : "候选没有生成可读取的工作线。",
+        structuredTodayV2Index.coverage.failed ? `${structuredTodayV2Index.coverage.failed} 个 Session 处理失败。` : "",
+        structuredTodayV2Index.coverage.unresolved ? `${structuredTodayV2Index.coverage.unresolved} 个 Session 尚未归入工作线。` : ""
+      ].filter(Boolean)
+    : [];
+  const structuredTodayV2Status = !structuredTodayV2Index
+    ? "empty" as const
+    : structuredTodayV2Index.coverage.failed > 0 || structuredTodayV2Index.worklines.length === 0
+      ? "failed" as const
+      : structuredTodayV2Index.coverage.unresolved > 0 || !structuredTodayV2Index.coverage.complete
+        ? "partial" as const
+        : "complete" as const;
+  const effectiveBoardMode = effectiveStructuredBoardMode(
+    requestDate,
+    structuredTodayReview,
+    traceinkState.boardMode
   );
   const traceinkReviewError = traceinkReviewErrors.get(requestDate);
   const reviewPreparation = exposeTraceinkFailure(deriveDailyReviewPreparationState({
@@ -808,11 +1349,11 @@ async function buildState(): Promise<DesktopState> {
     time: current.settings.dailyReviewScheduleTime,
     logicalDate: requestDate,
     today: localDateString(),
-    boardMode: traceinkState.boardMode,
+    boardMode: effectiveBoardMode,
     sessionCount: current.workSessionSnapshot.sessions.length,
     ...(traceinkReviewError ? { compilationError: traceinkReviewError } : {}),
     ...(dailyReviewCoordinator.activeRun ? { activeRun: dailyReviewCoordinator.activeRun } : {})
-  }), traceinkReviewError, traceinkState.boardMode);
+  }), traceinkReviewError, effectiveBoardMode);
   return {
     data: current,
     activeDate: requestDate,
@@ -823,6 +1364,19 @@ async function buildState(): Promise<DesktopState> {
     activity,
     summaryJob,
     traceinkReview: traceinkState.projection,
+    structuredTodayReview,
+    structuredTodayV2Candidate: {
+      enabled: messageSpanCandidateEnabled,
+      ...(structuredTodayV2Index ? { index: structuredTodayV2Index } : {}),
+      dossiers: structuredTodayV2Dossiers,
+      status: structuredTodayV2Status,
+      issues: structuredTodayV2Issues
+    },
+    structuredTodayProgress: projectStructuredTodayProgress(
+      requestDate,
+      assetStore.structuredRuns ?? [],
+      structuredTodayProgressByDate.get(requestDate) ?? { dossierByWorklineId: {} }
+    ),
     ...(traceinkReviewError ? { traceinkReviewError } : {}),
     reviewPreparation
   };
@@ -851,24 +1405,27 @@ async function evaluateAutomaticDailyReview(now = new Date()): Promise<void> {
       publish: activeDate === logicalDate
     });
     const legacyBoard = notebookStateForDate(notebook, logicalDate, snapshot.sessions).todayBoard;
-    const reviewState = effectiveTraceinkReviewState(
-      requireTraceinkAssetRepository().snapshot(),
+    const assetStore = requireTraceinkAssetRepository().snapshot();
+    const structuredReview = projectStructuredTodayReview(assetStore, logicalDate, snapshot.sessions);
+    const legacyReview = effectiveTraceinkReviewState(
+      assetStore,
       logicalDate,
       snapshot.sessions,
       legacyBoard.mode
     );
+    const boardMode = effectiveStructuredBoardMode(logicalDate, structuredReview, legacyReview.boardMode);
     if (!shouldStartAutomaticDailyReview({
       enabled: current.settings.dailyReviewScheduleEnabled,
       time: current.settings.dailyReviewScheduleTime,
       logicalDate,
       now,
       sessionCount: snapshot.sessions.length,
-      boardMode: automaticTraceinkEligibilityMode(reviewState.boardMode),
+      boardMode: automaticTraceinkEligibilityMode(boardMode),
       hasFailure: Boolean(traceinkReviewErrors.get(logicalDate)),
       inFlight: Boolean(dailyReviewCoordinator.activeRun),
       attempted: dailyReviewCoordinator.hasScheduledAttempt(logicalDate)
     })) return;
-    await startDailyReviewForDate(logicalDate, reviewState.boardMode === "raw" ? "compile" : "refresh", "scheduled", snapshot);
+    await startDailyReviewForDate(logicalDate, boardMode === "raw" ? "compile" : "refresh", "scheduled", snapshot);
   } catch {
     // A local scan failure leaves Today usable and will be retried at the next scheduler tick.
   } finally {
@@ -879,6 +1436,71 @@ async function evaluateAutomaticDailyReview(now = new Date()): Promise<void> {
 function requireTraceinkAssetRepository(): TraceinkAssetRepository {
   if (!traceinkAssetRepository) throw new Error("Traceink 资产仓库尚未加载。");
   return traceinkAssetRepository;
+}
+
+function requireStructuredTodayCheckpointer(): NodeSqliteSaver {
+  structuredTodayCheckpointer ??= NodeSqliteSaver.fromConnectionString(
+    path.join(app.getPath("userData"), structuredTodayCheckpointFileName)
+  );
+  return structuredTodayCheckpointer;
+}
+
+function setStructuredIndexProgress(logicalDate: string, progress: StructuredTodayRunProgress): void {
+  const current = structuredTodayProgressByDate.get(logicalDate) ?? { dossierByWorklineId: {} };
+  structuredTodayProgressByDate.set(logicalDate, {
+    ...current,
+    index: progress,
+    dossierByWorklineId: current.dossierByWorklineId
+  });
+}
+
+function setStructuredDossierProgress(
+  logicalDate: string,
+  worklineId: string,
+  progress: StructuredTodayRunProgress
+): void {
+  const current = structuredTodayProgressByDate.get(logicalDate) ?? { dossierByWorklineId: {} };
+  structuredTodayProgressByDate.set(logicalDate, {
+    ...current,
+    dossierByWorklineId: {
+      ...current.dossierByWorklineId,
+      [worklineId]: progress
+    }
+  });
+}
+
+function setStructuredProposalProgress(
+  logicalDate: string,
+  worklineId: string,
+  progress: StructuredTodayRunProgress
+): void {
+  const current = structuredTodayProgressByDate.get(logicalDate) ?? { dossierByWorklineId: {} };
+  structuredTodayProgressByDate.set(logicalDate, {
+    ...current,
+    dossierByWorklineId: current.dossierByWorklineId,
+    proposalByWorklineId: {
+      ...(current.proposalByWorklineId ?? {}),
+      [worklineId]: progress
+    }
+  });
+}
+
+function sameStructuredTodayReference(
+  left: StructuredTodayIndexReferenceV1,
+  right: StructuredTodayIndexReferenceV1
+): boolean {
+  return left.artifactId === right?.artifactId &&
+    left.revision === right?.revision &&
+    left.contentHash === right?.contentHash;
+}
+
+function effectiveStructuredBoardMode(
+  logicalDate: string,
+  structured: StructuredTodayReviewProjection,
+  fallback: TodayBoardMode
+): TodayBoardMode {
+  if (fallback === "sealed" && notebook.pages[logicalDate]?.structuredCloseout) return "sealed";
+  return structured.activeIndex ? structured.mode : fallback;
 }
 
 function sessionsForTraceinkArtifact(index: TraceinkIndexArtifactV1, current: AgentWorkSession[]): AgentWorkSession[] {
@@ -1148,7 +1770,21 @@ async function loadSessionTranscript(request: SessionTranscriptRequest): Promise
     sessionId: target.id,
     title: target.title,
     path: target.path,
-    truncated: source.truncated
+    truncated: source.truncated,
+    userAuthorKind: sessionUserAuthorKind(
+      current.workSessionSnapshot.sessions.find((session) =>
+        session.id === target.id && session.platform === target.platform && session.path === target.path
+      ) ?? {
+        id: target.id,
+        platform: target.platform,
+        path: target.path,
+        title: target.title,
+        summary: "",
+        updatedAt: "",
+        artifacts: [],
+        status: "unknown"
+      }
+    )
   });
 }
 

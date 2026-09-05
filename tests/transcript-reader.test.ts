@@ -26,3 +26,48 @@ test("Claude transcript reader supports nested text content", () => {
   const transcript = parseSessionTranscript({ content, platform: "claude", sessionId: "session", title: "Claude 会话", path: "/tmp/session.jsonl" });
   assert.deepEqual(transcript.messages.map((message) => message.content), ["阅读 Claude 会话", "正文已经提取。"]);
 });
+
+test("transcript reader carries host-attested user authority for primary and subagent Sessions", () => {
+  const content = JSON.stringify({
+    type: "response_item",
+    payload: { type: "message", id: "u1", role: "user", content: [{ type: "input_text", text: "规划下一步" }] }
+  });
+  const primary = parseSessionTranscript({ content, platform: "codex", sessionId: "root", title: "root", path: "/tmp/root", userAuthorKind: "human" });
+  const subagent = parseSessionTranscript({ content, platform: "codex", sessionId: "child", title: "child", path: "/tmp/child", userAuthorKind: "agent" });
+  assert.equal(primary.messages[0]?.authorKind, "human");
+  assert.equal(subagent.messages[0]?.authorKind, "agent");
+});
+
+test("transcript reader derives Agent activity from provider task and tool windows", () => {
+  const codex = parseSessionTranscript({
+    content: [
+      JSON.stringify({ timestamp: "2026-08-31T01:00:00.000Z", type: "response_item", payload: { type: "custom_tool_call", call_id: "call-1", name: "exec" } }),
+      JSON.stringify({ timestamp: "2026-08-31T01:03:00.000Z", type: "response_item", payload: { type: "custom_tool_call_output", call_id: "call-1", output: "ok" } }),
+      JSON.stringify({ timestamp: "2026-08-31T01:05:00.000Z", type: "event_msg", payload: { type: "task_complete", started_at: "2026-08-31T00:59:00.000Z", completed_at: "2026-08-31T01:05:00.000Z" } })
+    ].join("\n"),
+    platform: "codex",
+    sessionId: "codex-window",
+    title: "Codex window",
+    path: "/tmp/codex-window"
+  });
+  assert.deepEqual(codex.activityWindows, [
+    { id: "codex-tool-call-1", start: "2026-08-31T01:00:00.000Z", end: "2026-08-31T01:03:00.000Z", basis: "tool-execution" },
+    { id: "codex-task-2", start: "2026-08-31T00:59:00.000Z", end: "2026-08-31T01:05:00.000Z", basis: "provider-task" }
+  ]);
+
+  const claude = parseSessionTranscript({
+    content: [
+      JSON.stringify({ type: "assistant", timestamp: "2026-08-31T02:00:00.000Z", message: { role: "assistant", content: [{ type: "tool_use", id: "tool-1", name: "Bash" }] } }),
+      JSON.stringify({ type: "user", timestamp: "2026-08-31T02:02:00.000Z", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tool-1", content: "ok" }] } }),
+      JSON.stringify({ type: "system", subtype: "turn_duration", durationMs: 180_000, timestamp: "2026-08-31T02:03:00.000Z" })
+    ].join("\n"),
+    platform: "claude",
+    sessionId: "claude-window",
+    title: "Claude window",
+    path: "/tmp/claude-window"
+  });
+  assert.deepEqual(claude.activityWindows, [
+    { id: "claude-tool-tool-1", start: "2026-08-31T02:00:00.000Z", end: "2026-08-31T02:02:00.000Z", basis: "tool-execution" },
+    { id: "claude-turn-2", start: "2026-08-31T02:00:00.000Z", end: "2026-08-31T02:03:00.000Z", basis: "provider-task" }
+  ]);
+});

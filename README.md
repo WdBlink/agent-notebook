@@ -43,13 +43,13 @@ The primary product is a standalone macOS app. It does not require Obsidian and 
 
 ## macOS Install
 
-Work Continuity v0.7.0 ships a DMG and ZIP for each current Mac architecture:
+Work Continuity v0.7.1 ships a DMG and ZIP for each current Mac architecture:
 
 ```text
-dist/macos/Work Continuity-0.7.0-macos-arm64.dmg
-dist/macos/Work Continuity-0.7.0-macos-arm64.zip
-dist/macos/Work Continuity-0.7.0-macos-x64.dmg
-dist/macos/Work Continuity-0.7.0-macos-x64.zip
+dist/macos/Work Continuity-0.7.1-macos-arm64.dmg
+dist/macos/Work Continuity-0.7.1-macos-arm64.zip
+dist/macos/Work Continuity-0.7.1-macos-x64.dmg
+dist/macos/Work Continuity-0.7.1-macos-x64.zip
 ```
 
 Use `arm64` on Apple Silicon and `x64` on Intel. The DMG is the normal install path; the ZIP is a fallback archive of the same app bundle.
@@ -63,10 +63,10 @@ These initial builds are unsigned and not notarized. On first launch, macOS may 
 3. Optionally set **每日自动准备工作脉络** to one local time. It is off by default and runs only while the app remains open.
 4. Choose an uncompiled date. Its Today Board starts in **raw** and shows independent Session lanes plus only activity that can be supported by timestamps and authorship.
 5. Choose **现在整理** when you want to start immediately, or let the configured daily time start the same preparation path. The board remains readable while preparation runs.
-6. In **compiled**, scan the cross-Session workline board. Expand source Sessions or open one evidence dossier at a time.
-7. If later evidence arrives, the day becomes **stale**. The previous generation stays readable while new evidence is listed separately; choose **更新工作脉络** only when you want a new generation.
-8. Read the dossier, reopen evidence, and choose **看完了，开始思考** when you are ready to write. The reflection field starts blank and preserves your original words.
-9. Choose **今日收口**, review the exact active generation and your writing, select any continuation bookmarks, and seal. Historical sealed dates reopen without another model call.
+6. In **compiled**, scan the cross-Session workline board. Expand stored Session membership without another model call, use citation chips to open the exact read-only Session, or request one evidence dossier at a time.
+7. If later evidence arrives, the day becomes **stale**. The previous structured index stays readable while new evidence is listed separately; choose **更新工作脉络** only when you want a new revision.
+8. Read the dossier at its document reading scale. The reflection field starts blank and preserves your original words in local Work Continuity data. After save, you may arrange five proposal categories; accept, dismiss, defer, and rewrite record a local disposition only and never write Wiki/CTX/project files, create reports, or start Agent work.
+9. Review the exact active index, opened dossiers, your writing, proposal dispositions, and any continuation bookmarks, then choose **收笔并封存**. Historical sealed dates reopen without another model call.
 
 Resume actions copy a verified command. Work Continuity never executes that command automatically.
 
@@ -75,15 +75,15 @@ Resume actions copy a verified command. Work Continuity never executes that comm
 | State | What you see | What changes it |
 | --- | --- | --- |
 | **raw** | Independent Session lanes and observed activity; they remain usable during preparation | **现在整理** or the configured local preparation time |
-| **compiled** | A Traceink workline package covering the current evidence cutoff | New evidence or an explicit seal |
-| **stale** | The prior package plus a separate list of uncompiled evidence | An explicit refresh request |
-| **sealed** | The selected package generation, evidence links, human reflection, and bookmarks as read-only history | Nothing; the day is immutable |
+| **compiled** | A structured workline index with stored Session membership and any requested dossiers | New evidence or an explicit seal |
+| **stale** | The prior structured index plus a separate list of uncompiled evidence | An explicit refresh request |
+| **sealed** | The pinned index, opened dossiers, reflection, proposal dispositions, and bookmarks as read-only history | Nothing; the day is immutable |
 
-Preparation runs through one enabled provider per attempt and never silently repeats the entire day through a second provider. Failures remain visible and retryable without replacing raw Sessions or the last readable generation. A reflection save or seal request is rejected if its generation is no longer active.
+Preparation freezes one per-node provider/model plan and never silently switches a failed node to an undeclared fallback. Failures remain visible and retryable without replacing raw Sessions or the last readable index. A reflection save or seal request is rejected if its index revision is no longer active.
 
 ## Historical Assets and Legacy Compatibility
 
-The local notebook store preserves review package generations, admitted evidence references, per-workline human reflection, continuation bookmarks, and sealed pages. This lets a historical day replay the material that was actually reviewed rather than silently recompiling against newer Sessions or a newer prompt.
+The local stores preserve structured index/dossier revisions, admitted evidence references, per-workline human reflection, proposal dispositions, continuation bookmarks, and sealed pages. This lets a historical day replay the material that was actually reviewed rather than silently recompiling against newer Sessions or a newer workflow.
 
 The store also continues to normalize legacy v0.5 note records and delivery receipts. Those records and the explicit Wiki/CTX delivery APIs remain compatibility data; note capture and delivery are no longer the primary Today workflow in v0.6.x.
 
@@ -110,6 +110,16 @@ npm run dist:macos
 
 ## Verification
 
+Checkpoint recovery data is temporary: successful tasks are cleaned up, and inactive failed/interrupted tasks expire 24 hours after their last activity. Saved Today pages, reflections, and decisions are retained. Expired tasks restart preparation rather than resuming old model outputs. Message-level preview is development-only and disabled in packaged apps.
+
+To physically reclaim a legacy oversized checkpoint database, quit Work Continuity and run from the source checkout after `npm ci`:
+
+```bash
+node --import tsx scripts/maintain-checkpoints.mjs "$HOME/Library/Application Support/Work Continuity" --apply
+```
+
+This offline command refuses an open database, preserves a compressed `checkpoint-recovery-*` copy in the app data directory, removes expired/completed recovery state, compacts SQLite, and checks saved artifact bytes. The recovery copy can be removed after verifying historical pages. Provider transcript stores are untouched.
+
 ```bash
 npm run lint
 npm test
@@ -121,13 +131,15 @@ The Node unit/integration suite covers Session parsing, evidence-bounded activit
 
 Release archives have an additional bundle, version, architecture, checksum, and product-surface verifier. See [TESTING.md](TESTING.md) for the four archive-specific commands.
 
-## KSI-Informed Traceink Compiler
+## Structured Today Workflow
 
 Traceink uses the versioned `traceink-review-v1` prompt profile as an evidence-led editorial contract. It groups by shared intent and changing state rather than Session title, removes repetitive tool chatter while retaining failed paths and route changes, cites admitted evidence, separates fact from inference, preserves disagreement and scope, and describes only possible changes with falsifiable future observations.
 
-The compiler may prepare basis evidence, but it cannot manufacture commitment. It is forbidden from claiming that the person decided, approved, adopted, delegated, migrated, authorized, or sealed anything. Generated semantic blocks remain extensible. Work Continuity requests a strict CLI result envelope and locally validates it; when a provider exhibits the known brace-free YAML transport defect, the app can recover only that narrow syntax without rewriting semantic values. Evidence membership, provenance, replay-safe generations, explicit actions, and sealed immutability remain mechanically enforced.
+The workflow may prepare basis evidence, but it cannot manufacture commitment. It is forbidden from claiming that the person decided, approved, adopted, delegated, migrated, authorized, or sealed anything. Generated semantic blocks remain extensible. Evidence membership, provenance, replay-safe revisions, explicit actions, and sealed immutability remain mechanically enforced.
 
-Compilation runs through one installed provider CLI in read-only, ephemeral mode and can read the verified Codex and Claude evidence manifest together. Product-owned Codex model and reasoning settings are isolated from interactive user configuration so they remain a compatible pair. Each manual or scheduled attempt uses one enabled provider only; a failure never silently repeats the full day through another provider or falls back to a thin summary. The default review models inherit the inexpensive smart-title defaults. Override them with `WORK_CONTINUITY_CODEX_REVIEW_MODEL` or `WORK_CONTINUITY_CLAUDE_REVIEW_MODEL`.
+The default Today producer is a bounded LangGraph workflow. It digests each main Session family through its source provider with bounded concurrency, includes child-Agent records as family evidence, synthesizes a typed workline index, reveals stored Session membership without another model call, and runs analysis → independent critique → composition only for a selected workline. Every run freezes one provider/model plan; failures never trigger an undeclared provider fallback. Provider-specific JSON Schema dialects are adapted at the CLI boundary, while dynamic enums require exact admitted Session and evidence IDs before local validation.
+
+The default structured Today models are `gpt-5.6-luna` for Codex nodes and `fable` for Claude nodes. Override them with `WORK_CONTINUITY_TODAY_CODEX_MODEL` and `WORK_CONTINUITY_TODAY_CLAUDE_MODEL`; the existing `WORK_CONTINUITY_CODEX_REVIEW_MODEL` and `WORK_CONTINUITY_CLAUDE_REVIEW_MODEL` remain lower-priority compatibility overrides. Set `WORK_CONTINUITY_STRUCTURED_TODAY=0` only to use the preserved legacy Traceink producer.
 
 ## Local Model / Smart Session Titles
 

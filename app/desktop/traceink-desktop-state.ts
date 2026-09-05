@@ -33,7 +33,10 @@ export function effectiveTraceinkReviewState(
 export function traceinkActivityDates(store: TraceinkAssetStoreDocumentV1): string[] {
   return Array.from(new Set([
     ...Object.keys(store.activeIndexByDate),
+    ...Object.keys(store.activeStructuredIndexByDate ?? {}),
     ...store.artifacts.map((artifact) => artifact.logicalDate),
+    ...(store.structuredIndexes ?? []).map((artifact) => artifact.logicalDate),
+    ...(store.structuredDossiers ?? []).map((artifact) => artifact.logicalDate),
     ...store.reflections.map((reflection) => reflection.logicalDate)
   ])).sort((left, right) => right.localeCompare(left));
 }

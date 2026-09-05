@@ -4,19 +4,22 @@ import { projectDailySessionActivity } from "../src/session-activity";
 import { parseSessionTranscript } from "../app/desktop/transcript-reader";
 import type { AgentWorkSession } from "../src/types";
 
-// Break protected: pairing an assistant response with anything other than the
-// preceding timestamped user intervention would invent an Agent activity window.
-test("projects provider-native Codex and Claude messages into user pulses and observed response windows", () => {
+// Break protected: protocol user/assistant adjacency is not an activity clock;
+// only provider-owned task/item/tool windows may contribute duration.
+test("projects host-classified human pulses and provider-owned activity windows", () => {
   const codex = parseSessionTranscript({
     platform: "codex",
     sessionId: "codex-a",
     title: "Codex lane",
     path: "/tmp/codex-a.jsonl",
+    userAuthorKind: "human",
     content: [
       JSON.stringify({ timestamp: "2026-08-09T09:00:00+08:00", type: "response_item", payload: { type: "message", id: "cu1", role: "user", content: [{ type: "input_text", text: "implement lanes" }] } }),
       JSON.stringify({ timestamp: "2026-08-09T09:12:00+08:00", type: "response_item", payload: { type: "message", id: "ca1", role: "assistant", content: [{ type: "output_text", text: "implemented" }] } }),
+      JSON.stringify({ timestamp: "2026-08-09T09:12:00+08:00", type: "event_msg", payload: { type: "task_complete", started_at: "2026-08-09T09:00:00+08:00", completed_at: "2026-08-09T09:12:00+08:00" } }),
       JSON.stringify({ timestamp: "2026-08-09T09:30:00+08:00", type: "response_item", payload: { type: "message", id: "cu2", role: "user", content: [{ type: "input_text", text: "add coverage" }] } }),
-      JSON.stringify({ timestamp: "2026-08-09T09:35:00+08:00", type: "response_item", payload: { type: "message", id: "ca2", role: "assistant", content: [{ type: "output_text", text: "covered" }] } })
+      JSON.stringify({ timestamp: "2026-08-09T09:35:00+08:00", type: "response_item", payload: { type: "message", id: "ca2", role: "assistant", content: [{ type: "output_text", text: "covered" }] } }),
+      JSON.stringify({ timestamp: "2026-08-09T09:35:00+08:00", type: "event_msg", payload: { type: "task_complete", started_at: "2026-08-09T09:30:00+08:00", completed_at: "2026-08-09T09:35:00+08:00" } })
     ].join("\n")
   });
   const claude = parseSessionTranscript({
@@ -24,9 +27,11 @@ test("projects provider-native Codex and Claude messages into user pulses and ob
     sessionId: "claude-b",
     title: "Claude lane",
     path: "/tmp/claude-b.jsonl",
+    userAuthorKind: "human",
     content: [
       JSON.stringify({ type: "user", uuid: "au1", timestamp: "2026-08-09T09:05:00+08:00", message: { role: "user", content: "review activity" } }),
-      JSON.stringify({ type: "assistant", uuid: "aa1", timestamp: "2026-08-09T09:20:00+08:00", message: { role: "assistant", content: [{ type: "text", text: "reviewed" }] } })
+      JSON.stringify({ type: "assistant", uuid: "aa1", timestamp: "2026-08-09T09:20:00+08:00", message: { role: "assistant", content: [{ type: "text", text: "reviewed" }] } }),
+      JSON.stringify({ type: "system", subtype: "turn_duration", durationMs: 15 * 60_000, timestamp: "2026-08-09T09:20:00+08:00" })
     ].join("\n")
   });
 
@@ -41,8 +46,8 @@ test("projects provider-native Codex and Claude messages into user pulses and ob
     "2026-08-09T09:30:00+08:00"
   ]);
   assert.deepEqual(activity.lanes[0]?.agentActivityWindows.map((window) => [window.start, window.end, window.durationMs, window.basis, window.coverage]), [
-    ["2026-08-09T09:00:00+08:00", "2026-08-09T09:12:00+08:00", 12 * 60_000, "timestamped-user-to-assistant", "observed"],
-    ["2026-08-09T09:30:00+08:00", "2026-08-09T09:35:00+08:00", 5 * 60_000, "timestamped-user-to-assistant", "observed"]
+    ["2026-08-09T01:00:00.000Z", "2026-08-09T01:12:00.000Z", 12 * 60_000, "provider-task", "observed"],
+    ["2026-08-09T01:30:00.000Z", "2026-08-09T01:35:00.000Z", 5 * 60_000, "provider-task", "observed"]
   ]);
   assert.deepEqual(activity.facts, {
     userInterventionCount: 3,
@@ -52,9 +57,9 @@ test("projects provider-native Codex and Claude messages into user pulses and ob
     contextSwitchCount: 2,
     confidence: "observed",
     basis: {
-      userInterventions: "timestamped-user-messages",
-      agentActivity: "union-of-timestamped-user-to-assistant-response-windows",
-      concurrency: "overlap-of-observed-agent-response-windows",
+      userInterventions: "host-classified-human-main-session-messages",
+      agentActivity: "union-of-provider-events-and-tool-windows",
+      concurrency: "overlap-of-provider-activity-windows",
       contextSwitches: "chronological-timestamped-user-session-transitions"
     }
   });
@@ -83,6 +88,40 @@ test("marks missing and reversed transcript timestamps uncertain without inventi
   assert.equal(activity.facts.confidence, "uncertain");
 });
 
+test("does not count child-Agent or unclassified protocol user messages as human interactions", () => {
+  const childTranscript = parseSessionTranscript({
+    platform: "codex",
+    sessionId: "child",
+    title: "Child",
+    path: "/tmp/child.jsonl",
+    userAuthorKind: "agent",
+    content: JSON.stringify({
+      timestamp: "2026-08-09T10:00:00+08:00",
+      type: "response_item",
+      payload: { type: "message", id: "child-user", role: "user", content: [{ type: "input_text", text: "delegated task" }] }
+    })
+  });
+  const child = source("child", "codex", childTranscript);
+  child.session.lineage = { origin: "subagent", parentSessionId: "root" };
+  const unknown = source("unknown", "codex", parseSessionTranscript({
+    platform: "codex",
+    sessionId: "unknown",
+    title: "Unknown",
+    path: "/tmp/unknown.jsonl",
+    content: JSON.stringify({
+      timestamp: "2026-08-09T10:05:00+08:00",
+      type: "response_item",
+      payload: { type: "message", id: "unknown-user", role: "user", content: [{ type: "input_text", text: "unclassified" }] }
+    })
+  }));
+  const activity = projectDailySessionActivity({
+    logicalDate: "2026-08-09",
+    timeZone: "Asia/Shanghai",
+    sessions: [child, unknown]
+  });
+  assert.equal(activity.facts.userInterventionCount, 0);
+});
+
 // Break protected: an active Session must remain an operational signal, not a
 // fabricated continuous attention or Agent-progress interval.
 test("keeps a running Session operationally visible while preserving a point intervention", () => {
@@ -91,7 +130,7 @@ test("keeps a running Session operationally visible while preserving a point int
     timeZone: "Asia/Shanghai",
     sessions: [source("running", "codex", {
       sessionId: "running", platform: "codex", title: "Running", path: "/tmp/running.jsonl", omittedToolEvents: 0, truncated: false,
-      messages: [{ id: "u", role: "user", content: "keep going", timestamp: "2026-08-09T14:00:00+08:00" }]
+      messages: [{ id: "u", role: "user", authorKind: "human", content: "keep going", timestamp: "2026-08-09T14:00:00+08:00" }]
     }, "active")]
   });
 
@@ -102,7 +141,7 @@ test("keeps a running Session operationally visible while preserving a point int
     path: "/tmp/running.jsonl",
     operationalState: "running",
     confidence: "observed",
-    timeRange: { start: "2026-08-09T14:00:00+08:00", end: "2026-08-09T14:00:00+08:00" },
+    timeRange: { start: "2026-08-09T06:00:00.000Z", end: "2026-08-09T06:00:00.000Z" },
     userInterventions: [{ id: "u", timestamp: "2026-08-09T14:00:00+08:00" }],
     agentActivityWindows: [],
     warnings: []
@@ -152,7 +191,7 @@ function source(
   platform: "codex" | "claude",
   transcript: ReturnType<typeof parseSessionTranscript>,
   status: AgentWorkSession["status"] = "completed"
-) {
+): { session: AgentWorkSession; transcript: ReturnType<typeof parseSessionTranscript> } {
   return {
     session: {
       id,
@@ -162,7 +201,8 @@ function source(
       path: transcript.path,
       updatedAt: "2026-08-09T15:00:00+08:00",
       artifacts: [],
-      status
+      status,
+      lineage: { origin: "primary" }
     } satisfies AgentWorkSession,
     transcript
   };

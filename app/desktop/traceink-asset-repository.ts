@@ -143,7 +143,16 @@ function strictNormalizeDocument(value: unknown): TraceinkAssetStoreDocumentV1 {
     !Array.isArray(raw.artifacts) ||
     !Array.isArray(raw.reflections) ||
     (raw.proposalDispositions !== undefined && !Array.isArray(raw.proposalDispositions)) ||
-    !isRecord(raw.activeIndexByDate)
+    !isRecord(raw.activeIndexByDate) ||
+    (raw.structuredIndexes !== undefined && !Array.isArray(raw.structuredIndexes)) ||
+    (raw.structuredIndexV2Candidates !== undefined && !Array.isArray(raw.structuredIndexV2Candidates)) ||
+    (raw.structuredDossierV2Candidates !== undefined && !Array.isArray(raw.structuredDossierV2Candidates)) ||
+    (raw.structuredDossiers !== undefined && !Array.isArray(raw.structuredDossiers)) ||
+    (raw.activeStructuredIndexByDate !== undefined && !isRecord(raw.activeStructuredIndexByDate)) ||
+    (raw.structuredReflections !== undefined && !Array.isArray(raw.structuredReflections)) ||
+    (raw.structuredProposals !== undefined && !Array.isArray(raw.structuredProposals)) ||
+    (raw.structuredProposalDispositions !== undefined && !Array.isArray(raw.structuredProposalDispositions)) ||
+    (raw.structuredRuns !== undefined && !Array.isArray(raw.structuredRuns))
   ) {
     throw new Error("Traceink asset store envelope is invalid.");
   }
@@ -153,7 +162,25 @@ function strictNormalizeDocument(value: unknown): TraceinkAssetStoreDocumentV1 {
     normalized.reflections.length !== raw.reflections.length ||
     (Array.isArray(raw.proposalDispositions) &&
       (normalized.proposalDispositions?.length ?? 0) !== raw.proposalDispositions.length) ||
-    Object.keys(normalized.activeIndexByDate).length !== Object.keys(raw.activeIndexByDate).length
+    Object.keys(normalized.activeIndexByDate).length !== Object.keys(raw.activeIndexByDate).length ||
+    (Array.isArray(raw.structuredIndexes) &&
+      (normalized.structuredIndexes?.length ?? 0) !== raw.structuredIndexes.length) ||
+    (Array.isArray(raw.structuredIndexV2Candidates) &&
+      (normalized.structuredIndexV2Candidates?.length ?? 0) !== raw.structuredIndexV2Candidates.length) ||
+    (Array.isArray(raw.structuredDossierV2Candidates) &&
+      (normalized.structuredDossierV2Candidates?.length ?? 0) !== raw.structuredDossierV2Candidates.length) ||
+    (Array.isArray(raw.structuredDossiers) &&
+      (normalized.structuredDossiers?.length ?? 0) !== raw.structuredDossiers.length) ||
+    (isRecord(raw.activeStructuredIndexByDate) &&
+      Object.keys(normalized.activeStructuredIndexByDate ?? {}).length !== Object.keys(raw.activeStructuredIndexByDate).length) ||
+    (Array.isArray(raw.structuredReflections) &&
+      (normalized.structuredReflections?.length ?? 0) !== raw.structuredReflections.length) ||
+    (Array.isArray(raw.structuredProposals) &&
+      (normalized.structuredProposals?.length ?? 0) !== raw.structuredProposals.length) ||
+    (Array.isArray(raw.structuredProposalDispositions) &&
+      (normalized.structuredProposalDispositions?.length ?? 0) !== raw.structuredProposalDispositions.length) ||
+    (Array.isArray(raw.structuredRuns) &&
+      (normalized.structuredRuns?.length ?? 0) !== raw.structuredRuns.length)
   ) {
     throw new Error("Traceink asset store failed integrity validation.");
   }

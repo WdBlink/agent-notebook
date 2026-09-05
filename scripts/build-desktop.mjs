@@ -20,6 +20,7 @@ const common = {
 };
 
 await fs.mkdir(outdir, { recursive: true });
+await fs.rm(path.join(outdir, "structured-today-spike.js"), { force: true });
 await fs.mkdir(path.join(traceinkOutdir, "references"), { recursive: true });
 await Promise.all([
   fs.copyFile("app/desktop/index.html", path.join(outdir, "index.html")),

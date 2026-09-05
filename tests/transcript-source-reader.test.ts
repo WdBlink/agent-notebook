@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { readBoundedTranscriptSource } from "../app/desktop/transcript-source-reader";
+import { readBoundedTranscriptSource, scanVerifiedTranscriptRecords } from "../app/desktop/transcript-source-reader";
 
 test("sealed transcript guard reads the same regular file identity", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "sealed-transcript-"));
@@ -187,6 +187,103 @@ test("large sealed transcript tail is bounded by the admitted end rather than a 
     assert.equal(source.truncated, true);
     assert.equal(source.content.includes("CAPTURED_END_MARKER"), true);
     assert.equal(source.content.includes("APPENDED_SECRET_SHOULD_NOT_APPEAR"), false);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("verified record scan preserves UTF-8 ranges, CRLF boundaries, and an explicit unterminated tail", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "verified-transcript-records-"));
+  try {
+    const sourcePath = path.join(directory, "session.jsonl");
+    const first = Buffer.from('{"message":"中"}', "utf8");
+    const second = Buffer.from('{"message":"🙂"}', "utf8");
+    const tail = Buffer.from('{"unfinished":', "utf8");
+    const admitted = Buffer.concat([first, Buffer.from("\r\n\n"), second, Buffer.from("\n"), tail]);
+    await fs.writeFile(sourcePath, Buffer.concat([admitted, Buffer.from("APPENDED\n")]));
+    const records: Array<{ ordinal: number; startByte: number; endByte: number; text: string }> = [];
+    const scan = await scanVerifiedTranscriptRecords(sourcePath, {
+      canonicalPath: sourcePath,
+      sha256: createHash("sha256").update(admitted).digest("hex"),
+      byteLength: admitted.byteLength,
+      coverage: { startByte: 0, endByte: admitted.byteLength }
+    }, (record) => {
+      records.push({
+        ordinal: record.ordinal,
+        startByte: record.startByte,
+        endByte: record.endByte,
+        text: Buffer.from(record.bytes).toString("utf8")
+      });
+    });
+
+    assert.deepEqual(records, [
+      { ordinal: 0, startByte: 0, endByte: first.byteLength, text: first.toString("utf8") },
+      {
+        ordinal: 1,
+        startByte: first.byteLength + 3,
+        endByte: first.byteLength + 3 + second.byteLength,
+        text: second.toString("utf8")
+      }
+    ]);
+    assert.deepEqual(scan.unterminatedTail, {
+      startByte: admitted.byteLength - tail.byteLength,
+      endByte: admitted.byteLength
+    });
+    assert.equal(scan.recordCount, 2);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("verified record scan emits nothing before frozen-prefix integrity succeeds", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "verified-transcript-record-integrity-"));
+  try {
+    const sourcePath = path.join(directory, "session.jsonl");
+    const original = Buffer.from('{"message":"original"}\n', "utf8");
+    const changed = Buffer.from('{"message":"mutated!"}\n', "utf8");
+    assert.equal(original.byteLength, changed.byteLength);
+    await fs.writeFile(sourcePath, changed);
+    let emitted = 0;
+    await assert.rejects(scanVerifiedTranscriptRecords(sourcePath, {
+      canonicalPath: sourcePath,
+      sha256: createHash("sha256").update(original).digest("hex"),
+      byteLength: original.byteLength,
+      coverage: { startByte: 0, endByte: original.byteLength }
+    }, () => { emitted += 1; }), /SHA-256|完整性/u);
+    assert.equal(emitted, 0);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("verified record scan keeps record ranges beyond the legacy 24 MiB reading window", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "verified-transcript-large-records-"));
+  try {
+    const sourcePath = path.join(directory, "session.jsonl");
+    const oversized = Buffer.alloc(24 * 1024 * 1024 + 64, 0x78);
+    const marker = Buffer.from('{"message":"after-large-record"}', "utf8");
+    const admitted = Buffer.concat([oversized, Buffer.from("\n"), marker, Buffer.from("\n")]);
+    await fs.writeFile(sourcePath, admitted);
+    const records: Array<{ startByte: number; endByte: number; hash: string }> = [];
+    const scan = await scanVerifiedTranscriptRecords(sourcePath, {
+      canonicalPath: sourcePath,
+      sha256: createHash("sha256").update(admitted).digest("hex"),
+      byteLength: admitted.byteLength,
+      coverage: { startByte: 0, endByte: admitted.byteLength }
+    }, (record) => {
+      records.push({
+        startByte: record.startByte,
+        endByte: record.endByte,
+        hash: createHash("sha256").update(record.bytes).digest("hex")
+      });
+    });
+
+    assert.equal(scan.recordCount, 2);
+    assert.deepEqual(records[1], {
+      startByte: oversized.byteLength + 1,
+      endByte: oversized.byteLength + 1 + marker.byteLength,
+      hash: createHash("sha256").update(marker).digest("hex")
+    });
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

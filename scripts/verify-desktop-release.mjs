@@ -68,14 +68,16 @@ try {
 
   assertMarkers("main process", main, {
     "explicit daily-review preparation": ["desktop:prepare-daily-review"],
-    "Traceink prompt profile": ["traceink-review-v1"],
-    "isolated Traceink compiler invocation": ["--ignore-user-config", "model_reasoning_effort"],
-    "schema-enforced Traceink result transport": ["--output-schema", "traceink-review-output", "valueJson"],
-    "bounded local Traceink transport recovery": ["traceink-local-transport-recovery-v1", "transportComplete"],
+    "canonical Traceink compatibility producer": ["traceink-skill-bundle-v1", "transportComplete", "--ignore-user-config"],
+    "default structured Today producer with rollback switch": ["WORK_CONTINUITY_STRUCTURED_TODAY", "today-workline-index/v1", "structured-today-provider-plan/v1"],
+    "structured Today persistence and selected dossier": ["activeStructuredIndexByDate", "desktop:prepare-structured-today-dossier", "today-workline-dossier/v1"],
+    "structured reflection proposals and sealing": ["desktop:save-structured-today-reflection", "desktop:prepare-structured-today-proposals", "desktop:dispose-structured-today-proposal", "desktop:seal-structured-today-page"],
+    "durable structured progress recovery": ["structuredRuns", "upsertStructuredTodayRun", "interrupted"],
+    "structured workflow checkpointing": ["node:sqlite", "structured-today-workflows-v1.sqlite", "structured-today-spike-checkpoint"],
     "bounded provider output collection": ["codex-jsonl", "single-json", "final-output-too-large", "SIGKILL"],
-    "single-provider daily preparation": ["allowProviderFallback", "dailyReviewScheduleEnabled", "dailyReviewScheduleTime"],
+    "frozen per-node provider plan": ["digestBySessionId", "functionProviders", "dailyReviewScheduleEnabled", "dailyReviewScheduleTime"],
     "background daily preparation": ["desktop:prepare-daily-review", "preparing", "scheduled"],
-    "frozen Traceink evidence": ["workline-evidence-manifest-v2", "transcriptCapture", "freezeCapturedPrefix"],
+    "frozen evidence": ["transcriptCapture", "Editorial contract bytes do not match", "metadata-only"],
     "generation-preserving review store": ["packageGenerations", "activePackageGenerationId"],
     "generation-safe reflection and sealing": ["desktop:save-daily-draft", "desktop:seal-daily-page", "expectedActiveGenerationId"],
     "sealed evidence access": ["desktop:get-session-transcript", "sealed-package"]
@@ -84,6 +86,8 @@ try {
 
   assertMarkers("preload bridge", preload, {
     "explicit daily-review preparation": ["prepareDailyReview", "desktop:prepare-daily-review"],
+    "selected structured dossier": ["prepareStructuredTodayDossier", "desktop:prepare-structured-today-dossier"],
+    "structured closeout": ["saveStructuredTodayReflection", "prepareStructuredTodayProposals", "disposeStructuredTodayProposal", "sealStructuredTodayPage"],
     "generation-safe reflection and sealing": ["saveDailyDraft", "desktop:save-daily-draft", "sealDailyPage", "desktop:seal-daily-page"]
   });
 
@@ -91,6 +95,8 @@ try {
     "explicit daily-review preparation": ["prepareDailyReview"],
     "unobtrusive scheduled preparation": ["review-schedule", "dailyReviewScheduleEnabled", "dailyReviewScheduleTime", "today-primary-action"],
     "Today workline board": ["today-board", "today-worklines", "workline-participation"],
+    "structured Today workline board": ["structured-today-index", "structured-today-workline", "STRUCTURED REVIEW / V1"],
+    "structured Today closeout": ["structured-today-closeout", "structured-today-proposal-groups", "structured-today-seal"],
     "evidence reader": ["review-reader", "review-block-evidence"],
     "legacy mutable artifact disclosure": ["review-evidence-reference"],
     "generation-safe reflection and sealing": ["saveDailyDraft", "review-reflection", "review-seal", "expectedActiveGenerationId"]
@@ -98,6 +104,8 @@ try {
   assertStringLiterals("renderer Today Board", renderer, ["raw", "compiled", "stale", "sealed"]);
   assertMarkers("renderer stylesheet", rendererCss, {
     "Today workline board": [".today-board", ".today-worklines", ".workline-participation"],
+    "structured Today workline board": [".structured-today-index", ".structured-today-workline", ".structured-today-dossier"],
+    "structured Today closeout": [".structured-today-closeout", ".structured-today-proposal-groups", ".structured-today-seal"],
     "evidence reader": [".review-reader", ".review-block-evidence"],
     "human reflection and sealing": [".review-reflection", ".review-seal"]
   });

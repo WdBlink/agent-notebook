@@ -1,6 +1,6 @@
 {
   "name": "work-continuity",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "A standalone macOS work-continuity app for local Codex and Claude Code sessions.",
   "main": "dist/desktop/main.js",
   "type": "module",
@@ -77,6 +77,9 @@
     }
   },
   "devDependencies": {
+    "@langchain/core": "1.2.9",
+    "@langchain/langgraph": "1.4.13",
+    "@langchain/langgraph-checkpoint": "1.1.5",
     "@playwright/test": "1.61.1",
     "@types/js-yaml": "4.0.9",
     "@types/jsdom": "28.0.3",
@@ -89,13 +92,14 @@
     "jsdom": "29.1.1",
     "obsidian": "1.13.1",
     "tsx": "^4.22.5",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "zod": "4.5.2"
   },
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
     "@xyflow/react": "^12.10.1",
-    "js-yaml": "4.3.0",
+    "js-yaml": "4.3.2",
     "lucide-react": "^0.577.0",
     "node-pty": "1.1.0",
     "react": "^19.0.0",

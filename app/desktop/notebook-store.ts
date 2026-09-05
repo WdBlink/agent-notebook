@@ -1,6 +1,7 @@
 import path from "node:path";
 import { buildResumeCommand } from "../../src/resume";
 import type { AgentSessionStatus, AgentWorkSession } from "../../src/types";
+import type { StructuredTodayReflectionV1, TodayWorklineIndexV1 } from "../../src/structured-today-contracts";
 import { normalizeDailyReviewPackage, type DailyReviewPackage } from "../../src/workline-review";
 import { createTodayBoardGeneration, legacyTodayBoardGeneration, projectTodayBoard, type TodayBoardPackageGeneration } from "../../src/today-board";
 import type {
@@ -13,7 +14,8 @@ import type {
   DesktopNotebookState,
   NotebookNote,
   NotebookNoteDelivery,
-  NotebookNoteInput
+  NotebookNoteInput,
+  StructuredTodaySealedCloseoutV1
 } from "./api";
 
 export interface NotebookDocument {
@@ -278,6 +280,62 @@ export function sealDailyPage(
   };
 }
 
+export function sealStructuredTodayPage(
+  document: NotebookDocument,
+  logicalDate: string,
+  index: TodayWorklineIndexV1,
+  reflections: StructuredTodayReflectionV1[],
+  closeout: StructuredTodaySealedCloseoutV1,
+  candidates: DailyContinuationBookmark[],
+  bookmarkIds: string[],
+  now = new Date()
+): NotebookDocument {
+  if (!isDate(logicalDate) || index.logicalDate !== logicalDate) throw new Error("结构化封页日期无效。");
+  const current = document.pages[logicalDate];
+  if (current?.status === "sealed") throw new Error("这一天已经封页，不能重复封存。");
+  if (
+    closeout.index.artifactId !== index.artifactId ||
+    closeout.index.revision !== index.revision ||
+    closeout.index.contentHash !== index.contentHash
+  ) throw new Error("结构化封页索引已经变化。");
+  const timestamp = now.toISOString();
+  const sessionById = new Map(index.sessions.map((session) => [session.sessionId, session]));
+  const workRecords: DailyWorkRecord[] = index.worklines.map((workline) => ({
+    id: `structured-record-${workline.worklineId}`,
+    projectKey: `structured:${workline.worklineId}`,
+    projectName: "结构化工作脉络",
+    title: workline.title,
+    summary: workline.summary,
+    changed: workline.possibleChange,
+    uncertainty: workline.evidenceReadiness === "ready" ? "证据可展开。" : "证据仍不完整或受阻。",
+    occurredAt: workline.endedAt ?? workline.startedAt,
+    sessions: workline.sessionIds.flatMap((sessionId) => {
+      const session = sessionById.get(sessionId);
+      return session ? [{ id: session.sessionId, platform: session.provider, path: session.sourcePath, title: session.title }] : [];
+    })
+  }));
+  const bookmarks = selectBookmarks(bookmarkIds, candidates);
+  const reflection = reflections
+    .sort((left, right) => left.worklineId.localeCompare(right.worklineId))
+    .map((item) => item.text)
+    .join("\n\n");
+  const page: DailyNotebookPage = {
+    schemaVersion: 4,
+    logicalDate,
+    status: "sealed",
+    createdAt: current?.createdAt ?? timestamp,
+    updatedAt: timestamp,
+    evidenceCutoff: timestamp,
+    sealedAt: timestamp,
+    workRecords,
+    reflection,
+    worklineReflections: [],
+    bookmarks,
+    structuredCloseout: structuredClone(closeout)
+  };
+  return { ...document, pages: { ...document.pages, [logicalDate]: page } };
+}
+
 export function findNotebookNote(document: NotebookDocument, noteId: string): NotebookNote {
   const note = document.notes.find((item) => item.id === noteId);
   if (!note) throw new Error("没有找到这条便签。");
@@ -380,8 +438,9 @@ function normalizePage(value: unknown, logicalDate: string): DailyNotebookPage {
   const activeGeneration = hasExplicitActiveGenerationId
     ? generations.find((generation) => generation.id === requestedActiveGenerationId)
     : hasPackageGenerations ? undefined : generations.at(-1);
+  const structuredCloseout = normalizeStructuredCloseout(raw.structuredCloseout);
   return {
-    schemaVersion: 3,
+    schemaVersion: raw.schemaVersion === 4 && structuredCloseout ? 4 : 3,
     logicalDate,
     status,
     ...(raw.createdAt ? { createdAt: cleanTimestamp(raw.createdAt) } : {}),
@@ -401,8 +460,63 @@ function normalizePage(value: unknown, logicalDate: string): DailyNotebookPage {
       : [],
     bookmarks: Array.isArray(raw.bookmarks)
       ? uniqueBookmarks(raw.bookmarks.map(normalizeBookmark).filter((item): item is DailyContinuationBookmark => Boolean(item))).slice(0, 3)
-      : []
+      : [],
+    ...(structuredCloseout ? { structuredCloseout } : {})
   };
+}
+
+function normalizeStructuredCloseout(value: unknown): StructuredTodaySealedCloseoutV1 | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Partial<StructuredTodaySealedCloseoutV1>;
+  const index = normalizeStructuredArtifactReference(raw.index);
+  if (!index || !Array.isArray(raw.dossiers) || !Array.isArray(raw.reflections) || !Array.isArray(raw.proposals) || !Array.isArray(raw.dispositions)) {
+    return undefined;
+  }
+  const dossiers = raw.dossiers.flatMap((item) => {
+    const reference = normalizeStructuredArtifactReference(item);
+    const worklineId = cleanText(item?.worklineId, 240);
+    return reference && worklineId ? [{ ...reference, worklineId }] : [];
+  });
+  const reflections = raw.reflections.flatMap((item) => {
+    const reflectionId = cleanText(item?.reflectionId, 240);
+    const revision = Number(item?.revision);
+    const contentHash = cleanText(item?.contentHash, 64);
+    const worklineId = cleanText(item?.worklineId, 240);
+    return reflectionId && Number.isSafeInteger(revision) && revision > 0 && /^[a-f0-9]{64}$/.test(contentHash) && worklineId
+      ? [{ reflectionId, revision, contentHash, worklineId }]
+      : [];
+  });
+  const proposals = raw.proposals.flatMap((item) => {
+    const reference = normalizeStructuredArtifactReference(item);
+    const worklineId = cleanText(item?.worklineId, 240);
+    return reference && worklineId ? [{ ...reference, worklineId }] : [];
+  });
+  const dispositions = raw.dispositions.flatMap((item) => {
+    const dispositionId = cleanText(item?.dispositionId, 240);
+    const revision = Number(item?.revision);
+    const proposalId = cleanText(item?.proposalId, 240);
+    return dispositionId && Number.isSafeInteger(revision) && revision > 0 && proposalId
+      ? [{ dispositionId, revision, proposalId }]
+      : [];
+  });
+  if (
+    dossiers.length !== raw.dossiers.length ||
+    reflections.length !== raw.reflections.length ||
+    proposals.length !== raw.proposals.length ||
+    dispositions.length !== raw.dispositions.length
+  ) return undefined;
+  return { index, dossiers, reflections, proposals, dispositions };
+}
+
+function normalizeStructuredArtifactReference(value: unknown): { artifactId: string; revision: number; contentHash: string } | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as { artifactId?: unknown; revision?: unknown; contentHash?: unknown };
+  const artifactId = cleanText(raw.artifactId, 240);
+  const revision = Number(raw.revision);
+  const contentHash = cleanText(raw.contentHash, 64);
+  return artifactId && Number.isSafeInteger(revision) && revision > 0 && /^[a-f0-9]{64}$/.test(contentHash)
+    ? { artifactId, revision, contentHash }
+    : undefined;
 }
 
 function generationsFor(page: DailyNotebookPage | undefined): TodayBoardPackageGeneration[] {

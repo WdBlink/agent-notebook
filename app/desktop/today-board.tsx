@@ -17,13 +17,20 @@ import type { AgentPlatform, AgentWorkSession, SessionProvider } from "../../src
 import type { TraceinkEvidenceRefV1, TraceinkIndexArtifactV1 } from "../../src/traceink-review-assets";
 import type { TodayBoardPackageGeneration } from "../../src/today-board";
 import type { DailyReviewEvidence, DailyReviewPackage, DailyWorklineReview } from "../../src/workline-review";
-import type { DesktopNotebookState, DesktopState, SessionTranscriptRequest } from "./api";
+import type { DesktopNotebookState, DesktopState, SessionTranscriptRequest, StructuredTodayRunProgress } from "./api";
 import { TraceinkIndexView } from "./traceink-index-view";
+import { StructuredTodayIndexView } from "./structured-today-index-view";
+import { StructuredTodayV2Preview } from "./structured-today-v2-preview";
 
 export interface TodayTranscriptTarget {
   title: string;
   platform: AgentPlatform;
   request: SessionTranscriptRequest;
+  citation?: {
+    label: string;
+    evidenceId: string;
+    precision: "session";
+  };
 }
 
 export type TodayReviewEntry =
@@ -76,15 +83,33 @@ export function TodayBoard({
   const [actionError, setActionError] = useState<string | null>(null);
   const board = state.notebook.todayBoard;
   const traceinkReview = state.traceinkReview;
-  const hasCanonicalIndex = Boolean(traceinkReview.activeIndex);
+  const structuredTodayReview = state.structuredTodayReview;
+  const hasStructuredIndex = Boolean(structuredTodayReview.activeIndex);
+  const hasLegacyCanonicalIndex = Boolean(traceinkReview.activeIndex);
+  const hasCanonicalIndex = hasStructuredIndex || hasLegacyCanonicalIndex;
+  const structuredPin = state.notebook.page.structuredCloseout?.index;
+  const structuredSealed = board.mode === "sealed" && Boolean(
+    structuredPin &&
+    structuredTodayReview.activeIndex &&
+    structuredPin.artifactId === structuredTodayReview.activeIndex.artifactId &&
+    structuredPin.revision === structuredTodayReview.activeIndex.revision &&
+    structuredPin.contentHash === structuredTodayReview.activeIndex.contentHash
+  );
   const legacySealed = board.mode === "sealed" && !hasCanonicalIndex;
-  const surfaceMode = legacySealed
+  const sealedSurface = structuredSealed || legacySealed;
+  const surfaceMode = sealedSurface
     ? "sealed"
-    : hasCanonicalIndex
+    : hasStructuredIndex
+      ? structuredTodayReview.mode
+      : hasLegacyCanonicalIndex
       ? traceinkReview.mode
       : "raw";
   const preparation = state.reviewPreparation;
   const preparing = preparation.status === "preparing" || requestingPreparation;
+  const indexProgress = state.structuredTodayProgress.index;
+  const preparationProgress = preparing && indexProgress && indexProgress.status === "running"
+    ? `${preparationStageLabel(indexProgress.stage)} ${indexProgress.completed}/${indexProgress.total}`
+    : undefined;
   const generation = legacySealed ? board.activeGeneration : undefined;
   const review = generation?.package;
   const activeReflections = generation
@@ -95,7 +120,7 @@ export function TodayBoard({
     setExpandedWorklines(new Set());
     setProvider("all");
     setActionError(null);
-  }, [state.activeDate, generation?.id]);
+  }, [state.activeDate, generation?.id, structuredTodayReview.activeIndex?.contentHash]);
 
   const sessionByIdentity = useMemo(
     () => new Map(sessions.map((session) => [sessionIdentity(session.platform, session.id, session.path), session])),
@@ -148,8 +173,8 @@ export function TodayBoard({
     });
   }
 
-  if (loading && !review && !traceinkReview.activeIndex) return <TodayBoardSkeleton />;
-  if (error && !review && !traceinkReview.activeIndex && sessions.length === 0) {
+  if (loading && !review && !hasCanonicalIndex) return <TodayBoardSkeleton />;
+  if (error && !review && !hasCanonicalIndex && sessions.length === 0) {
     return <section className="today-board-state" role="alert"><Activity size={22} /><h2>本地证据暂时无法读取</h2><p>{error}</p><button type="button" onClick={onRetry}>重新扫描</button></section>;
   }
 
@@ -166,18 +191,26 @@ export function TodayBoard({
           <span data-mode={surfaceMode}>{modeLabel(surfaceMode)}</span>
           {generation
             ? <small>材料截止 {formatDateTime(generation.evidenceCutoff)}</small>
-            : traceinkReview.activeIndex
+            : structuredTodayReview.activeIndex
+              ? <small>结构化版本 {structuredTodayReview.activeIndex.revision}</small>
+              : traceinkReview.activeIndex
               ? <small>材料截止 {formatDateTime(traceinkReview.activeIndex.producer.scope?.evidenceCutoff ?? traceinkReview.activeIndex.producer.completedAt)}</small>
               : preparation.status === "scheduled"
                 ? <small>{preparation.time} 自动准备</small>
-                : <small>{sessions.length} 条独立 Session</small>}
+                : preparationProgress
+                  ? <small>{preparationProgress}</small>
+                  : <small>{sessions.length} 条独立 Session</small>}
         </div>
         {surfaceMode === "raw" ? (
           <button type="button" className="today-primary-action" disabled={preparing || sessions.length === 0} onClick={() => void prepare("compile")}>
-            <Sparkles size={16} />{preparing ? "正在准备工作脉络…" : preparation.status === "failed" ? "重新整理" : "现在整理"}
+            <Sparkles size={16} />{preparing ? preparationProgress ?? "正在准备工作脉络…" : preparation.status === "failed" ? "重新整理" : "现在整理"}
           </button>
         ) : surfaceMode === "sealed" ? (
           <div className="today-seal-mark" aria-label="本日已封存"><LockKeyhole size={15} />封</div>
+        ) : hasStructuredIndex && surfaceMode === "stale" ? (
+          <button type="button" className="today-primary-action" disabled={preparing} onClick={() => void prepare("refresh")}>
+            <RefreshCw size={16} />{preparing ? "正在更新工作脉络…" : "更新工作脉络"}
+          </button>
         ) : hasCanonicalIndex ? null : surfaceMode === "stale" ? (
           <button type="button" className="today-primary-action" disabled={preparing} onClick={() => void prepare("refresh")}>
             <RefreshCw size={16} />{preparing ? "正在更新工作脉络…" : "更新工作脉络"}
@@ -191,7 +224,9 @@ export function TodayBoard({
 
       {surfaceMode === "sealed" ? null : <ActivitySummary activity={state.activity} />}
 
-      {hasCanonicalIndex && !legacySealed ? null : (
+      <TodayIndexProgress progress={indexProgress} />
+
+        {hasCanonicalIndex && !sealedSurface ? null : (
         <div className="today-board-toolbar">
           {surfaceMode === "sealed" ? null : <ProjectFilters projects={projects} selected={selectedProjectKey} onProject={onProject} />}
           <div className="today-board-filters" aria-label="来源筛选">
@@ -209,7 +244,16 @@ export function TodayBoard({
 
       <div className="today-board-scroll">
         {surfaceMode === "sealed" ? <SealedPageDetails notebook={state.notebook} /> : null}
-        {hasCanonicalIndex && !legacySealed ? (
+        {hasStructuredIndex && !sealedSurface ? (
+          <StructuredTodayIndexView
+            projection={structuredTodayReview}
+            progress={state.structuredTodayProgress}
+            sessions={sessions}
+            bookmarkCandidates={state.notebook.continuationCandidates}
+            error={displayedError}
+            onEvidence={onTranscript}
+          />
+        ) : hasLegacyCanonicalIndex && !sealedSurface ? (
           <>
             <CanonicalActivityMap
               activeIndex={traceinkReview.activeIndex!}
@@ -270,8 +314,23 @@ export function TodayBoard({
             ) : null}
           </>
         ) : <CompactEmpty text="这一天还没有可读取的工作材料。" />}
+        <StructuredTodayV2Preview state={state} />
       </div>
     </section>
+  );
+}
+
+export function TodayIndexProgress({ progress }: { progress: StructuredTodayRunProgress | undefined }): ReactElement | null {
+  if (progress?.status !== "running") return null;
+  return (
+    <div className="structured-today-progress today-structured-progress" role="status" aria-live="polite">
+      <span>{preparationStageLabel(progress.stage)} · {progress.completed}/{progress.total}</span>
+      <progress
+        aria-label="工作脉络整理进度"
+        value={progress.completed}
+        max={Math.max(1, progress.total)}
+      />
+    </div>
   );
 }
 
@@ -430,7 +489,7 @@ function ActivitySummary({ activity }: { activity: DailySessionActivity }): Reac
       <div><Bot size={15} /><span><strong>{formatObservedMinutes(facts.observedAgentActivityMs)}</strong><small>观测到的 Agent 活动</small></span></div>
       <div><UserRound size={15} /><span><strong>{facts.userInterventionCount} 次</strong><small>明确的用户交互</small></span></div>
       <div><Activity size={15} /><span><strong>{facts.peakObservedAgentConcurrency} 路</strong><small>峰值并行活动</small></span></div>
-      <div className="attention-cue"><span><strong>注意力负荷线索</strong><small>{facts.contextSwitchCount} 次跨 Session 切换 · 置信度：{facts.confidence === "observed" ? "已观测" : "证据不足"}</small></span><em>依据：带时间戳的用户消息与 Agent 响应窗口</em></div>
+      <div className="attention-cue"><span><strong>注意力负荷线索</strong><small>{facts.contextSwitchCount} 次跨 Session 切换 · 置信度：{facts.confidence === "observed" ? "已观测" : "证据不足"}</small></span><em>依据：host 分类的人类消息与 provider / 工具活动窗口</em></div>
     </section>
   );
 }
@@ -667,6 +726,13 @@ function sessionIdentity(platform: string, id: string, path: string): string {
 
 function modeLabel(mode: DesktopNotebookState["todayBoard"]["mode"]): string {
   return mode === "raw" ? "原始会话" : mode === "compiled" ? "已整理" : mode === "stale" ? "有新证据" : "已封存";
+}
+
+function preparationStageLabel(stage: string): string {
+  if (stage === "capture-evidence") return "正在读取证据";
+  if (stage === "digest") return "正在整理 Session";
+  if (stage === "index-synthesis") return "正在生成工作线";
+  return "正在准备工作脉络";
 }
 
 function modeDescription(

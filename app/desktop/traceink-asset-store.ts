@@ -22,6 +22,32 @@ import {
   type UserReflectionAssetV1
 } from "../../src/traceink-review-assets";
 import { TRACEINK_PROPOSAL_CATEGORIES } from "../../src/traceink-review-assets";
+import {
+  TodayWorklineDossierSchema,
+  TodayWorklineIndexSchema,
+  StructuredTodayProposalArtifactSchema,
+  StructuredTodayProposalDispositionSchema,
+  StructuredTodayReflectionSchema,
+  sha256Text,
+  type StructuredTodayProposalArtifactV1,
+  type StructuredTodayProposalDispositionV1,
+  type StructuredTodayReflectionV1,
+  type TodayWorklineDossierV1,
+  type TodayWorklineIndexV1
+} from "../../src/structured-today-contracts";
+import {
+  validateStructuredTodayDossier,
+  validateStructuredTodayIndex,
+  validateStructuredTodayProposalArtifact
+} from "../../src/structured-today-artifacts";
+import {
+  TodayWorklineIndexV2Schema,
+  TodayWorklineDossierV2Schema,
+  validateTodayWorklineDossierV2,
+  validateTodayWorklineIndexV2,
+  type TodayWorklineDossierV2,
+  type TodayWorklineIndexV2
+} from "../../src/structured-today-v2-contracts";
 
 export type TraceinkIndexArtifactReferenceV1 = TraceinkArtifactReferenceV1 & { stage: "index" };
 
@@ -32,6 +58,37 @@ export interface TraceinkAssetStoreDocumentV1 {
   /** Optional only for backward-compatible loading of pre-interaction v1 files. */
   proposalDispositions?: TraceinkProposalDispositionV1[];
   activeIndexByDate: Record<string, TraceinkIndexArtifactReferenceV1>;
+  /** Added in place so historical Traceink-only v1 documents remain readable. */
+  structuredIndexes?: TodayWorklineIndexV1[];
+  /** Unmerged V2 candidates never participate in the active V1 lineage. */
+  structuredIndexV2Candidates?: TodayWorklineIndexV2[];
+  structuredDossierV2Candidates?: TodayWorklineDossierV2[];
+  structuredDossiers?: TodayWorklineDossierV1[];
+  activeStructuredIndexByDate?: Record<string, StructuredTodayIndexReferenceV1>;
+  structuredReflections?: StructuredTodayReflectionV1[];
+  structuredProposals?: StructuredTodayProposalArtifactV1[];
+  structuredProposalDispositions?: StructuredTodayProposalDispositionV1[];
+  structuredRuns?: StructuredTodayRunRecordV1[];
+}
+
+export interface StructuredTodayIndexReferenceV1 {
+  artifactId: string;
+  revision: number;
+  contentHash: string;
+}
+
+export interface StructuredTodayRunRecordV1 {
+  runId: string;
+  kind: "index" | "dossier" | "proposals";
+  logicalDate: string;
+  worklineId?: string;
+  status: "running" | "ready" | "failed" | "cancelled";
+  stage: string;
+  completed: number;
+  total: number;
+  startedAt: string;
+  updatedAt: string;
+  message?: string;
 }
 
 export type TraceinkAssetStoreDocument = TraceinkAssetStoreDocumentV1;
@@ -100,12 +157,79 @@ export function normalizeTraceinkAssetStore(value: unknown): TraceinkAssetStoreD
   ));
   const activeIndexByDate = normalizeActiveIndexes(raw.activeIndexByDate, resolvedArtifactByReference);
 
+  const hasStructuredFields = raw.structuredIndexes !== undefined ||
+    raw.structuredIndexV2Candidates !== undefined ||
+    raw.structuredDossierV2Candidates !== undefined ||
+    raw.structuredDossiers !== undefined ||
+    raw.activeStructuredIndexByDate !== undefined ||
+    raw.structuredReflections !== undefined ||
+    raw.structuredProposals !== undefined ||
+    raw.structuredProposalDispositions !== undefined ||
+    raw.structuredRuns !== undefined;
+  const structuredIndexes = normalizeStructuredIndexes(raw.structuredIndexes);
+  const structuredIndexV2Candidates = normalizeStructuredIndexV2Candidates(raw.structuredIndexV2Candidates);
+  const structuredIndexV2CandidateByReference = new Map(structuredIndexV2Candidates.map((artifact) => [
+    structuredTodayReferenceKey(structuredTodayIndexReference(artifact)),
+    artifact
+  ]));
+  const structuredDossierV2Candidates = normalizeStructuredDossierV2Candidates(
+    raw.structuredDossierV2Candidates,
+    structuredIndexV2CandidateByReference
+  );
+  const structuredIndexByReference = new Map(
+    structuredIndexes.map((artifact) => [structuredTodayReferenceKey(structuredTodayIndexReference(artifact)), artifact])
+  );
+  const structuredDossiers = normalizeStructuredDossiers(raw.structuredDossiers, structuredIndexByReference);
+  const structuredDossierByReference = new Map(structuredDossiers.map((artifact) => [
+    structuredArtifactReferenceKey(artifact),
+    artifact
+  ]));
+  const structuredReflections = normalizeStructuredReflections(
+    raw.structuredReflections,
+    structuredDossierByReference
+  );
+  const structuredReflectionByReference = new Map(structuredReflections.map((reflection) => [
+    structuredReflectionReferenceKey(reflection),
+    reflection
+  ]));
+  const structuredProposals = normalizeStructuredProposals(
+    raw.structuredProposals,
+    structuredDossierByReference,
+    structuredReflectionByReference
+  );
+  const structuredProposalByReference = new Map(structuredProposals.map((artifact) => [
+    structuredArtifactReferenceKey(artifact),
+    artifact
+  ]));
+  const structuredProposalDispositions = normalizeStructuredProposalDispositions(
+    raw.structuredProposalDispositions,
+    structuredProposalByReference
+  );
+  const structuredRuns = normalizeStructuredRuns(raw.structuredRuns);
+  const activeStructuredIndexByDate = normalizeActiveStructuredIndexes(
+    raw.activeStructuredIndexByDate,
+    structuredIndexByReference
+  );
+
   return {
     schemaVersion: 1,
     artifacts: resolvedArtifacts,
     reflections,
     proposalDispositions,
-    activeIndexByDate
+    activeIndexByDate,
+    ...(hasStructuredFields
+      ? {
+          structuredIndexes,
+          structuredIndexV2Candidates,
+          structuredDossierV2Candidates,
+          structuredDossiers,
+          activeStructuredIndexByDate,
+          structuredReflections,
+          structuredProposals,
+          structuredProposalDispositions,
+          structuredRuns
+        }
+      : {})
   };
 }
 
@@ -470,6 +594,492 @@ export function activeIndexReferenceForDate(
   return { ...reference, stage: "index" };
 }
 
+export function structuredTodayIndexArtifactId(logicalDate: string): string {
+  if (!isTraceinkLogicalDate(logicalDate)) throw new Error("Structured Today index date is invalid.");
+  return `structured-today-index-${logicalDate}`;
+}
+
+export function structuredTodayDossierArtifactId(
+  index: StructuredTodayIndexReferenceV1,
+  worklineId: string
+): string {
+  const normalized = normalizeStructuredTodayIndexReference(index);
+  if (!normalized || !worklineId.trim()) throw new Error("Structured Today dossier source is invalid.");
+  return `structured-today-dossier-${sha256Text(
+    `${normalized.artifactId}\0${normalized.revision}\0${normalized.contentHash}\0${worklineId}`
+  ).slice(0, 32)}`;
+}
+
+export function structuredTodayIndexReference(
+  artifact: { artifactId: string; revision: number; contentHash: string }
+): StructuredTodayIndexReferenceV1 {
+  return {
+    artifactId: artifact.artifactId,
+    revision: artifact.revision,
+    contentHash: artifact.contentHash
+  };
+}
+
+export function activeStructuredTodayIndexReferenceForDate(
+  document: TraceinkAssetStoreDocumentV1,
+  logicalDate: string
+): StructuredTodayIndexReferenceV1 | undefined {
+  if (!isTraceinkLogicalDate(logicalDate)) return undefined;
+  const reference = normalizeStructuredTodayIndexReference(document.activeStructuredIndexByDate?.[logicalDate]);
+  if (!reference) return undefined;
+  const artifact = findStructuredTodayIndex(document, reference);
+  return artifact?.logicalDate === logicalDate ? reference : undefined;
+}
+
+export function findStructuredTodayIndex(
+  document: TraceinkAssetStoreDocumentV1,
+  reference: StructuredTodayIndexReferenceV1
+): TodayWorklineIndexV1 | undefined {
+  const normalized = normalizeStructuredTodayIndexReference(reference);
+  if (!normalized) return undefined;
+  const candidates = (document.structuredIndexes ?? []).filter((artifact) =>
+    artifact.artifactId === normalized.artifactId &&
+    artifact.revision === normalized.revision &&
+    artifact.contentHash === normalized.contentHash
+  );
+  if (candidates.length !== 1) return undefined;
+  const parsed = TodayWorklineIndexSchema.safeParse(candidates[0]);
+  return parsed.success && validateStructuredTodayIndex(parsed.data).length === 0 ? parsed.data : undefined;
+}
+
+export function appendStructuredTodayIndexRevision(
+  document: TraceinkAssetStoreDocumentV1,
+  artifact: TodayWorklineIndexV1,
+  expectedActive: StructuredTodayIndexReferenceV1 | null
+): TraceinkAssetStoreDocumentV1 {
+  const current = canonicalStore(document);
+  const parsed = TodayWorklineIndexSchema.safeParse(artifact);
+  if (!parsed.success || validateStructuredTodayIndex(parsed.data).length > 0) {
+    throw new Error("Structured Today index failed integrity validation.");
+  }
+  const active = activeStructuredTodayIndexReferenceForDate(current, artifact.logicalDate) ?? null;
+  if (!sameOptionalStructuredReference(active, expectedActive)) {
+    throw new Error("Structured Today active index changed before this revision could be appended.");
+  }
+  const expectedArtifactId = structuredTodayIndexArtifactId(artifact.logicalDate);
+  const nextRevision = nextStructuredTodayIndexRevision(current, artifact.logicalDate);
+  if (artifact.artifactId !== expectedArtifactId || artifact.revision !== nextRevision) {
+    throw new Error("Structured Today index identity or revision is not repository-owned.");
+  }
+  const reference = structuredTodayIndexReference(parsed.data);
+  return {
+    ...current,
+    structuredIndexes: [...(current.structuredIndexes ?? []), parsed.data],
+    structuredDossiers: current.structuredDossiers ?? [],
+    activeStructuredIndexByDate: {
+      ...(current.activeStructuredIndexByDate ?? {}),
+      [artifact.logicalDate]: reference
+    }
+  };
+}
+
+export function nextStructuredTodayIndexRevision(
+  document: TraceinkAssetStoreDocumentV1,
+  logicalDate: string
+): number {
+  const artifactId = structuredTodayIndexArtifactId(logicalDate);
+  return 1 + Math.max(
+    0,
+    ...(document.structuredIndexes ?? [])
+      .filter((artifact) => artifact.artifactId === artifactId)
+      .map((artifact) => artifact.revision),
+    ...(document.structuredIndexV2Candidates ?? [])
+      .filter((artifact) => artifact.artifactId === artifactId)
+      .map((artifact) => artifact.revision)
+  );
+}
+
+export function appendStructuredTodayIndexV2Candidate(
+  document: TraceinkAssetStoreDocumentV1,
+  artifact: TodayWorklineIndexV2
+): TraceinkAssetStoreDocumentV1 {
+  const current = canonicalStore(document);
+  const parsed = TodayWorklineIndexV2Schema.safeParse(artifact);
+  if (!parsed.success || validateTodayWorklineIndexV2(parsed.data).length > 0) {
+    throw new Error("Structured Today V2 index candidate failed integrity validation.");
+  }
+  const expectedArtifactId = structuredTodayIndexArtifactId(artifact.logicalDate);
+  const expectedRevision = nextStructuredTodayIndexV2CandidateRevision(current, artifact.logicalDate);
+  if (artifact.artifactId !== expectedArtifactId || artifact.revision !== expectedRevision) {
+    throw new Error("Structured Today V2 candidate identity or revision is not repository-owned.");
+  }
+  return {
+    ...current,
+    structuredIndexV2Candidates: [...(current.structuredIndexV2Candidates ?? []), parsed.data]
+  };
+}
+
+export function nextStructuredTodayIndexV2CandidateRevision(
+  document: TraceinkAssetStoreDocumentV1,
+  logicalDate: string
+): number {
+  const artifactId = structuredTodayIndexArtifactId(logicalDate);
+  return 1 + Math.max(
+    0,
+    ...(document.structuredIndexes ?? [])
+      .filter((candidate) => candidate.artifactId === artifactId)
+      .map((candidate) => candidate.revision),
+    ...(document.structuredIndexV2Candidates ?? [])
+      .filter((candidate) => candidate.artifactId === artifactId)
+      .map((candidate) => candidate.revision)
+  );
+}
+
+export function latestStructuredTodayIndexV2Candidate(
+  document: TraceinkAssetStoreDocumentV1,
+  logicalDate: string
+): TodayWorklineIndexV2 | undefined {
+  if (!isTraceinkLogicalDate(logicalDate)) return undefined;
+  return (document.structuredIndexV2Candidates ?? [])
+    .filter((artifact) => artifact.logicalDate === logicalDate)
+    .sort((left, right) => right.revision - left.revision)[0];
+}
+
+export function findStructuredTodayIndexV2Candidate(
+  document: TraceinkAssetStoreDocumentV1,
+  reference: { artifactId: string; revision: number; contentHash: string }
+): TodayWorklineIndexV2 | undefined {
+  const matches = (document.structuredIndexV2Candidates ?? []).filter((artifact) =>
+    artifact.artifactId === reference.artifactId &&
+    artifact.revision === reference.revision &&
+    artifact.contentHash === reference.contentHash
+  );
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+export function appendStructuredTodayDossierV2Candidate(
+  document: TraceinkAssetStoreDocumentV1,
+  artifact: TodayWorklineDossierV2
+): TraceinkAssetStoreDocumentV1 {
+  const current = canonicalStore(document);
+  const parsed = TodayWorklineDossierV2Schema.safeParse(artifact);
+  if (!parsed.success || validateTodayWorklineDossierV2(parsed.data).length > 0) {
+    throw new Error("Structured Today V2 dossier candidate failed integrity validation.");
+  }
+  const sourceIndex = (current.structuredIndexV2Candidates ?? []).find((candidate) =>
+    candidate.artifactId === artifact.sourceIndex.artifactId &&
+    candidate.revision === artifact.sourceIndex.revision &&
+    candidate.contentHash === artifact.sourceIndex.contentHash
+  );
+  if (!sourceIndex || !sourceIndex.worklines.some((workline) => workline.worklineId === artifact.worklineId)) {
+    throw new Error("Structured Today V2 dossier candidate does not belong to a stored index candidate.");
+  }
+  const expectedId = structuredTodayDossierArtifactId(artifact.sourceIndex, artifact.worklineId);
+  const expectedRevision = nextStructuredTodayDossierV2CandidateRevision(current, artifact.sourceIndex, artifact.worklineId);
+  if (artifact.artifactId !== expectedId || artifact.revision !== expectedRevision) {
+    throw new Error("Structured Today V2 dossier candidate identity or revision is not repository-owned.");
+  }
+  return {
+    ...current,
+    structuredDossierV2Candidates: [...(current.structuredDossierV2Candidates ?? []), parsed.data]
+  };
+}
+
+export function nextStructuredTodayDossierV2CandidateRevision(
+  document: TraceinkAssetStoreDocumentV1,
+  sourceIndex: { artifactId: string; revision: number; contentHash: string },
+  worklineId: string
+): number {
+  const artifactId = structuredTodayDossierArtifactId(sourceIndex, worklineId);
+  return 1 + Math.max(
+    0,
+    ...(document.structuredDossierV2Candidates ?? [])
+      .filter((candidate) => candidate.artifactId === artifactId)
+      .map((candidate) => candidate.revision)
+  );
+}
+
+export function latestStructuredTodayDossierV2Candidate(
+  document: TraceinkAssetStoreDocumentV1,
+  sourceIndex: { artifactId: string; revision: number; contentHash: string },
+  worklineId: string
+): TodayWorklineDossierV2 | undefined {
+  const artifactId = structuredTodayDossierArtifactId(sourceIndex, worklineId);
+  return (document.structuredDossierV2Candidates ?? [])
+    .filter((artifact) => artifact.artifactId === artifactId && artifact.worklineId === worklineId)
+    .sort((left, right) => right.revision - left.revision)[0];
+}
+
+export function findStructuredTodayDossierV2Candidate(
+  document: TraceinkAssetStoreDocumentV1,
+  reference: { artifactId: string; revision: number; contentHash: string }
+): TodayWorklineDossierV2 | undefined {
+  const matches = (document.structuredDossierV2Candidates ?? []).filter((artifact) =>
+    artifact.artifactId === reference.artifactId &&
+    artifact.revision === reference.revision &&
+    artifact.contentHash === reference.contentHash
+  );
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+export function appendStructuredTodayDossierRevision(
+  document: TraceinkAssetStoreDocumentV1,
+  artifact: TodayWorklineDossierV1,
+  expectedActiveIndex: StructuredTodayIndexReferenceV1
+): TraceinkAssetStoreDocumentV1 {
+  const current = canonicalStore(document);
+  const active = activeStructuredTodayIndexReferenceForDate(current, artifact.logicalDate);
+  if (!active || !sameStructuredReference(active, expectedActiveIndex)) {
+    throw new Error("Structured Today active index changed before this dossier could be appended.");
+  }
+  const parsed = TodayWorklineDossierSchema.safeParse(artifact);
+  if (!parsed.success || validateStructuredTodayDossier(parsed.data).length > 0) {
+    throw new Error("Structured Today dossier failed integrity validation.");
+  }
+  if (!sameStructuredReference(parsed.data.sourceIndex, expectedActiveIndex)) {
+    throw new Error("Structured Today dossier points to a different index revision.");
+  }
+  const sourceIndex = findStructuredTodayIndex(current, expectedActiveIndex);
+  if (!sourceIndex?.worklines.some((workline) => workline.worklineId === artifact.worklineId)) {
+    throw new Error("Structured Today dossier workline is not in the active index.");
+  }
+  const expectedArtifactId = structuredTodayDossierArtifactId(expectedActiveIndex, artifact.worklineId);
+  const nextRevision = nextStructuredTodayDossierRevision(current, expectedActiveIndex, artifact.worklineId);
+  if (artifact.artifactId !== expectedArtifactId || artifact.revision !== nextRevision) {
+    throw new Error("Structured Today dossier identity or revision is not repository-owned.");
+  }
+  return {
+    ...current,
+    structuredIndexes: current.structuredIndexes ?? [],
+    structuredDossiers: [...(current.structuredDossiers ?? []), parsed.data],
+    activeStructuredIndexByDate: current.activeStructuredIndexByDate ?? {}
+  };
+}
+
+export function nextStructuredTodayDossierRevision(
+  document: TraceinkAssetStoreDocumentV1,
+  index: StructuredTodayIndexReferenceV1,
+  worklineId: string
+): number {
+  const artifactId = structuredTodayDossierArtifactId(index, worklineId);
+  return 1 + Math.max(0, ...(document.structuredDossiers ?? [])
+    .filter((artifact) => artifact.artifactId === artifactId)
+    .map((artifact) => artifact.revision));
+}
+
+export function latestStructuredTodayDossier(
+  document: TraceinkAssetStoreDocumentV1,
+  index: StructuredTodayIndexReferenceV1,
+  worklineId: string
+): TodayWorklineDossierV1 | undefined {
+  const artifactId = structuredTodayDossierArtifactId(index, worklineId);
+  const candidates = (document.structuredDossiers ?? [])
+    .filter((artifact) => artifact.artifactId === artifactId && artifact.worklineId === worklineId)
+    .sort((left, right) => right.revision - left.revision);
+  const parsed = TodayWorklineDossierSchema.safeParse(candidates[0]);
+  if (!parsed.success || validateStructuredTodayDossier(parsed.data).length > 0) return undefined;
+  return sameStructuredReference(parsed.data.sourceIndex, index) ? parsed.data : undefined;
+}
+
+export function structuredTodayDossierReference(artifact: TodayWorklineDossierV1) {
+  return { artifactId: artifact.artifactId, revision: artifact.revision, contentHash: artifact.contentHash };
+}
+
+export function structuredTodayReflectionReference(reflection: StructuredTodayReflectionV1) {
+  return {
+    reflectionId: reflection.reflectionId,
+    revision: reflection.revision,
+    contentHash: reflection.contentHash
+  };
+}
+
+export function appendStructuredTodayReflectionRevision(
+  document: TraceinkAssetStoreDocumentV1,
+  dossier: TodayWorklineDossierV1,
+  text: string,
+  savedAt: string
+): TraceinkAssetStoreDocumentV1 {
+  const current = canonicalStore(document);
+  const active = activeStructuredTodayIndexReferenceForDate(current, dossier.logicalDate);
+  const currentDossier = active
+    ? latestStructuredTodayDossier(current, active, dossier.worklineId)
+    : undefined;
+  if (!currentDossier || structuredArtifactReferenceKey(currentDossier) !== structuredArtifactReferenceKey(dossier)) {
+    throw new Error("Structured Today dossier changed before reflection save.");
+  }
+  if (typeof text !== "string" || !text.trim() || Number.isNaN(Date.parse(savedAt))) {
+    throw new Error("Structured Today reflection must preserve non-empty user text and a valid save time.");
+  }
+  const reflectionId = `structured-today-reflection-${sha256Text(
+    structuredArtifactReferenceKey(dossier)
+  ).slice(0, 24)}`;
+  const previous = (current.structuredReflections ?? [])
+    .filter((reflection) => reflection.reflectionId === reflectionId)
+    .sort((left, right) => left.revision - right.revision);
+  const contentHash = sha256Text(text);
+  const latest = previous.at(-1);
+  if (latest?.contentHash === contentHash && latest.text === text) {
+    return current;
+  }
+  const reflection = StructuredTodayReflectionSchema.parse({
+    schema: "today-workline-reflection/v1",
+    reflectionId,
+    revision: (previous.at(-1)?.revision ?? 0) + 1,
+    logicalDate: dossier.logicalDate,
+    worklineId: dossier.worklineId,
+    sourceDossier: structuredTodayDossierReference(dossier),
+    text,
+    createdAt: previous[0]?.createdAt ?? savedAt,
+    savedAt,
+    contentHash
+  });
+  return {
+    ...current,
+    structuredReflections: [...(current.structuredReflections ?? []), reflection]
+  };
+}
+
+export function latestStructuredTodayReflection(
+  document: TraceinkAssetStoreDocumentV1,
+  dossier: TodayWorklineDossierV1
+): StructuredTodayReflectionV1 | undefined {
+  const referenceKey = structuredArtifactReferenceKey(dossier);
+  return (document.structuredReflections ?? [])
+    .filter((reflection) => structuredReferenceKey(reflection.sourceDossier) === referenceKey)
+    .sort((left, right) => right.revision - left.revision)[0];
+}
+
+export function structuredTodayProposalArtifactId(reflection: StructuredTodayReflectionV1): string {
+  return `structured-today-proposals-${sha256Text(
+    structuredReflectionReferenceKey(reflection)
+  ).slice(0, 24)}`;
+}
+
+export function nextStructuredTodayProposalRevision(
+  document: TraceinkAssetStoreDocumentV1,
+  reflection: StructuredTodayReflectionV1
+): number {
+  const artifactId = structuredTodayProposalArtifactId(reflection);
+  return 1 + Math.max(0, ...(document.structuredProposals ?? [])
+    .filter((artifact) => artifact.artifactId === artifactId)
+    .map((artifact) => artifact.revision));
+}
+
+export function appendStructuredTodayProposalRevision(
+  document: TraceinkAssetStoreDocumentV1,
+  artifact: StructuredTodayProposalArtifactV1,
+  reflection: StructuredTodayReflectionV1
+): TraceinkAssetStoreDocumentV1 {
+  const current = canonicalStore(document);
+  const dossier = (current.structuredDossiers ?? []).find((candidate) =>
+    structuredReferenceKey(artifact.sourceDossier) === structuredArtifactReferenceKey(candidate)
+  );
+  const currentReflection = dossier ? latestStructuredTodayReflection(current, dossier) : undefined;
+  if (
+    !dossier ||
+    !currentReflection ||
+    structuredReflectionReferenceKey(currentReflection) !== structuredReflectionReferenceKey(reflection) ||
+    structuredReflectionReferenceKey(currentReflection) !== structuredReferenceKey(artifact.sourceReflection)
+  ) {
+    throw new Error("你的回顾在整理期间已经更新；旧版本的整理结果没有保存，请重新整理最新版本。");
+  }
+  const parsed = StructuredTodayProposalArtifactSchema.safeParse(artifact);
+  if (!parsed.success || validateStructuredTodayProposalArtifact(parsed.data, currentReflection).length > 0) {
+    throw new Error("Structured Today proposals failed integrity validation.");
+  }
+  const expectedId = structuredTodayProposalArtifactId(reflection);
+  const expectedRevision = nextStructuredTodayProposalRevision(current, reflection);
+  if (artifact.artifactId !== expectedId || artifact.revision !== expectedRevision) {
+    throw new Error("Structured Today proposal identity or revision is not repository-owned.");
+  }
+  return {
+    ...current,
+    structuredProposals: [...(current.structuredProposals ?? []), parsed.data]
+  };
+}
+
+export function latestStructuredTodayProposals(
+  document: TraceinkAssetStoreDocumentV1,
+  reflection: StructuredTodayReflectionV1
+): StructuredTodayProposalArtifactV1 | undefined {
+  const reference = structuredReflectionReferenceKey(reflection);
+  return (document.structuredProposals ?? [])
+    .filter((artifact) => structuredReferenceKey(artifact.sourceReflection) === reference)
+    .sort((left, right) => right.revision - left.revision)[0];
+}
+
+export function appendStructuredTodayProposalDisposition(
+  document: TraceinkAssetStoreDocumentV1,
+  proposalArtifact: StructuredTodayProposalArtifactV1,
+  proposalId: string,
+  input: { action: "accept" | "dismiss" | "defer" | "rewrite"; rewriteText?: string; decidedAt: string }
+): TraceinkAssetStoreDocumentV1 {
+  const current = canonicalStore(document);
+  const stored = (current.structuredProposals ?? []).find((artifact) =>
+    structuredArtifactReferenceKey(artifact) === structuredArtifactReferenceKey(proposalArtifact)
+  );
+  const proposal = stored?.proposals.find((candidate) => candidate.proposalId === proposalId);
+  if (!stored || !proposal) throw new Error("Structured Today proposal is not current.");
+  const dispositionId = `structured-today-disposition-${sha256Text(
+    `${structuredArtifactReferenceKey(stored)}\0${proposalId}`
+  ).slice(0, 24)}`;
+  const previous = (current.structuredProposalDispositions ?? [])
+    .filter((disposition) => disposition.dispositionId === dispositionId);
+  const disposition = StructuredTodayProposalDispositionSchema.parse({
+    schema: "today-proposal-disposition/v1",
+    dispositionId,
+    revision: 1 + Math.max(0, ...previous.map((item) => item.revision)),
+    logicalDate: stored.logicalDate,
+    worklineId: stored.worklineId,
+    proposalArtifact: {
+      artifactId: stored.artifactId,
+      revision: stored.revision,
+      contentHash: stored.contentHash
+    },
+    proposalId,
+    category: proposal.category,
+    action: input.action,
+    ...(input.action === "rewrite" ? { rewriteText: input.rewriteText } : {}),
+    decidedAt: input.decidedAt
+  });
+  return {
+    ...current,
+    structuredProposalDispositions: [...(current.structuredProposalDispositions ?? []), disposition]
+  };
+}
+
+export function latestStructuredTodayProposalDispositions(
+  document: TraceinkAssetStoreDocumentV1,
+  proposalArtifact: StructuredTodayProposalArtifactV1
+): StructuredTodayProposalDispositionV1[] {
+  const reference = structuredArtifactReferenceKey(proposalArtifact);
+  const latest = new Map<string, StructuredTodayProposalDispositionV1>();
+  for (const disposition of document.structuredProposalDispositions ?? []) {
+    if (structuredReferenceKey(disposition.proposalArtifact) !== reference) continue;
+    const previous = latest.get(disposition.proposalId);
+    if (!previous || disposition.revision > previous.revision) latest.set(disposition.proposalId, disposition);
+  }
+  return proposalArtifact.proposals.flatMap((proposal) => {
+    const disposition = latest.get(proposal.proposalId);
+    return disposition ? [disposition] : [];
+  });
+}
+
+export function upsertStructuredTodayRun(
+  document: TraceinkAssetStoreDocumentV1,
+  record: StructuredTodayRunRecordV1
+): TraceinkAssetStoreDocumentV1 {
+  const current = canonicalStore(document);
+  const normalized = normalizeStructuredRun(record);
+  if (!normalized) throw new Error("Structured Today run record is invalid.");
+  const existing = current.structuredRuns ?? [];
+  const previous = existing.find((item) => item.runId === normalized.runId);
+  if (previous && previous.kind !== normalized.kind) {
+    throw new Error("Structured Today run identity cannot cross workflow kinds.");
+  }
+  return {
+    ...current,
+    structuredRuns: [...existing.filter((item) => item.runId !== normalized.runId), normalized]
+      .sort((left, right) => left.startedAt.localeCompare(right.startedAt))
+      .slice(-200)
+  };
+}
+
 export function findTraceinkArtifact(
   document: TraceinkAssetStoreDocumentV1,
   reference: TraceinkArtifactReferenceV1
@@ -526,6 +1136,319 @@ function normalizeActiveIndexes(
     active[logicalDate] = { ...reference, stage: "index" };
   }
   return active;
+}
+
+function normalizeStructuredIndexes(value: unknown): TodayWorklineIndexV1[] {
+  if (!Array.isArray(value)) return [];
+  const byRevision = new Map<string, TodayWorklineIndexV1>();
+  const conflicts = new Set<string>();
+  for (const candidate of value) {
+    const parsed = TodayWorklineIndexSchema.safeParse(candidate);
+    if (!parsed.success || validateStructuredTodayIndex(parsed.data).length > 0) continue;
+    const key = JSON.stringify([parsed.data.artifactId, parsed.data.revision]);
+    const previous = byRevision.get(key);
+    if (!previous) byRevision.set(key, parsed.data);
+    else if (!isDeepStrictEqual(previous, parsed.data)) conflicts.add(key);
+  }
+  return [...byRevision.entries()]
+    .filter(([key]) => !conflicts.has(key))
+    .map(([, artifact]) => artifact)
+    .sort((left, right) => left.artifactId.localeCompare(right.artifactId) || left.revision - right.revision);
+}
+
+function normalizeStructuredIndexV2Candidates(value: unknown): TodayWorklineIndexV2[] {
+  if (!Array.isArray(value)) return [];
+  const byRevision = new Map<string, TodayWorklineIndexV2>();
+  const conflicts = new Set<string>();
+  for (const candidate of value) {
+    const parsed = TodayWorklineIndexV2Schema.safeParse(candidate);
+    if (!parsed.success || validateTodayWorklineIndexV2(parsed.data).length > 0) continue;
+    const key = JSON.stringify([parsed.data.artifactId, parsed.data.revision]);
+    const previous = byRevision.get(key);
+    if (!previous) byRevision.set(key, parsed.data);
+    else if (!isDeepStrictEqual(previous, parsed.data)) conflicts.add(key);
+  }
+  return [...byRevision.entries()]
+    .filter(([key]) => !conflicts.has(key))
+    .map(([, artifact]) => artifact)
+    .sort((left, right) => left.artifactId.localeCompare(right.artifactId) || left.revision - right.revision);
+}
+
+function normalizeStructuredDossierV2Candidates(
+  value: unknown,
+  indexByReference: ReadonlyMap<string, TodayWorklineIndexV2>
+): TodayWorklineDossierV2[] {
+  if (!Array.isArray(value)) return [];
+  const byRevision = new Map<string, TodayWorklineDossierV2>();
+  const conflicts = new Set<string>();
+  for (const candidate of value) {
+    const parsed = TodayWorklineDossierV2Schema.safeParse(candidate);
+    if (!parsed.success || validateTodayWorklineDossierV2(parsed.data).length > 0) continue;
+    const source = indexByReference.get(structuredTodayReferenceKey(parsed.data.sourceIndex));
+    if (!source || !source.worklines.some((workline) => workline.worklineId === parsed.data.worklineId)) continue;
+    const key = JSON.stringify([parsed.data.artifactId, parsed.data.revision]);
+    const previous = byRevision.get(key);
+    if (!previous) byRevision.set(key, parsed.data);
+    else if (!isDeepStrictEqual(previous, parsed.data)) conflicts.add(key);
+  }
+  return [...byRevision.entries()]
+    .filter(([key]) => !conflicts.has(key))
+    .map(([, artifact]) => artifact)
+    .sort((left, right) => left.artifactId.localeCompare(right.artifactId) || left.revision - right.revision);
+}
+
+function normalizeStructuredDossiers(
+  value: unknown,
+  indexByReference: ReadonlyMap<string, TodayWorklineIndexV1>
+): TodayWorklineDossierV1[] {
+  if (!Array.isArray(value)) return [];
+  const byRevision = new Map<string, TodayWorklineDossierV1>();
+  const conflicts = new Set<string>();
+  for (const candidate of value) {
+    const parsed = TodayWorklineDossierSchema.safeParse(candidate);
+    if (!parsed.success || validateStructuredTodayDossier(parsed.data).length > 0) continue;
+    const source = indexByReference.get(structuredTodayReferenceKey(parsed.data.sourceIndex));
+    if (!source || !source.worklines.some((workline) => workline.worklineId === parsed.data.worklineId)) continue;
+    const key = JSON.stringify([parsed.data.artifactId, parsed.data.revision]);
+    const previous = byRevision.get(key);
+    if (!previous) byRevision.set(key, parsed.data);
+    else if (!isDeepStrictEqual(previous, parsed.data)) conflicts.add(key);
+  }
+  return [...byRevision.entries()]
+    .filter(([key]) => !conflicts.has(key))
+    .map(([, artifact]) => artifact)
+    .sort((left, right) => left.artifactId.localeCompare(right.artifactId) || left.revision - right.revision);
+}
+
+function normalizeStructuredReflections(
+  value: unknown,
+  dossierByReference: ReadonlyMap<string, TodayWorklineDossierV1>
+): StructuredTodayReflectionV1[] {
+  if (!Array.isArray(value)) return [];
+  const byRevision = new Map<string, StructuredTodayReflectionV1>();
+  const conflicts = new Set<string>();
+  for (const candidate of value) {
+    const parsed = StructuredTodayReflectionSchema.safeParse(candidate);
+    if (!parsed.success) continue;
+    const dossier = dossierByReference.get(structuredReferenceKey(parsed.data.sourceDossier));
+    if (!dossier || dossier.logicalDate !== parsed.data.logicalDate || dossier.worklineId !== parsed.data.worklineId) continue;
+    const key = JSON.stringify([parsed.data.reflectionId, parsed.data.revision]);
+    const previous = byRevision.get(key);
+    if (!previous) byRevision.set(key, parsed.data);
+    else if (!isDeepStrictEqual(previous, parsed.data)) conflicts.add(key);
+  }
+  return [...byRevision.entries()]
+    .filter(([key]) => !conflicts.has(key))
+    .map(([, reflection]) => reflection)
+    .sort((left, right) => left.reflectionId.localeCompare(right.reflectionId) || left.revision - right.revision);
+}
+
+function normalizeStructuredProposals(
+  value: unknown,
+  dossierByReference: ReadonlyMap<string, TodayWorklineDossierV1>,
+  reflectionByReference: ReadonlyMap<string, StructuredTodayReflectionV1>
+): StructuredTodayProposalArtifactV1[] {
+  if (!Array.isArray(value)) return [];
+  const byRevision = new Map<string, StructuredTodayProposalArtifactV1>();
+  const conflicts = new Set<string>();
+  for (const candidate of value) {
+    const parsed = StructuredTodayProposalArtifactSchema.safeParse(candidate);
+    if (!parsed.success) continue;
+    const dossier = dossierByReference.get(structuredReferenceKey(parsed.data.sourceDossier));
+    const reflection = reflectionByReference.get(structuredReferenceKey(parsed.data.sourceReflection));
+    if (
+      !dossier ||
+      !reflection ||
+      dossier.logicalDate !== parsed.data.logicalDate ||
+      dossier.worklineId !== parsed.data.worklineId ||
+      reflection.logicalDate !== parsed.data.logicalDate ||
+      reflection.worklineId !== parsed.data.worklineId ||
+      validateStructuredTodayProposalArtifact(parsed.data, reflection).length > 0
+    ) continue;
+    const key = JSON.stringify([parsed.data.artifactId, parsed.data.revision]);
+    const previous = byRevision.get(key);
+    if (!previous) byRevision.set(key, parsed.data);
+    else if (!isDeepStrictEqual(previous, parsed.data)) conflicts.add(key);
+  }
+  return [...byRevision.entries()]
+    .filter(([key]) => !conflicts.has(key))
+    .map(([, artifact]) => artifact)
+    .sort((left, right) => left.artifactId.localeCompare(right.artifactId) || left.revision - right.revision);
+}
+
+function normalizeStructuredProposalDispositions(
+  value: unknown,
+  proposalByReference: ReadonlyMap<string, StructuredTodayProposalArtifactV1>
+): StructuredTodayProposalDispositionV1[] {
+  if (!Array.isArray(value)) return [];
+  const byRevision = new Map<string, StructuredTodayProposalDispositionV1>();
+  const conflicts = new Set<string>();
+  for (const candidate of value) {
+    const parsed = StructuredTodayProposalDispositionSchema.safeParse(candidate);
+    if (!parsed.success) continue;
+    const artifact = proposalByReference.get(structuredReferenceKey(parsed.data.proposalArtifact));
+    const proposal = artifact?.proposals.find((item) => item.proposalId === parsed.data.proposalId);
+    if (
+      !artifact ||
+      !proposal ||
+      artifact.logicalDate !== parsed.data.logicalDate ||
+      artifact.worklineId !== parsed.data.worklineId ||
+      proposal.category !== parsed.data.category
+    ) continue;
+    const key = JSON.stringify([parsed.data.dispositionId, parsed.data.revision]);
+    const previous = byRevision.get(key);
+    if (!previous) byRevision.set(key, parsed.data);
+    else if (!isDeepStrictEqual(previous, parsed.data)) conflicts.add(key);
+  }
+  return [...byRevision.entries()]
+    .filter(([key]) => !conflicts.has(key))
+    .map(([, disposition]) => disposition)
+    .sort((left, right) => left.dispositionId.localeCompare(right.dispositionId) || left.revision - right.revision);
+}
+
+function normalizeStructuredRuns(value: unknown): StructuredTodayRunRecordV1[] {
+  if (!Array.isArray(value)) return [];
+  const latest = new Map<string, StructuredTodayRunRecordV1>();
+  for (const candidate of value) {
+    const normalized = normalizeStructuredRun(candidate);
+    if (!normalized) continue;
+    const previous = latest.get(normalized.runId);
+    if (!previous || normalized.updatedAt >= previous.updatedAt) latest.set(normalized.runId, normalized);
+  }
+  return [...latest.values()]
+    .sort((left, right) => left.startedAt.localeCompare(right.startedAt))
+    .slice(-200);
+}
+
+function normalizeStructuredRun(value: unknown): StructuredTodayRunRecordV1 | undefined {
+  const raw = asRecord(value);
+  const runId = typeof raw?.runId === "string" ? raw.runId.trim() : "";
+  const kind = raw?.kind === "index" || raw?.kind === "dossier" || raw?.kind === "proposals" ? raw.kind : undefined;
+  const logicalDate = typeof raw?.logicalDate === "string" && isTraceinkLogicalDate(raw.logicalDate)
+    ? raw.logicalDate
+    : undefined;
+  const status = raw?.status === "running" || raw?.status === "ready" || raw?.status === "failed" || raw?.status === "cancelled"
+    ? raw.status
+    : undefined;
+  const stage = typeof raw?.stage === "string" ? raw.stage.trim() : "";
+  const completed = typeof raw?.completed === "number" ? raw.completed : Number.NaN;
+  const total = typeof raw?.total === "number" ? raw.total : Number.NaN;
+  const startedAt = typeof raw?.startedAt === "string" && !Number.isNaN(Date.parse(raw.startedAt))
+    ? new Date(raw.startedAt).toISOString()
+    : undefined;
+  const updatedAt = typeof raw?.updatedAt === "string" && !Number.isNaN(Date.parse(raw.updatedAt))
+    ? new Date(raw.updatedAt).toISOString()
+    : undefined;
+  const worklineId = typeof raw?.worklineId === "string" && raw.worklineId.trim() ? raw.worklineId.trim() : undefined;
+  const message = typeof raw?.message === "string" && raw.message.trim() ? raw.message.replace(/\s+/g, " ").trim().slice(0, 500) : undefined;
+  if (
+    !runId ||
+    !kind ||
+    !logicalDate ||
+    !status ||
+    !stage ||
+    !Number.isSafeInteger(completed) ||
+    !Number.isSafeInteger(total) ||
+    completed < 0 ||
+    total < 0 ||
+    completed > total ||
+    !startedAt ||
+    !updatedAt ||
+    (kind !== "index" && !worklineId)
+  ) return undefined;
+  return {
+    runId,
+    kind,
+    logicalDate,
+    ...(worklineId ? { worklineId } : {}),
+    status,
+    stage,
+    completed,
+    total,
+    startedAt,
+    updatedAt,
+    ...(message ? { message } : {})
+  };
+}
+
+function normalizeActiveStructuredIndexes(
+  value: unknown,
+  indexByReference: ReadonlyMap<string, TodayWorklineIndexV1>
+): Record<string, StructuredTodayIndexReferenceV1> {
+  const raw = asRecord(value);
+  if (!raw) return {};
+  const active: Record<string, StructuredTodayIndexReferenceV1> = {};
+  for (const [logicalDate, candidate] of Object.entries(raw)) {
+    if (!isTraceinkLogicalDate(logicalDate)) continue;
+    const reference = normalizeStructuredTodayIndexReference(candidate);
+    if (!reference) continue;
+    const artifact = indexByReference.get(structuredTodayReferenceKey(reference));
+    if (artifact?.logicalDate === logicalDate) active[logicalDate] = reference;
+  }
+  return active;
+}
+
+function normalizeStructuredTodayIndexReference(value: unknown): StructuredTodayIndexReferenceV1 | undefined {
+  const raw = asRecord(value);
+  const artifactId = typeof raw?.artifactId === "string" ? raw.artifactId.trim() : "";
+  const revision = typeof raw?.revision === "number" ? raw.revision : 0;
+  const contentHash = typeof raw?.contentHash === "string" ? raw.contentHash : "";
+  if (!artifactId || !Number.isSafeInteger(revision) || revision < 1 || !/^[a-f0-9]{64}$/.test(contentHash)) {
+    return undefined;
+  }
+  return { artifactId, revision, contentHash };
+}
+
+function sameStructuredReference(
+  left: StructuredTodayIndexReferenceV1,
+  right: StructuredTodayIndexReferenceV1
+): boolean {
+  const normalizedLeft = normalizeStructuredTodayIndexReference(left);
+  const normalizedRight = normalizeStructuredTodayIndexReference(right);
+  return Boolean(
+    normalizedLeft &&
+    normalizedRight &&
+    structuredTodayReferenceKey(normalizedLeft) === structuredTodayReferenceKey(normalizedRight)
+  );
+}
+
+function sameOptionalStructuredReference(
+  current: StructuredTodayIndexReferenceV1 | null,
+  expected: StructuredTodayIndexReferenceV1 | null
+): boolean {
+  if (!current || !expected) return current === null && expected === null;
+  return sameStructuredReference(current, expected);
+}
+
+function structuredTodayReferenceKey(reference: StructuredTodayIndexReferenceV1): string {
+  return JSON.stringify([reference.artifactId, reference.revision, reference.contentHash]);
+}
+
+function structuredArtifactReferenceKey(artifact: {
+  artifactId: string;
+  revision: number;
+  contentHash: string;
+}): string {
+  return structuredReferenceKey(artifact);
+}
+
+function structuredReflectionReferenceKey(reflection: {
+  reflectionId: string;
+  revision: number;
+  contentHash: string;
+}): string {
+  return JSON.stringify([reflection.reflectionId, reflection.revision, reflection.contentHash]);
+}
+
+function structuredReferenceKey(reference: {
+  artifactId?: string;
+  reflectionId?: string;
+  revision: number;
+  contentHash: string;
+}): string {
+  return "reflectionId" in reference
+    ? JSON.stringify([reference.reflectionId, reference.revision, reference.contentHash])
+    : JSON.stringify([reference.artifactId, reference.revision, reference.contentHash]);
 }
 
 function uniqueArtifacts(artifacts: TraceinkArtifactV1[]): TraceinkArtifactV1[] {
@@ -874,7 +1797,16 @@ function isCanonicalStoreEnvelope(value: unknown): value is TraceinkAssetStoreDo
     Array.isArray(raw.artifacts) &&
     Array.isArray(raw.reflections) &&
     (raw.proposalDispositions === undefined || Array.isArray(raw.proposalDispositions)) &&
-    asRecord(raw.activeIndexByDate)
+    asRecord(raw.activeIndexByDate) &&
+    (raw.structuredIndexes === undefined || Array.isArray(raw.structuredIndexes)) &&
+    (raw.structuredIndexV2Candidates === undefined || Array.isArray(raw.structuredIndexV2Candidates)) &&
+    (raw.structuredDossierV2Candidates === undefined || Array.isArray(raw.structuredDossierV2Candidates)) &&
+    (raw.structuredDossiers === undefined || Array.isArray(raw.structuredDossiers)) &&
+    (raw.activeStructuredIndexByDate === undefined || asRecord(raw.activeStructuredIndexByDate)) &&
+    (raw.structuredReflections === undefined || Array.isArray(raw.structuredReflections)) &&
+    (raw.structuredProposals === undefined || Array.isArray(raw.structuredProposals)) &&
+    (raw.structuredProposalDispositions === undefined || Array.isArray(raw.structuredProposalDispositions)) &&
+    (raw.structuredRuns === undefined || Array.isArray(raw.structuredRuns))
   );
 }
 

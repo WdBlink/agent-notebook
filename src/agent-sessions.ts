@@ -119,7 +119,10 @@ export async function loadAgentWorkSnapshot(
   const candidates: CandidateFile[] = [];
   const evidenceCoverage: AgentEvidenceCoverageEntry[] = [];
   const maxFiles = options.maxFiles ?? DEFAULT_MAX_FILES;
-  const maxFilesPerRoot = Math.max(12, Math.ceil(maxFiles / Math.max(sources.length, 1)));
+  // Each provider root gets the full discovery budget before one global
+  // recency cut. Dividing the budget by root allowed a burst of child-Agent
+  // files to hide their older primary Session before lineage was parsed.
+  const maxFilesPerRoot = Math.max(12, maxFiles);
 
   for (const { source, platform } of sourceDescriptors) {
     const root = expandHome(source, homeDir);
@@ -154,14 +157,6 @@ export async function loadAgentWorkSnapshot(
   }
 
   for (const candidate of sorted) {
-    if (sessions.length >= maxSessions) {
-      evidenceCoverage.push({
-        sourceId: candidateSourceId(candidate),
-        disposition: "truncated",
-        detail: "已达到本次 Session 容量上限，候选证据未进入本次快照。"
-      });
-      continue;
-    }
     let session: AgentWorkSession | null;
     try {
       session = await readSession(candidate, fs, day);
@@ -202,11 +197,22 @@ export async function loadAgentWorkSnapshot(
     });
   }
 
-  let mergedSessions = sessions;
-  if (options.summarizer && sessions.length > 0) {
+  const retainedSessions = retainMainSessionFamilies(sessions, maxSessions);
+  const retainedIdentities = new Set(retainedSessions.map((session) => `${session.platform}:${session.id}:${session.path}`));
+  for (const session of sessions) {
+    if (retainedIdentities.has(`${session.platform}:${session.id}:${session.path}`)) continue;
+    evidenceCoverage.push({
+      sourceId: `${session.platform}:${session.path}`,
+      disposition: "truncated",
+      detail: "已达到本次 Session 容量上限；主会话优先保留，当前执行记录未进入快照。"
+    });
+  }
+
+  let mergedSessions = retainedSessions;
+  if (options.summarizer && retainedSessions.length > 0) {
     try {
-      const batch = await options.summarizer({ date, sessions, settings });
-      mergedSessions = mergeSessionSummaries(sessions, batch.summaries);
+      const batch = await options.summarizer({ date, sessions: retainedSessions, settings });
+      mergedSessions = mergeSessionSummaries(retainedSessions, batch.summaries);
       warnings = [...warnings, ...batch.warnings].slice(0, 8);
     } catch (error) {
       warnings = [...warnings, `Agent 总结失败：${errorMessage(error)}`].slice(0, 8);
@@ -223,6 +229,28 @@ export async function loadAgentWorkSnapshot(
     evidenceCoverage,
     evidenceScope: evidenceScopeForDay(day, generatedAt)
   };
+}
+
+function retainMainSessionFamilies(sessions: AgentWorkSession[], maxSessions: number): AgentWorkSession[] {
+  if (sessions.length <= maxSessions) return sessions;
+  const main = sessions.filter((session) => session.lineage?.origin !== "subagent");
+  const retained = main.slice(0, maxSessions);
+  if (retained.length >= maxSessions) return retained;
+  const retainedRootIds = new Set(retained.map((session) => session.id));
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  const children = sessions.filter((session) => {
+    if (session.lineage?.origin !== "subagent") return false;
+    let parentId = session.lineage.parentSessionId;
+    const seen = new Set([session.id]);
+    while (parentId && !seen.has(parentId)) {
+      if (retainedRootIds.has(parentId)) return true;
+      seen.add(parentId);
+      parentId = byId.get(parentId)?.lineage?.parentSessionId;
+    }
+    return false;
+  });
+  return [...retained, ...children.slice(0, maxSessions - retained.length)]
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
 function candidateSourceId(candidate: CandidateFile): string {
@@ -285,6 +313,7 @@ export function extractWorkSessionFromText(
   const artifacts = collectArtifacts(parsed.records, projectPath).slice(0, 12);
   const status = normalizeStatus(firstUsefulText(collectStringsByKeys(parsed.records, ["status", "state", "phase"])));
   const resumeHint = identity.resumable ? resumeCommand(platform, id) : undefined;
+  const lineage = extractSessionLineage(parsed.records, platform);
 
   const session: AgentWorkSession = {
     id,
@@ -303,8 +332,57 @@ export function extractWorkSessionFromText(
   if (projectPath) session.projectPath = projectPath;
   if (branch) session.branch = truncateOneLine(branch, 160);
   if (resumeHint) session.resumeHint = resumeHint;
+  if (lineage) session.lineage = lineage;
   session.artifacts = normalizeGeneratedArtifacts(artifacts, session);
   return session;
+}
+
+function extractSessionLineage(
+  records: unknown[],
+  platform: AgentPlatform
+): AgentWorkSession["lineage"] | undefined {
+  if (platform === "claude") return { origin: "primary" };
+  if (platform !== "codex") return { origin: "unknown" };
+  for (const value of records) {
+    const record = asRecord(value);
+    if (stringField(record, "type") !== "session_meta") continue;
+    const payload = asRecord(recordField(record, "payload"));
+    const source = recordField(payload, "source");
+    const subagent = asRecord(recordField(source, "subagent"));
+    const spawn = asRecord(recordField(subagent, "thread_spawn"));
+    const threadSource = stringField(payload, "thread_source");
+    const origin = subagent || threadSource === "subagent"
+      ? "subagent"
+      : typeof source === "string" && source === "exec"
+        ? "automation"
+        : typeof source === "string" || source
+          ? "primary"
+          : "unknown";
+    const lineage: NonNullable<AgentWorkSession["lineage"]> = { origin };
+    const parentSessionId = firstUsefulText([
+      stringField(spawn, "parent_thread_id") ?? "",
+      stringField(payload, "parent_thread_id") ?? "",
+      stringField(payload, "forked_from_id") ?? ""
+    ]);
+    const agentPath = firstUsefulText([
+      stringField(spawn, "agent_path") ?? "",
+      stringField(payload, "agent_path") ?? ""
+    ]);
+    const agentNickname = firstUsefulText([
+      stringField(spawn, "agent_nickname") ?? "",
+      stringField(payload, "agent_nickname") ?? ""
+    ]);
+    const agentRole = firstUsefulText([
+      stringField(spawn, "agent_role") ?? "",
+      stringField(payload, "agent_role") ?? ""
+    ]);
+    if (parentSessionId) lineage.parentSessionId = parentSessionId;
+    if (agentPath) lineage.agentPath = agentPath;
+    if (agentNickname) lineage.agentNickname = agentNickname;
+    if (agentRole) lineage.agentRole = agentRole;
+    return lineage;
+  }
+  return { origin: "unknown" };
 }
 
 export function previousLocalDateString(now = new Date()): string {

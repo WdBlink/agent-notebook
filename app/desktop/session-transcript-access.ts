@@ -3,8 +3,10 @@ import type { SessionTranscriptRequest } from "./api";
 import type { NotebookDocument } from "./notebook-store";
 import {
   activeIndexReferenceForDate,
+  activeStructuredTodayIndexReferenceForDate,
   currentTraceinkWorklineLineage,
   findTraceinkArtifact,
+  findStructuredTodayIndex,
   sameTraceinkArtifactReference,
   type TraceinkAssetStoreDocumentV1
 } from "./traceink-asset-store";
@@ -29,9 +31,11 @@ export function authorizeSessionTranscriptRequest(
   document: NotebookDocument,
   traceinkAssets?: TraceinkAssetStoreDocumentV1
 ): AuthorizedSessionTranscriptReference {
-  if (request?.packageRef && request?.traceinkRef) {
-    throw new Error("一次会话读取不能同时使用旧证据包和 Traceink 证据授权。");
+  const authorityCount = [request?.packageRef, request?.traceinkRef, request?.structuredTodayRef].filter(Boolean).length;
+  if (authorityCount > 1) {
+    throw new Error("一次会话读取不能同时使用多种封存证据授权。");
   }
+  if (request?.structuredTodayRef) return authorizeStructuredTodayTranscript(request, traceinkAssets);
   if (request?.traceinkRef) return authorizeTraceinkTranscript(request, traceinkAssets);
   const packageRef = request?.packageRef;
   if (!packageRef) {
@@ -66,6 +70,54 @@ export function authorizeSessionTranscriptRequest(
     return pickReference(current);
   }
   return pickPackageReference(evidence);
+}
+
+function authorizeStructuredTodayTranscript(
+  request: SessionTranscriptRequest,
+  document: TraceinkAssetStoreDocumentV1 | undefined
+): AuthorizedSessionTranscriptReference {
+  const requested = request.structuredTodayRef;
+  if (!requested || !document) throw new Error("Structured Today 证据资产尚未加载，拒绝读取。");
+  const active = activeStructuredTodayIndexReferenceForDate(document, requested.logicalDate);
+  if (
+    !active ||
+    active.artifactId !== requested.artifactId ||
+    active.revision !== requested.revision ||
+    active.contentHash !== requested.contentHash
+  ) {
+    throw new Error("这条证据不属于该日期当前结构化工作脉络，拒绝读取。");
+  }
+  const index = findStructuredTodayIndex(document, active);
+  const evidence = index?.evidence.find((candidate) => candidate.evidenceId === requested.evidenceId);
+  if (!index || !evidence || evidence.sourceKind !== "session") {
+    throw new Error("结构化工作脉络中找不到指定 Session 证据。");
+  }
+  if (
+    evidence.sessionId !== request.id ||
+    evidence.provider !== request.platform ||
+    evidence.sourcePath !== request.path
+  ) {
+    throw new Error("请求的会话元组与结构化证据不匹配，拒绝读取。");
+  }
+  const match = /^bytes 0-(\d+)$/.exec(evidence.range ?? "");
+  const byteLength = match ? Number(match[1]) : Number.NaN;
+  if (!path.isAbsolute(evidence.sourcePath) || !Number.isSafeInteger(byteLength) || byteLength < 0) {
+    throw new Error("结构化 Session 证据的冻结路径或范围无效，拒绝读取。");
+  }
+  return {
+    id: evidence.sessionId,
+    platform: evidence.provider,
+    path: evidence.sourcePath,
+    readPath: evidence.sourcePath,
+    title: index.sessions.find((session) => session.sessionId === evidence.sessionId)?.title ?? evidence.sessionId,
+    origin: "traceink-asset",
+    transcriptCapture: {
+      canonicalPath: evidence.sourcePath,
+      sha256: evidence.contentHash,
+      byteLength,
+      coverage: { startByte: 0, endByte: byteLength }
+    }
+  };
 }
 
 function authorizeTraceinkTranscript(

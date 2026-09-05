@@ -1,3 +1,13 @@
+# Work Continuity v0.7.1
+
+Today preparation now keeps one temporary frozen input per workflow and stores only hash-checked input references in checkpoints and initial pending writes. Interrupted work can resume without repeating completed model calls; successful publication removes its recovery state. Inactive failed/interrupted runs expire after 24 hours, superseded attempts are reclaimed, and active runs are protected. Cleanup failures no longer turn a successfully saved page into a failed task.
+
+This release also includes the structured Today workflow: one digest per main Session family, child-Agent evidence within that family, a top-level preparation progress bar, human-only interaction counts, provider/tool activity windows, and on-demand dossiers with saved reflections and explicit proposal decisions. Published pages and provider transcripts are not deleted by checkpoint maintenance.
+
+Existing oversized database files can be reclaimed with the explicit offline maintenance command documented in the README. It preserves a compressed recovery copy and verifies saved artifact bytes and SQLite integrity. Normal startup performs bounded recovery-state cleanup; it does not run a blocking full database rewrite.
+
+Message-level evidence preview remains development-only and cannot be enabled in packaged applications. Its semantic release gates remain pending. macOS installers are unsigned and not notarized.
+
 # Work Continuity v0.7.0
 
 Work Continuity v0.7.0 moves daily workline preparation out of the user's waiting path. Today remains one continuous work surface: source Sessions stay readable while the app prepares the day's review in the background, and a finished package appears without requiring the user to watch a model run.

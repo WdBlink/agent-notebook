@@ -57,6 +57,35 @@ test("extracts Codex JSONL sessions with resume hints", () => {
   assert.equal(session?.resumable, true);
 });
 
+test("preserves Codex subagent lineage instead of treating a child transcript as a primary Session", () => {
+  const content = [
+    JSON.stringify({
+      timestamp: "2026-08-30T03:31:02.892Z",
+      type: "session_meta",
+      payload: {
+        id: "child-thread",
+        parent_thread_id: "root-thread",
+        thread_source: "subagent",
+        source: { subagent: { thread_spawn: {
+          parent_thread_id: "root-thread",
+          agent_path: "/root/radar_pipeline",
+          agent_nickname: "Confucius",
+          agent_role: "worker"
+        } } }
+      }
+    }),
+    JSON.stringify({ type: "response_item", payload: { type: "message", role: "user", content: [{ text: "执行雷达子任务" }] } })
+  ].join("\n");
+  const session = extractWorkSessionFromText(content, "/tmp/child.jsonl", "codex", "2026-08-30T04:00:00.000Z");
+  assert.deepEqual(session?.lineage, {
+    origin: "subagent",
+    parentSessionId: "root-thread",
+    agentPath: "/root/radar_pipeline",
+    agentNickname: "Confucius",
+    agentRole: "worker"
+  });
+});
+
 test("Codex archived sessions are completed and model summaries cannot reopen them", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "work-continuity-archive-"));
   const archive = path.join(root, ".codex", "archived_sessions");

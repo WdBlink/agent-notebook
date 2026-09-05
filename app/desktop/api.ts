@@ -4,6 +4,10 @@ import type { DailyReviewPackage } from "../../src/workline-review";
 import type { TodayBoardPackageGeneration, TodayBoardProjection } from "../../src/today-board";
 import type { DailyReviewPreparationState } from "../../src/daily-review-schedule";
 import type { TraceinkReviewProjection } from "../../src/traceink-review-state";
+import type { StructuredTodayReviewProjection } from "../../src/structured-today-review-state";
+import type { StructuredTodayIndexReferenceV1 } from "./traceink-asset-store";
+import type { StructuredTodayProposalDispositionV1 } from "../../src/structured-today-contracts";
+import type { TodayWorklineDossierV2, TodayWorklineIndexV2 } from "../../src/structured-today-v2-contracts";
 import type {
   TraceinkArtifactReferenceV1,
   TraceinkProposalDispositionActionV1,
@@ -24,7 +28,31 @@ export interface DesktopState {
   summaryJob?: DesktopSummaryJob;
   reviewPreparation: DailyReviewPreparationState;
   traceinkReview: TraceinkReviewProjection;
+  structuredTodayReview: StructuredTodayReviewProjection;
+  structuredTodayProgress: StructuredTodayProgressState;
+  structuredTodayV2Candidate: {
+    enabled: boolean;
+    index?: TodayWorklineIndexV2;
+    dossiers: TodayWorklineDossierV2[];
+    status: "empty" | "complete" | "partial" | "failed";
+    issues: string[];
+  };
   traceinkReviewError?: string;
+}
+
+export interface StructuredTodayRunProgress {
+  runId: string;
+  status: "queued" | "running" | "ready" | "failed" | "cancelled";
+  stage: string;
+  completed: number;
+  total: number;
+  message?: string;
+}
+
+export interface StructuredTodayProgressState {
+  index?: StructuredTodayRunProgress;
+  dossierByWorklineId: Record<string, StructuredTodayRunProgress>;
+  proposalByWorklineId?: Record<string, StructuredTodayRunProgress>;
 }
 
 export type NotebookNoteKind = "thought" | "web" | "note";
@@ -81,7 +109,7 @@ export interface DailyContinuationBookmark {
 }
 
 export interface DailyNotebookPage {
-  schemaVersion: 1 | 2 | 3;
+  schemaVersion: 1 | 2 | 3 | 4;
   logicalDate: string;
   status: "unformed" | "draft" | "sealed";
   createdAt?: string;
@@ -96,6 +124,20 @@ export interface DailyNotebookPage {
   lastCompilationError?: string;
   worklineReflections: DailyWorklineReflection[];
   bookmarks: DailyContinuationBookmark[];
+  structuredCloseout?: StructuredTodaySealedCloseoutV1;
+}
+
+export interface StructuredTodaySealedCloseoutV1 {
+  index: StructuredTodayIndexReferenceV1;
+  dossiers: Array<{ artifactId: string; revision: number; contentHash: string; worklineId: string }>;
+  reflections: Array<{ reflectionId: string; revision: number; contentHash: string; worklineId: string }>;
+  proposals: Array<{ artifactId: string; revision: number; contentHash: string; worklineId: string }>;
+  dispositions: Array<{ dispositionId: string; revision: number; proposalId: string }>;
+}
+
+export interface StructuredTodaySealInput {
+  index: StructuredTodayIndexReferenceV1;
+  bookmarkIds: string[];
 }
 
 export interface DailyWorklineReflection {
@@ -182,13 +224,26 @@ export interface SessionTranscriptRequest {
     logicalDate: string;
     evidenceId: string;
   };
+  structuredTodayRef?: StructuredTodayIndexReferenceV1 & {
+    logicalDate: string;
+    evidenceId: string;
+  };
 }
 
 export interface SessionTranscriptMessage {
   id: string;
   role: "user" | "assistant";
+  /** Display metadata only. Evidence authority is carried by V2 message locators. */
+  authorKind?: "human" | "agent" | "automation" | "host-notification" | "unknown";
   content: string;
   timestamp?: string;
+}
+
+export interface SessionTranscriptActivityWindow {
+  id: string;
+  start: string;
+  end: string;
+  basis: "provider-task" | "provider-item" | "tool-execution";
 }
 
 export interface SessionTranscriptState {
@@ -197,9 +252,47 @@ export interface SessionTranscriptState {
   title: string;
   path: string;
   messages: SessionTranscriptMessage[];
+  activityWindows?: SessionTranscriptActivityWindow[];
   omittedToolEvents: number;
   truncated: boolean;
   warning?: string;
+}
+
+export interface StructuredTodaySpanRequest {
+  owner: {
+    kind: "index-v2-candidate" | "dossier-v2-candidate";
+    logicalDate: string;
+    artifactId: string;
+    revision: number;
+    contentHash: string;
+  };
+  statementId: string;
+  spanId: string;
+}
+
+export interface StructuredTodaySpanState {
+  status: "exact";
+  owner: StructuredTodaySpanRequest["owner"];
+  statementId: string;
+  spanId: string;
+  evidenceId: string;
+  provider: "codex" | "claude";
+  sessionId: string;
+  role: "user" | "assistant";
+  authorKind: "human" | "agent" | "automation" | "host-notification" | "unknown";
+  messageKey: string;
+  messageLocatorId: string;
+  content: string;
+  utf16Start: number;
+  utf16End: number;
+  messages: Array<{
+    messageKey: string;
+    role: "user" | "assistant";
+    authorKind: "human" | "agent" | "automation" | "host-notification" | "unknown";
+    content: string;
+  }>;
+  omittedBefore: number;
+  omittedAfter: number;
 }
 
 export interface DesktopApi {
@@ -214,6 +307,35 @@ export interface DesktopApi {
   routeNotebookNoteToProject(noteId: string, projectPath: string): Promise<{ notebook: DesktopNotebookState; path: string }>;
   prepareDailyReview(date: string, mode: DailyReviewPreparationMode): Promise<DesktopNotebookState>;
   prepareTraceinkDossier(date: string, selection: TraceinkWorklineSelectionV1): Promise<DesktopState>;
+  prepareStructuredTodayDossier(
+    date: string,
+    index: StructuredTodayIndexReferenceV1,
+    worklineId: string
+  ): Promise<DesktopState>;
+  prepareStructuredTodayV2Candidate(date: string): Promise<DesktopState>;
+  prepareStructuredTodayV2DossierCandidate(
+    date: string,
+    index: StructuredTodayIndexReferenceV1,
+    worklineId: string
+  ): Promise<DesktopState>;
+  saveStructuredTodayReflection(
+    date: string,
+    index: StructuredTodayIndexReferenceV1,
+    worklineId: string,
+    text: string
+  ): Promise<DesktopState>;
+  prepareStructuredTodayProposals(
+    date: string,
+    index: StructuredTodayIndexReferenceV1,
+    worklineId: string
+  ): Promise<DesktopState>;
+  disposeStructuredTodayProposal(
+    date: string,
+    proposalArtifact: { artifactId: string; revision: number; contentHash: string },
+    proposalId: string,
+    input: Pick<StructuredTodayProposalDispositionV1, "action" | "rewriteText">
+  ): Promise<DesktopState>;
+  sealStructuredTodayPage(date: string, input: StructuredTodaySealInput): Promise<DesktopState>;
   saveTraceinkReflection(date: string, dossier: TraceinkArtifactReferenceV1 & { stage: "dossier" }, text: string): Promise<DesktopState>;
   prepareTraceinkProposals(date: string, reflection: UserReflectionAssetReferenceV1): Promise<DesktopState>;
   disposeTraceinkProposal(
@@ -227,6 +349,7 @@ export interface DesktopApi {
   sealDailyPage(date: string, input: DailySealInput): Promise<DesktopNotebookState>;
   getProjectContext(projectPath: string): Promise<ProjectContextState>;
   getSessionTranscript(request: SessionTranscriptRequest): Promise<SessionTranscriptState>;
+  getStructuredTodaySpan(request: StructuredTodaySpanRequest): Promise<StructuredTodaySpanState>;
   chooseDirectory(): Promise<string | null>;
   copyText(text: string): Promise<boolean>;
   openPath(path: string, reveal?: boolean): Promise<boolean>;

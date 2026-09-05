@@ -1137,6 +1137,12 @@ function TranscriptReader({ target, onClose }: { target: TodayTranscriptTarget; 
           {!transcript && !error ? <TranscriptSkeleton /> : null}
           {error ? <StateMessage kind="error" title="会话记录暂时无法读取" detail={error} /> : null}
           {transcript?.warning ? <div className="transcript-warning"><AlertTriangle size={15} />{transcript.warning}</div> : null}
+          {target.citation ? (
+            <div className="transcript-citation-context" role="note">
+              <FileText size={16} aria-hidden="true" />
+              <p><strong>引用 {target.citation.label} · Session 级证据</strong><span>这里是该引用对应的完整会话。当前资产没有消息级位置，因此不会自动猜测或高亮某一段。</span></p>
+            </div>
+          ) : null}
           {transcript && transcript.messages.length === 0 ? <StateMessage kind="empty" title="没有可显示的对话正文" detail="文件存在，但没有识别到用户或助手消息；系统指令和工具事件不会作为正文铺开。" /> : null}
           {transcript?.messages.map((message, index) => {
             const previous = transcript.messages[index - 1];

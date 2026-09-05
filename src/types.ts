@@ -62,6 +62,16 @@ export interface AgentTranscriptCapture {
   };
 }
 
+export type AgentSessionOrigin = "primary" | "subagent" | "automation" | "unknown";
+
+export interface AgentSessionLineage {
+  origin: AgentSessionOrigin;
+  parentSessionId?: string;
+  agentPath?: string;
+  agentNickname?: string;
+  agentRole?: string;
+}
+
 export interface AgentWorkSession {
   id: string;
   platform: AgentPlatform;
@@ -80,6 +90,7 @@ export interface AgentWorkSession {
   artifacts: string[];
   status: AgentSessionStatus;
   transcriptCapture?: AgentTranscriptCapture;
+  lineage?: AgentSessionLineage;
 }
 
 export interface AgentEvidenceCoverageEntry {

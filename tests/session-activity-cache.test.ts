@@ -32,8 +32,8 @@ test("keeps blocked date loads and cached lanes bound to their request dates", a
 
   const cachedAugust9 = await cache.load("2026-08-09", [session()]);
   const cachedAugust10 = await cache.load("2026-08-10", [session()]);
-  assert.deepEqual(cachedAugust9.lanes[0]?.timeRange, { start: "2026-08-09T09:00:00+08:00", end: "2026-08-09T09:02:00+08:00" });
-  assert.deepEqual(cachedAugust10.lanes[0]?.timeRange, { start: "2026-08-10T09:00:00+08:00", end: "2026-08-10T09:03:00+08:00" });
+  assert.deepEqual(cachedAugust9.lanes[0]?.timeRange, { start: "2026-08-09T01:00:00.000Z", end: "2026-08-09T01:02:00.000Z" });
+  assert.deepEqual(cachedAugust10.lanes[0]?.timeRange, { start: "2026-08-10T01:00:00.000Z", end: "2026-08-10T01:03:00.000Z" });
   assert.equal(reads, 2);
 });
 
@@ -81,7 +81,8 @@ function session(): AgentWorkSession {
     path: "/tmp/shared.jsonl",
     updatedAt: "2026-08-10T09:03:00+08:00",
     artifacts: [],
-    status: "completed"
+    status: "completed",
+    lineage: { origin: "primary" }
   };
 }
 
@@ -94,9 +95,9 @@ function transcript(): SessionTranscriptState {
     omittedToolEvents: 0,
     truncated: false,
     messages: [
-      { id: "u-9", role: "user", content: "day nine", timestamp: "2026-08-09T09:00:00+08:00" },
+      { id: "u-9", role: "user", authorKind: "human", content: "day nine", timestamp: "2026-08-09T09:00:00+08:00" },
       { id: "a-9", role: "assistant", content: "done", timestamp: "2026-08-09T09:02:00+08:00" },
-      { id: "u-10", role: "user", content: "day ten", timestamp: "2026-08-10T09:00:00+08:00" },
+      { id: "u-10", role: "user", authorKind: "human", content: "day ten", timestamp: "2026-08-10T09:00:00+08:00" },
       { id: "a-10", role: "assistant", content: "done", timestamp: "2026-08-10T09:03:00+08:00" }
     ]
   };

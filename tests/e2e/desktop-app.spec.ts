@@ -542,6 +542,13 @@ async function installDesktopApi(page: Page): Promise<void> {
       notebook: createNotebook(activeDate, scopedSessions, scenario),
       activity: createActivity(activeDate, scopedSessions),
       traceinkReview: createTraceinkProjection(activeDate, scopedSessions, scenario),
+      structuredTodayReview: {
+        mode: "raw",
+        worklines: [],
+        dispositions: [],
+        uncompiledEvidence: []
+      },
+      structuredTodayProgress: { dossierByWorklineId: {} },
       traceinkReviewError: undefined as string | undefined,
       reviewPreparation: {
         enabled: false,
@@ -898,6 +905,7 @@ async function installDesktopApi(page: Page): Promise<void> {
         state = structuredClone(state);
         return state;
       },
+      prepareStructuredTodayDossier: async () => state,
       saveTraceinkReflection: async (date: string, dossier: { artifactId: string; stage: string; revision: number; outputHash: string }, text: string) => {
         (window as unknown as { traceinkReflectionInputs: string[] }).traceinkReflectionInputs.push(text);
         const workline = state.traceinkReview.worklines?.find((item: any) => item.dossier?.id === dossier.artifactId);
@@ -1060,7 +1068,7 @@ test("today board keeps raw Sessions as independent evidence lanes", async ({ pa
   await expect(board.getByText("22 分钟", { exact: true })).toBeVisible();
   await expect(board.getByText("3 次", { exact: true })).toBeVisible();
   await expect(board.getByText("注意力负荷线索", { exact: true })).toBeVisible();
-  await expect(board.getByText(/依据：带时间戳的用户消息与 Agent 响应窗口/)).toBeVisible();
+  await expect(board.getByText(/依据：host 分类的人类消息与 provider \/ 工具活动窗口/)).toBeVisible();
   await expect(board.getByText(/置信度：证据不足/)).toBeVisible();
   await expect(page.getByLabel("今日便签")).toHaveCount(0);
 
