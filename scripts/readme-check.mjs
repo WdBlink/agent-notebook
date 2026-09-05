@@ -5,7 +5,7 @@ const requiredFiles = [
   "LICENSE",
   ".github/logo-light.svg",
   ".github/logo-dark.svg",
-  ".github/cockpit-preview.png",
+  ".github/agent-notebook-preview.png",
   ".github/repo-meta.yml",
   "app/desktop/assets/app-icon.png",
   "app/desktop/assets/app-icon.icns"
@@ -16,7 +16,7 @@ for (const file of requiredFiles) {
 
 const readme = await fs.readFile("README.md", "utf8");
 const requiredSnippets = [
-  "Work Continuity",
+  "Agent Notebook",
   "macOS Install",
   "Quick Start From Source",
   "Source Install",
@@ -57,7 +57,7 @@ for (const retired of [
   }
 }
 
-console.log("readme-check: Work Continuity assets and required sections are present");
+console.log("readme-check: Agent Notebook assets and required sections are present");
 
 async function assertFile(file) {
   const stat = await fs.stat(file);

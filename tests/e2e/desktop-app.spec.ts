@@ -6,13 +6,13 @@ const desktopUrl = pathToFileURL(path.resolve("dist/desktop/index.html")).toStri
 
 const baseSessions = [
   {
-    id: "019f-work-continuity",
+    id: "019f-agent-notebook",
     platform: "codex",
     title: "迁移第一版视觉骨架",
     summary: "第一版比例、留白和会话入口仍需完整迁入独立应用。",
     path: "/tmp/codex-session.jsonl",
     updatedAt: "2026-07-20T14:36:00+08:00",
-    projectPath: "/workspace/work-continuity",
+    projectPath: "/workspace/agent-notebook",
     resumable: true,
     summarySource: "codex",
     artifacts: ["app/desktop/renderer.tsx"],
@@ -25,7 +25,7 @@ const baseSessions = [
     summary: "节点需要保持空间身份，并可以阅读项目原文。",
     path: "/tmp/claude-session.jsonl",
     updatedAt: "2026-07-20T16:12:00+08:00",
-    projectPath: "/workspace/work-continuity",
+    projectPath: "/workspace/agent-notebook",
     resumable: true,
     summarySource: "claude",
     artifacts: [],
@@ -51,7 +51,7 @@ const baseSessions = [
     summary: "Codex 与 Claude Code 可以独立读取。",
     path: "/tmp/claude-finished.jsonl",
     updatedAt: "2026-07-20T18:22:00+08:00",
-    projectPath: "/workspace/work-continuity",
+    projectPath: "/workspace/agent-notebook",
     resumable: false,
     summarySource: "claude",
     artifacts: [],
@@ -104,11 +104,11 @@ async function installDesktopApi(page: Page): Promise<void> {
       activeDate,
       activityDates: ["2026-07-20", "2026-07-19", "2026-07-18"],
       appVersion: "0.4.0-test",
-      userDataPath: "/tmp/work-continuity-test",
+      userDataPath: "/tmp/agent-notebook-test",
       data: {
         schemaVersion: 4,
         settings: {
-          dailyNoteFolder: "Daily Cockpit",
+          dailyNoteFolder: "Agent Notebook",
           llmEndpoint: "",
           llmModel: "",
           sessionScanRoots: ["~/.codex/sessions", "~/.claude/projects"],
@@ -176,7 +176,7 @@ async function installDesktopApi(page: Page): Promise<void> {
         note?.deliveries.push({ kind: "wiki", deliveredAt: "2026-07-20T20:12:00+08:00", target: `/workspace/LLM-Wiki/raw/${noteId}.md`, status: "queued" });
         return { notebook: state.notebook, path: `/workspace/LLM-Wiki/raw/${noteId}.md` };
       },
-      routeNotebookNoteToProject: async (noteId: string) => ({ notebook: state.notebook, path: `/workspace/work-continuity/ctx/scratch/inbox/${noteId}.md` }),
+      routeNotebookNoteToProject: async (noteId: string) => ({ notebook: state.notebook, path: `/workspace/agent-notebook/ctx/scratch/inbox/${noteId}.md` }),
       composeDailyPage: async () => {
         state.notebook.page = { ...state.notebook.page, status: "draft", createdAt: "2026-07-20T20:00:00+08:00", updatedAt: "2026-07-20T20:00:00+08:00", evidenceCutoff: "2026-07-20T20:00:00+08:00", workRecords: state.notebook.previewRecords };
         return state.notebook;
@@ -195,11 +195,11 @@ async function installDesktopApi(page: Page): Promise<void> {
       },
       getProjectContext: async (projectPath: string) => ({
         projectPath,
-        storePath: "/workspace/work-continuity-ctx",
+        storePath: "/workspace/agent-notebook-ctx",
         warnings: [],
         documents: [
-          { id: "overview.md", kind: "overview", label: "产品总览", path: "/workspace/work-continuity-ctx/overview.md", relativePath: "overview.md", content: "# 产品总览\n\n这是 Agent-native work continuity 的当前事实源。", updatedAt: "2026-07-20T18:00:00+08:00" },
-          { id: "spec/brief.md", kind: "spec", label: "每日工作简报", path: "/workspace/work-continuity-ctx/spec/brief.md", relativePath: "spec/brief.md", content: "# 每日工作简报\n\n最多显示三条智能接续建议。", updatedAt: "2026-07-20T18:00:00+08:00" }
+          { id: "overview.md", kind: "overview", label: "产品总览", path: "/workspace/agent-notebook-ctx/overview.md", relativePath: "overview.md", content: "# 产品总览\n\n这是 Agent-native work continuity 的当前事实源。", updatedAt: "2026-07-20T18:00:00+08:00" },
+          { id: "spec/brief.md", kind: "spec", label: "每日工作简报", path: "/workspace/agent-notebook-ctx/spec/brief.md", relativePath: "spec/brief.md", content: "# 每日工作简报\n\n最多显示三条智能接续建议。", updatedAt: "2026-07-20T18:00:00+08:00" }
         ]
       }),
       getSessionTranscript: async (request: { id: string; platform: string; path: string }) => ({
@@ -306,7 +306,7 @@ test("map keeps node identity while focusing and exposes current project source"
   await expect(openInDefaultApp).toHaveCSS("color", "rgb(251, 250, 246)");
   await expect(openInDefaultApp).toHaveCSS("background-color", "rgb(32, 33, 30)");
   await openInDefaultApp.click();
-  expect(await page.evaluate(() => (window as unknown as { openedPaths: string[] }).openedPaths)).toContain("/workspace/work-continuity-ctx/overview.md");
+  expect(await page.evaluate(() => (window as unknown as { openedPaths: string[] }).openedPaths)).toContain("/workspace/agent-notebook-ctx/overview.md");
   await page.getByRole("button", { name: "项目文档", exact: true }).click();
   await page.getByRole("button", { name: "阅读完整原文" }).click();
   await expect(page.locator(".document-drawer pre")).toContainText("Agent-native work continuity");

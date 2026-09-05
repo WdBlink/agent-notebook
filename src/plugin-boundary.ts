@@ -5,7 +5,7 @@ import {
   COMMAND_QUICK_CAPTURE,
   COMMAND_REFRESH_WORK_SESSIONS,
   VIEW_TYPE_AGENT_WHITEBOARD,
-  VIEW_TYPE_DAILY_COCKPIT
+  VIEW_TYPE_AGENT_NOTEBOOK
 } from "./constants";
 
 export interface PluginSurfaceHost<TLeaf, TView, TSettingTab> {
@@ -30,13 +30,13 @@ export function registerPluginSurface<TLeaf, TView, TSettingTab>(
   host: PluginSurfaceHost<TLeaf, TView, TSettingTab>,
   actions: PluginSurfaceActions<TLeaf, TView, TSettingTab>
 ): void {
-  host.registerView(VIEW_TYPE_DAILY_COCKPIT, actions.createDailyView);
+  host.registerView(VIEW_TYPE_AGENT_NOTEBOOK, actions.createDailyView);
   host.registerView(VIEW_TYPE_AGENT_WHITEBOARD, actions.createWhiteboardView);
   host.addSettingTab(actions.settingTab);
-  host.addRibbonIcon("list-checks", "打开 Daily Cockpit", actions.openDaily);
+  host.addRibbonIcon("list-checks", "打开 Agent Notebook", actions.openDaily);
   host.addRibbonIcon("layout-dashboard", "打开 Agent Whiteboard", actions.openWhiteboard);
   for (const command of [
-    { id: COMMAND_OPEN_COCKPIT, name: "打开 Daily Cockpit", callback: actions.openDaily },
+    { id: COMMAND_OPEN_COCKPIT, name: "打开 Agent Notebook", callback: actions.openDaily },
     { id: COMMAND_OPEN_AGENT_WHITEBOARD, name: "打开 Agent Whiteboard", callback: actions.openWhiteboard },
     { id: COMMAND_QUICK_CAPTURE, name: "快速拆解待办", callback: actions.quickCapture },
     { id: COMMAND_EXPORT_DAILY_NOTE, name: "导出每日简报", callback: actions.exportDaily },

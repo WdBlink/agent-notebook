@@ -22,11 +22,11 @@ import {
   PLUGIN_ID,
   SESSION_PROVIDER_DEFINITIONS,
   VIEW_TYPE_AGENT_WHITEBOARD,
-  VIEW_TYPE_DAILY_COCKPIT
+  VIEW_TYPE_AGENT_NOTEBOOK
 } from "./constants";
 import { loadAgentWorkSnapshot } from "./agent-sessions";
 import { createCliSessionSummarizer } from "./agent-summary";
-import { buildDailyMarkdown, dailyNotePath, isDailyCockpitMarkdown } from "./export";
+import { buildDailyMarkdown, dailyNotePath, isAgentNotebookMarkdown } from "./export";
 import { requestTaskDecomposition } from "./llm";
 import {
   addPlanFromModelTasks,
@@ -63,7 +63,7 @@ import type {
   RendererState
 } from "./types";
 
-export default class DailyCockpitPlugin extends Plugin {
+export default class AgentNotebookPlugin extends Plugin {
   data: CockpitData = normalizeData(null);
   whiteboardMigrationError: WhiteboardMigrationError | undefined;
   private readonly writeQueue = new SerialTransactionQueue();
@@ -103,9 +103,9 @@ export default class DailyCockpitPlugin extends Plugin {
     this.runtimeGateway = this.createRuntimeGateway();
 
     registerPluginSurface(this, {
-      createDailyView: (leaf) => new DailyCockpitView(leaf, this),
+      createDailyView: (leaf) => new AgentNotebookView(leaf, this),
       createWhiteboardView: (leaf) => new AgentWhiteboardView(leaf, this),
-      settingTab: new DailyCockpitSettingTab(this.app, this),
+      settingTab: new AgentNotebookSettingTab(this.app, this),
       openDaily: () => { void this.activateView(); },
       openWhiteboard: () => { void this.activateWhiteboard(); },
       quickCapture: () => new IntentModal(this).open(),
@@ -116,21 +116,21 @@ export default class DailyCockpitPlugin extends Plugin {
   }
 
   onunload(): void {
-    this.app.workspace.detachLeavesOfType(VIEW_TYPE_DAILY_COCKPIT);
+    this.app.workspace.detachLeavesOfType(VIEW_TYPE_AGENT_NOTEBOOK);
     this.app.workspace.detachLeavesOfType(VIEW_TYPE_AGENT_WHITEBOARD);
     // beginDispose synchronously marks the gateway unavailable and sends host shutdown before returning.
     void this.runtimeGateway?.beginDispose();
   }
 
   async activateView(): Promise<void> {
-    const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_DAILY_COCKPIT)[0];
+    const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_AGENT_NOTEBOOK)[0];
     if (existing) {
       this.app.workspace.revealLeaf(existing);
       return;
     }
 
     const leaf = this.app.workspace.getLeaf("tab");
-    await leaf.setViewState({ type: VIEW_TYPE_DAILY_COCKPIT, active: true });
+    await leaf.setViewState({ type: VIEW_TYPE_AGENT_NOTEBOOK, active: true });
     this.app.workspace.revealLeaf(leaf);
   }
 
@@ -266,7 +266,7 @@ export default class DailyCockpitPlugin extends Plugin {
 
       if (existing instanceof TFile) {
         const current = await this.app.vault.read(existing);
-        if (isDailyCockpitMarkdown(current)) {
+        if (isAgentNotebookMarkdown(current)) {
           await this.app.vault.modify(existing, markdown);
         } else {
           path = await this.nextAvailableExportPath(path);
@@ -323,9 +323,9 @@ export default class DailyCockpitPlugin extends Plugin {
   }
 
   private refreshViews(): void {
-    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_DAILY_COCKPIT)) {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_AGENT_NOTEBOOK)) {
       const view = leaf.view;
-      if (view instanceof DailyCockpitView) {
+      if (view instanceof AgentNotebookView) {
         view.refresh();
       }
     }
@@ -383,7 +383,7 @@ export default class DailyCockpitPlugin extends Plugin {
     let counter = 1;
 
     while (counter < 100) {
-      const suffix = counter === 1 ? "daily-cockpit" : `daily-cockpit-${counter}`;
+      const suffix = counter === 1 ? "agent-notebook" : `agent-notebook-${counter}`;
       const candidate = normalizePath(`${stem}-${suffix}${extension}`);
       if (!this.app.vault.getAbstractFileByPath(candidate)) {
         return candidate;
@@ -391,7 +391,7 @@ export default class DailyCockpitPlugin extends Plugin {
       counter += 1;
     }
 
-    throw new Error("Could not find an available Daily Cockpit export path");
+    throw new Error("Could not find an available Agent Notebook export path");
   }
 }
 
@@ -403,22 +403,22 @@ async function resolveInstalledRuntimeHost(runtimeRoot: string): Promise<string>
   return `${runtimeRoot}/versions/${pointer.version}/pty-host.mjs`;
 }
 
-class DailyCockpitView extends ItemView {
+class AgentNotebookView extends ItemView {
   private controller?: RenderController;
   private processing = false;
   private refreshingSessions = false;
   private error?: RendererState["error"];
 
-  constructor(leaf: WorkspaceLeaf, private readonly plugin: DailyCockpitPlugin) {
+  constructor(leaf: WorkspaceLeaf, private readonly plugin: AgentNotebookPlugin) {
     super(leaf);
   }
 
   getViewType(): string {
-    return VIEW_TYPE_DAILY_COCKPIT;
+    return VIEW_TYPE_AGENT_NOTEBOOK;
   }
 
   getDisplayText(): string {
-    return "Daily Cockpit";
+    return "Agent Notebook";
   }
 
   getIcon(): string {
@@ -509,7 +509,7 @@ class AgentWhiteboardView extends ItemView implements WhiteboardCommitListener {
     retryMigration: async () => this.plugin.retryWhiteboardMigration()
   };
 
-  constructor(leaf: WorkspaceLeaf, private readonly plugin: DailyCockpitPlugin) {
+  constructor(leaf: WorkspaceLeaf, private readonly plugin: AgentNotebookPlugin) {
     super(leaf);
   }
 
@@ -579,7 +579,7 @@ class AgentWhiteboardView extends ItemView implements WhiteboardCommitListener {
 class WhiteboardProjectModal extends Modal {
   private readonly presenter: WhiteboardProjectModalPresenter;
 
-  constructor(private readonly plugin: DailyCockpitPlugin) {
+  constructor(private readonly plugin: AgentNotebookPlugin) {
     super(plugin.app);
     this.presenter = new WhiteboardProjectModalPresenter(new WhiteboardProjectConsumer({
       register: (rootPath, name, signal, onPhase) => plugin.registerWhiteboardProject(rootPath, name, signal, onPhase),
@@ -709,7 +709,7 @@ async function resolveProjectDirectory(input: string, signal?: AbortSignal): Pro
 class IntentModal extends Modal {
   private text = "";
 
-  constructor(private readonly plugin: DailyCockpitPlugin) {
+  constructor(private readonly plugin: AgentNotebookPlugin) {
     super(plugin.app);
   }
 
@@ -746,15 +746,15 @@ class IntentModal extends Modal {
   }
 }
 
-class DailyCockpitSettingTab extends PluginSettingTab {
-  constructor(app: App, private readonly plugin: DailyCockpitPlugin) {
+class AgentNotebookSettingTab extends PluginSettingTab {
+  constructor(app: App, private readonly plugin: AgentNotebookPlugin) {
     super(app, plugin);
   }
 
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Daily Cockpit" });
+    containerEl.createEl("h2", { text: "Agent Notebook" });
 
     new Setting(containerEl)
       .setName("本地模型 endpoint")

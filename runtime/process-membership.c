@@ -97,8 +97,8 @@ static int scan_processes(const char *needle, size_t needle_len, int prefix_matc
 #endif
 
 int main(void) {
-  const char *key = getenv("DAILY_COCKPIT_AUDIT_KEY");
-  const char *value = getenv("DAILY_COCKPIT_AUDIT_VALUE");
+  const char *key = getenv("AGENT_NOTEBOOK_AUDIT_KEY");
+  const char *value = getenv("AGENT_NOTEBOOK_AUDIT_VALUE");
   if (key == NULL || value == NULL || key[0] == '\0' || value[0] == '\0' || strchr(key, '=') != NULL) return 2;
   int prefix_match = strcmp(value, "*") == 0;
   size_t length = strlen(key) + (prefix_match ? 0 : strlen(value)) + 2;

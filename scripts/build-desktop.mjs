@@ -31,7 +31,7 @@ await fs.writeFile(
   path.join(outdir, "package.json"),
   `${JSON.stringify(
     {
-      name: "work-continuity",
+      name: "agent-notebook",
       version: rootPackage.version,
       description: rootPackage.description,
       main: "main.js",

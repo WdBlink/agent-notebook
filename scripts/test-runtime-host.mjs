@@ -14,7 +14,7 @@ const sourceSpawnHelper = path.resolve("node_modules/node-pty", "prebuilds", `${
 const spawnHelper = await exists(localSpawnHelper) ? localSpawnHelper : sourceSpawnHelper;
 const spawnHelperMode = (await fs.stat(spawnHelper)).mode;
 if ((spawnHelperMode & 0o111) === 0) await fs.chmod(spawnHelper, 0o755);
-const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "daily-cockpit-runtime-"));
+const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agent-notebook-runtime-"));
 const cwdA = path.join(tempRoot, "cockpit project α");
 const cwdB = path.join(tempRoot, "cockpit project β");
 await fs.mkdir(cwdA);
@@ -188,7 +188,7 @@ try {
 
   const descendantScript = [
     "const {spawn}=require('node:child_process');",
-    `const child=spawn(${JSON.stringify(process.execPath)},['-e',${JSON.stringify("const marker='daily-cockpit-descendant-probe';process.on('SIGHUP',()=>{});process.on('SIGTERM',()=>{});setInterval(()=>void marker,1000);")}],{stdio:'ignore'});`,
+    `const child=spawn(${JSON.stringify(process.execPath)},['-e',${JSON.stringify("const marker='agent-notebook-descendant-probe';process.on('SIGHUP',()=>{});process.on('SIGTERM',()=>{});setInterval(()=>void marker,1000);")}],{stdio:'ignore'});`,
     "process.on('SIGHUP',()=>{});process.on('SIGTERM',()=>{});",
     "console.log('DESCENDANT:' + child.pid);",
     "setInterval(()=>{},1000);"
@@ -209,7 +209,7 @@ try {
 
   const detachedScript = [
     "const {spawn}=require('node:child_process');",
-    `const child=spawn(${JSON.stringify(process.execPath)},['-e',${JSON.stringify("const marker='daily-cockpit-zero-detach-probe';process.on('SIGHUP',()=>{});process.on('SIGTERM',()=>{});setInterval(()=>void marker,1000);")}],{stdio:'ignore',detached:true});`,
+    `const child=spawn(${JSON.stringify(process.execPath)},['-e',${JSON.stringify("const marker='agent-notebook-zero-detach-probe';process.on('SIGHUP',()=>{});process.on('SIGTERM',()=>{});setInterval(()=>void marker,1000);")}],{stdio:'ignore',detached:true});`,
     "child.unref();console.log('DETACHED:' + child.pid);",
     "setImmediate(()=>process.exit(0));"
   ].join("");
@@ -225,7 +225,7 @@ try {
   });
   const detachedPid = await outputPid(detachedRuntime.runtimeId, "DETACHED:");
   await waitFor(() => exits.has(detachedRuntime.runtimeId), "natural detached runtime cleanup", 5_000);
-  await waitFor(() => pidExited(detachedPid, "daily-cockpit-zero-detach-probe"), "detached descendant exit");
+  await waitFor(() => pidExited(detachedPid, "agent-notebook-zero-detach-probe"), "detached descendant exit");
 
   const hostExit = new Promise((resolve) => child.once("exit", resolve));
   const shutdownRuntime = await request("spawn", {
@@ -288,7 +288,7 @@ async function runDisconnectProbe(environment, cwd) {
           ownerId: "disconnect-resistant",
           kind: "terminal",
           command: process.execPath,
-            args: ["-e", "const marker='daily-cockpit-disconnect-probe';process.on('SIGHUP',()=>{});process.on('SIGTERM',()=>{});setInterval(()=>void marker,1000);"],
+            args: ["-e", "const marker='agent-notebook-disconnect-probe';process.on('SIGHUP',()=>{});process.on('SIGTERM',()=>{});setInterval(()=>void marker,1000);"],
           cwd,
           env: environment,
           cols: 80,

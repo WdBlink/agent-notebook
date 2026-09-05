@@ -11,7 +11,7 @@ import { runWhiteboardLifecycle, WHITEBOARD_FAILURE_STAGES } from "./whiteboard-
 
 const execFileAsync = promisify(execFile);
 const { normalizeGlobalBoardDocument, validateSchemaTwoDocument } = await tsImport("../src/whiteboard-model.ts", import.meta.url);
-const pluginId = "daily-cockpit";
+const pluginId = "agent-notebook";
 const args = process.argv.slice(2);
 const trackedChildren = new Set();
 let failAfter;
@@ -136,7 +136,7 @@ const scenario = (async function* () {
   yield "install";
 
   throwIfAborted(currentStageSignal);
-  tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "daily-cockpit-whiteboard-"));
+  tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agent-notebook-whiteboard-"));
   const alphaRoot = path.join(tempRoot, "alpha");
   const betaRoot = path.join(tempRoot, "beta");
   const gammaRoot = path.join(tempRoot, "gamma");
@@ -675,7 +675,7 @@ async function captureRuntimeMembership(pluginDirectory, signal) {
   const hostPath = path.join(runtimeDirectory, "pty-host.mjs");
   const processes = await systemProcesses(5_000, signal);
   const byPid = new Map(processes.map((entry) => [entry.pid, entry]));
-  const memberPids = await membershipPidsByKey(helperPath, "DAILY_COCKPIT_HOST_TOKEN", signal);
+  const memberPids = await membershipPidsByKey(helperPath, "AGENT_NOTEBOOK_HOST_TOKEN", signal);
   const identities = memberPids.map((pid) => byPid.get(pid)).filter(Boolean);
   if (identities.length === 0 || !identities.some((entry) => entry.fullCommand.includes(hostPath))) {
     throw new Error("Live runtime membership capture did not include the companion host");
@@ -692,7 +692,7 @@ async function assertNoRuntimeDescendants(pluginDirectory, audit, signal) {
       const current = byPid.get(identity.pid);
       return current && current.executable === identity.executable && current.fullCommand === identity.fullCommand;
     });
-    const tokenMembers = await membershipPidsByKey(audit.helperPath, "DAILY_COCKPIT_HOST_TOKEN", signal);
+    const tokenMembers = await membershipPidsByKey(audit.helperPath, "AGENT_NOTEBOOK_HOST_TOKEN", signal);
     const hosts = processes.filter((entry) => entry.fullCommand.includes(audit.hostPath));
     if (capturedSurvivors.length === 0 && tokenMembers.length === 0 && hosts.length === 0) return;
     await abortableSleep(100, signal);
@@ -703,7 +703,7 @@ async function assertNoRuntimeDescendants(pluginDirectory, audit, signal) {
 async function membershipPidsByKey(helperPath, key, signal) {
   throwIfAborted(signal);
   const { stdout } = await execFileAsync(helperPath, [], {
-    env: { DAILY_COCKPIT_AUDIT_KEY: key, DAILY_COCKPIT_AUDIT_VALUE: "*" },
+    env: { AGENT_NOTEBOOK_AUDIT_KEY: key, AGENT_NOTEBOOK_AUDIT_VALUE: "*" },
     timeout: 1_000,
     maxBuffer: 1024 * 1024,
     signal

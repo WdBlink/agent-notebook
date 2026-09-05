@@ -1,6 +1,6 @@
-# Testing Daily Cockpit
+# Testing Agent Notebook
 
-Daily Cockpit has four verification layers: model and state tests, browser interaction tests, local installation integrity checks, and an optional real Obsidian desktop run.
+Agent Notebook has four verification layers: model and state tests, browser interaction tests, local installation integrity checks, and an optional real Obsidian desktop run.
 
 ## Prerequisites
 

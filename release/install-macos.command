@@ -18,7 +18,7 @@ if [[ "$ACTUAL_ARCH" != "$EXPECTED_ARCH" ]]; then
 fi
 
 ROOT_DIR="${0:A:h}"
-SOURCE_DIR="$ROOT_DIR/daily-cockpit"
+SOURCE_DIR="$ROOT_DIR/agent-notebook"
 if [[ ! -f "$SOURCE_DIR/manifest.json" || ! -f "$SOURCE_DIR/runtime/active.json" ]]; then
   show_error "安装包内容不完整，请重新下载 GitHub Release。"
   exit 1
@@ -44,7 +44,7 @@ if [[ ! -d "$VAULT_PATH/.obsidian" ]]; then
   exit 1
 fi
 
-PLUGIN_DIR="$VAULT_PATH/.obsidian/plugins/daily-cockpit"
+PLUGIN_DIR="$VAULT_PATH/.obsidian/plugins/agent-notebook"
 if [[ -L "$PLUGIN_DIR" ]]; then
   show_error "目标插件目录是符号链接；为避免覆盖外部文件，安装已停止。"
   exit 1

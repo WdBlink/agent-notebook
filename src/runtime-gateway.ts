@@ -97,7 +97,7 @@ interface HostGeneration {
   failureReported: boolean;
 }
 
-const HOST_TOKEN_KEY = "DAILY_COCKPIT_HOST_TOKEN";
+const HOST_TOKEN_KEY = "AGENT_NOTEBOOK_HOST_TOKEN";
 
 export class AgentRuntimeGateway implements AgentRuntimeGatewayContract {
   private readonly supervisor: PtyHostSupervisor;

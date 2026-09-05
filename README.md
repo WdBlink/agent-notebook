@@ -1,6 +1,8 @@
-# Work Continuity
+# Agent Notebook
 
-Work Continuity is a local work notebook for macOS. It reads Codex and Claude Code session stores, groups the day's work by project, lets you keep timestamped notes, and turns an explicit end-of-day review into a stable sealed page.
+A knowledge notebook co-written by you and your agents. [Download the latest release](https://github.com/WdBlink/agent-notebook/releases/latest).
+
+Agent Notebook is a local work notebook for macOS. It reads Codex and Claude Code session stores, groups the day's work by project, lets you keep timestamped notes, and turns an explicit end-of-day review into a stable sealed page.
 
 The product is a standalone Mac app. It does not require Obsidian and it never edits provider-owned session files.
 
@@ -20,20 +22,20 @@ The app uses the supplied stuffed Traveler's Notebook artwork as its product ico
 The first release supports both current Mac architectures:
 
 ```text
-dist/macos/Work Continuity-0.5.0-macos-arm64.dmg
-dist/macos/Work Continuity-0.5.0-macos-x64.dmg
+dist/macos/Agent Notebook-0.5.0-macos-arm64.dmg
+dist/macos/Agent Notebook-0.5.0-macos-x64.dmg
 ```
 
 Use the `arm64` image on Apple Silicon Macs and the `x64` image on Intel Macs. These initial builds are unsigned and not notarized, so local testing may require Control-clicking the app and choosing **Open**.
 
 ## Usage
 
-1. Launch Work Continuity.
+1. Launch Agent Notebook.
 2. Open **Sources** and enable Codex, Claude Code, or both.
 3. Choose a date from the calendar. Activity dots identify dates with known sessions.
 4. Use **Today** to capture thoughts and expand the project records assembled from multiple sessions.
 5. When you finish thinking for the day, choose **开始整理今天**, write what you want to keep, select up to three bookmarks, and seal the page.
-6. Copy a resume command when you want to continue work. Work Continuity never executes it automatically.
+6. Copy a resume command when you want to continue work. Agent Notebook never executes it automatically.
 
 Notes remain local until you explicitly use the paper-plane action. From there you can export a card, write a source into the configured `LLM-Wiki/raw`, or hand it to an existing project's CTX intake.
 
@@ -80,7 +82,7 @@ The Node unit/integration suite covers session parsing, project grouping, note p
 
 ## Local Model / Smart Session Titles
 
-Work Continuity first renders provider metadata immediately, then asks the installed Codex and Claude Code CLIs to produce compact Chinese titles and progress summaries in the background. The app explicitly selects inexpensive models (`gpt-5.3-codex-spark` and `fable` by default), uses ephemeral CLI sessions, caches only the generated summaries locally, and automatically refreshes the interface when they are ready. Model names can be overridden with `WORK_CONTINUITY_CODEX_SUMMARY_MODEL` and `WORK_CONTINUITY_CLAUDE_SUMMARY_MODEL`; setting `WORK_CONTINUITY_DISABLE_SUMMARIES=1` keeps the metadata-only mode.
+Agent Notebook first renders provider metadata immediately, then asks the installed Codex and Claude Code CLIs to produce compact Chinese titles and progress summaries in the background. The app explicitly selects inexpensive models (`gpt-5.3-codex-spark` and `fable` by default), uses ephemeral CLI sessions, caches only the generated summaries locally, and automatically refreshes the interface when they are ready. Model names can be overridden with `AGENT_NOTEBOOK_CODEX_SUMMARY_MODEL` and `AGENT_NOTEBOOK_CLAUDE_SUMMARY_MODEL`; setting `AGENT_NOTEBOOK_DISABLE_SUMMARIES=1` keeps the metadata-only mode.
 
 These provider CLI calls may use the provider account and network configured on the Mac. Original session files remain read-only, and failures visibly fall back to metadata instead of silently selecting a more expensive model.
 

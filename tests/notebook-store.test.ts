@@ -22,7 +22,7 @@ const sessions: AgentWorkSession[] = [
     summary: "把白天采集、晚间整理和封页连接成同一条路径。",
     path: "/tmp/codex-1.jsonl",
     updatedAt: "2026-08-01T10:00:00+08:00",
-    projectPath: "/workspace/work-continuity",
+    projectPath: "/workspace/agent-notebook",
     resumable: true,
     artifacts: [],
     status: "active"
@@ -34,7 +34,7 @@ const sessions: AgentWorkSession[] = [
     summary: "便签只有经由小飞机操作才会离开今日页面。",
     path: "/tmp/claude-1.jsonl",
     updatedAt: "2026-08-01T15:00:00+08:00",
-    projectPath: "/workspace/work-continuity",
+    projectPath: "/workspace/agent-notebook",
     resumable: true,
     artifacts: [],
     status: "blocked"
@@ -44,7 +44,7 @@ const sessions: AgentWorkSession[] = [
 test("project records create information gain without losing session evidence", () => {
   const records = compileWorkRecords(sessions);
   assert.equal(records.length, 1);
-  assert.equal(records[0]?.projectName, "work-continuity");
+  assert.equal(records[0]?.projectName, "agent-notebook");
   assert.match(records[0]?.changed ?? "", /2 条会话被归并/);
   assert.match(records[0]?.uncertainty ?? "", /阻塞/);
   assert.deepEqual(records[0]?.sessions.map((session) => session.id), ["codex-1", "claude-1"]);

@@ -11,7 +11,7 @@ const { normalizeGlobalBoardDocument, validateSchemaTwoDocument } = await tsImpo
   import.meta.url
 );
 
-const pluginId = "daily-cockpit";
+const pluginId = "agent-notebook";
 const args = process.argv.slice(2);
 const vault = parseVault(args);
 const allowSchemaOne = args.includes("--allow-schema-one");

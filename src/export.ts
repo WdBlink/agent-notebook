@@ -3,11 +3,11 @@ import { buildResumeCommand } from "./resume";
 import { activePlan } from "./state";
 import type { AgentWorkSession, CockpitData, DecomposedTask } from "./types";
 
-const DAILY_COCKPIT_SOURCE = "source: daily-cockpit";
+const AGENT_NOTEBOOK_SOURCE = "source: agent-notebook";
 
 export function dailyNotePath(data: CockpitData, date = new Date()): string {
   const day = activePlan(data)?.targetDate ?? formatDate(date);
-  const folder = data.settings.dailyNoteFolder.replace(/^\/+|\/+$/g, "") || "Daily Cockpit";
+  const folder = data.settings.dailyNoteFolder.replace(/^\/+|\/+$/g, "") || "Agent Notebook";
   return `${folder}/${day}.md`;
 }
 
@@ -16,11 +16,11 @@ export function buildDailyMarkdown(data: CockpitData, date = new Date()): string
   const day = plan?.targetDate ?? formatDate(date);
   const lines: string[] = [
     "---",
-    DAILY_COCKPIT_SOURCE,
+    AGENT_NOTEBOOK_SOURCE,
     `date: ${day}`,
     "---",
     "",
-    `# Daily Cockpit ${day}`,
+    `# Agent Notebook ${day}`,
     "",
     "## 昨日工作",
     ""
@@ -53,10 +53,10 @@ export function buildDailyMarkdown(data: CockpitData, date = new Date()): string
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
-export function isDailyCockpitMarkdown(markdown: string): boolean {
+export function isAgentNotebookMarkdown(markdown: string): boolean {
   const frontmatter = markdown.match(/^---\n([\s\S]*?)\n---/);
   const body = frontmatter?.[1];
-  return Boolean(body?.split(/\r?\n/).some((line) => line.trim() === DAILY_COCKPIT_SOURCE));
+  return Boolean(body?.split(/\r?\n/).some((line) => line.trim() === AGENT_NOTEBOOK_SOURCE));
 }
 
 export function formatDate(date: Date): string {

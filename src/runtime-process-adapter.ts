@@ -15,7 +15,7 @@ export function createNodeProcessAdapter(): ProcessAdapter {
       if (timeout <= 0) throw new Error("Runtime membership audit deadline elapsed.");
       const helper = path.join(path.dirname(hostPath), "process-membership");
       const { stdout } = await execFileAsync(helper, [], {
-        env: { DAILY_COCKPIT_AUDIT_KEY: key, DAILY_COCKPIT_AUDIT_VALUE: token },
+        env: { AGENT_NOTEBOOK_AUDIT_KEY: key, AGENT_NOTEBOOK_AUDIT_VALUE: token },
         timeout,
         maxBuffer: 1024 * 1024
       });

@@ -10,7 +10,7 @@ import asar from "@electron/asar";
 const execFileAsync = promisify(execFile);
 const args = process.argv.slice(2);
 const archiveArg = valueAfter(args, "--archive");
-if (!archiveArg) throw new Error("Use --archive <Work Continuity.dmg|zip>.");
+if (!archiveArg) throw new Error("Use --archive <Agent Notebook.dmg|zip>.");
 const archive = path.resolve(archiveArg);
 const format = path.extname(archive).slice(1).toLowerCase();
 if (format !== "zip" && format !== "dmg") throw new Error(`Unsupported desktop archive: ${archive}`);
@@ -19,7 +19,7 @@ if (arch !== "arm64" && arch !== "x64") throw new Error("Could not determine rel
 
 const packageJson = JSON.parse(await fs.readFile("package.json", "utf8"));
 const version = packageJson.version;
-const temp = await fs.mkdtemp(path.join(os.tmpdir(), "work-continuity-desktop-release-"));
+const temp = await fs.mkdtemp(path.join(os.tmpdir(), "agent-notebook-desktop-release-"));
 const mountPoint = path.join(temp, "mounted");
 let mounted = false;
 
@@ -27,7 +27,7 @@ try {
   const root = await openArchive();
   const appBundle = await findAppBundle(root);
   const infoPlist = path.join(appBundle, "Contents", "Info.plist");
-  const executable = path.join(appBundle, "Contents", "MacOS", "Work Continuity");
+  const executable = path.join(appBundle, "Contents", "MacOS", "Agent Notebook");
   const appAsar = path.join(appBundle, "Contents", "Resources", "app.asar");
   await Promise.all([assertFile(infoPlist), assertFile(executable), assertFile(appAsar)]);
 
@@ -61,7 +61,7 @@ try {
     if (expected !== await fileHash(archive)) throw new Error("Release checksum does not match archive.");
   }
 
-  console.log(JSON.stringify({ ok: true, product: "Work Continuity", version, arch, format, archive, appBundle }, null, 2));
+  console.log(JSON.stringify({ ok: true, product: "Agent Notebook", version, arch, format, archive, appBundle }, null, 2));
 } finally {
   if (mounted) await execFileAsync("/usr/bin/hdiutil", ["detach", mountPoint], { timeout: 60_000, maxBuffer: 4 * 1024 * 1024 });
   await fs.rm(temp, { recursive: true, force: true });
@@ -82,8 +82,8 @@ async function openArchive() {
 
 async function findAppBundle(root) {
   const entries = await fs.readdir(root, { withFileTypes: true });
-  const bundle = entries.find((entry) => entry.isDirectory() && entry.name === "Work Continuity.app");
-  if (!bundle) throw new Error(`Work Continuity.app was not found in ${root}.`);
+  const bundle = entries.find((entry) => entry.isDirectory() && entry.name === "Agent Notebook.app");
+  if (!bundle) throw new Error(`Agent Notebook.app was not found in ${root}.`);
   return path.join(root, bundle.name);
 }
 

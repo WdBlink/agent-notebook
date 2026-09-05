@@ -41,7 +41,7 @@ export async function requestTaskDecomposition(settings: CockpitSettings, intent
     const content = extractModelContent(response.json);
     return parseDecompositionContent(content, settings.llmModel);
   } catch (error) {
-    console.error("[daily-cockpit] model decomposition failed", error);
+    console.error("[agent-notebook] model decomposition failed", error);
     return failure("LLM_FAILED", ERROR_MESSAGES.llmFailed);
   }
 }

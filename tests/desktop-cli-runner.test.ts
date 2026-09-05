@@ -6,11 +6,11 @@ test("desktop CLI runner works in an ESM process and forwards stdin", async () =
   const result = await runDesktopCli({
     command: process.execPath,
     args: ["-e", "process.stdin.setEncoding('utf8'); let s=''; process.stdin.on('data', c => s += c); process.stdin.on('end', () => process.stdout.write(s.toUpperCase()))"],
-    stdin: "work continuity",
+    stdin: "agent notebook",
     cwd: process.cwd(),
     timeoutMs: 5_000
   });
-  assert.equal(result.stdout, "WORK CONTINUITY");
+  assert.equal(result.stdout, "AGENT NOTEBOOK");
   assert.equal(result.stderr, "");
 });
 

@@ -228,15 +228,15 @@ function renderCockpitFixture(rootElement: HTMLElement): void {
     return { ok: true, data };
   },
   async copyResumeCommand(command) {
-    (window as Window & { dailyCockpitCopiedResumeCommand?: string }).dailyCockpitCopiedResumeCommand = command;
+    (window as Window & { agentNotebookCopiedResumeCommand?: string }).agentNotebookCopiedResumeCommand = command;
     return true;
   },
   async openLocalPath(path, reveal) {
-    (window as Window & { dailyCockpitOpenedPath?: string }).dailyCockpitOpenedPath = `${reveal ? "reveal" : "open"}:${path}`;
+    (window as Window & { agentNotebookOpenedPath?: string }).agentNotebookOpenedPath = `${reveal ? "reveal" : "open"}:${path}`;
     return true;
   },
   async exportDailyNote() {
-    const path = "Daily Cockpit/2026-07-04.md";
+    const path = "Agent Notebook/2026-07-04.md";
     data = setLastExportPath(data, path);
     update({ data, processing: false, exportPath: path });
     return { ok: true, data: { path } };
@@ -289,8 +289,8 @@ function renderWhiteboardFixture(rootElement: HTMLElement): void {
   };
   const terminalReaders = new Map<string, () => string>();
   (globalThis as typeof globalThis & {
-    __dailyCockpitTerminalTestHook?: { register(ownerId: string, readBuffer: () => string): () => void };
-  }).__dailyCockpitTerminalTestHook = {
+    __agentNotebookTerminalTestHook?: { register(ownerId: string, readBuffer: () => string): () => void };
+  }).__agentNotebookTerminalTestHook = {
     register(ownerId, readBuffer) {
       terminalReaders.set(ownerId, readBuffer);
       return () => {

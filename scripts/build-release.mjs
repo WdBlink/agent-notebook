@@ -28,7 +28,7 @@ for (const file of ["main.js", "styles.css", "manifest.json", "runtime/pty-host.
 const dist = path.join(repo, "dist", "release");
 const releaseName = `agent-whiteboard-v${version}-macos-${arch}`;
 const releaseRoot = path.join(dist, releaseName);
-const pluginDir = path.join(releaseRoot, "daily-cockpit");
+const pluginDir = path.join(releaseRoot, "agent-notebook");
 const pendingRuntime = path.join(pluginDir, "runtime", "versions", "pending");
 const nodePtySource = path.join(repo, "node_modules", "node-pty");
 const nativeSource = path.join(nodePtySource, "prebuilds", `darwin-${arch}`);

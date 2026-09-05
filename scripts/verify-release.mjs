@@ -25,13 +25,13 @@ let mounted = false;
 
 try {
   const root = await openArchive();
-  const plugin = path.join(root, "daily-cockpit");
+  const plugin = path.join(root, "agent-notebook");
   await rejectSymlinks(root);
   for (const relative of ["main.js", "styles.css", "manifest.json", "runtime/active.json"]) await assertFile(path.join(plugin, relative));
   if (await exists(path.join(plugin, "data.json"))) throw new Error("Release must not contain user data.json.");
 
   const manifest = JSON.parse(await fs.readFile(path.join(plugin, "manifest.json"), "utf8"));
-  if (manifest.version !== version || manifest.id !== "daily-cockpit" || manifest.isDesktopOnly !== true) {
+  if (manifest.version !== version || manifest.id !== "agent-notebook" || manifest.isDesktopOnly !== true) {
     throw new Error("Release manifest metadata is inconsistent.");
   }
   const pointer = JSON.parse(await fs.readFile(path.join(plugin, "runtime", "active.json"), "utf8"));

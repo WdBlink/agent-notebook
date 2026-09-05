@@ -128,7 +128,7 @@ test("schema two data gains target dates and drops retired task semantics", () =
   });
 
   assert.equal(normalized.schemaVersion, 4);
-  assert.equal(normalized.settings.dailyNoteFolder, "Daily Cockpit");
+  assert.equal(normalized.settings.dailyNoteFolder, "Agent Notebook");
   assert.equal(normalized.settings.llmEndpoint, "http://127.0.0.1:11434/v1/chat/completions");
   assert.ok(normalized.settings.sessionScanRoots.includes("~/.codex/sessions"));
   assert.ok(normalized.settings.sessionScanRoots.includes("~/.claude/projects"));
@@ -139,7 +139,7 @@ test("schema two data gains target dates and drops retired task semantics", () =
   assert.equal(normalized.plans[0]?.targetDate, "2026-07-04");
   assert.equal(normalized.plans[0]?.tasks[0]?.category, "other");
   assert.equal(normalized.plans[0]?.tasks[0]?.priority, "P1");
-  assert.equal(dailyNotePath(normalized, new Date("2026-07-03T00:00:00.000Z")), "Daily Cockpit/2026-07-03.md");
+  assert.equal(dailyNotePath(normalized, new Date("2026-07-03T00:00:00.000Z")), "Agent Notebook/2026-07-03.md");
 });
 
 test("session provider selection keeps an intentional empty selection and removes unsupported ids", () => {
@@ -500,7 +500,7 @@ test("project workflow cancels validation and queue wait but completes after the
 });
 
 test("project directory resolution uses filesystem canonicalization, readability, searchability, and cancellation", async () => {
-  const temp = await fs.mkdtemp(path.join(os.tmpdir(), "daily-cockpit-project-"));
+  const temp = await fs.mkdtemp(path.join(os.tmpdir(), "agent-notebook-project-"));
   const project = path.join(temp, "project");
   const alias = path.join(temp, "alias");
   const file = path.join(temp, "file.txt");

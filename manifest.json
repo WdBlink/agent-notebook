@@ -1,6 +1,6 @@
 {
-  "id": "daily-cockpit",
-  "name": "Agent Whiteboard",
+  "id": "agent-notebook",
+  "name": "Agent Notebook",
   "version": "0.5.0",
   "minAppVersion": "1.5.0",
   "description": "Deprecated legacy Obsidian prototype for Agent Whiteboard.",

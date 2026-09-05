@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 test("install-local fails closed on malformed community-plugins.json", async (t) => {
-  const temp = await createTempRoot(t, "daily-cockpit-install-");
+  const temp = await createTempRoot(t, "agent-notebook-install-");
   const vault = path.join(temp, "vault");
   const obsidianDir = path.join(vault, ".obsidian");
   await fs.mkdir(obsidianDir, { recursive: true });
@@ -25,16 +25,16 @@ test("install-local fails closed on malformed community-plugins.json", async (t)
 });
 
 test("install-local migrates existing plugin data to the continuity schema", async (t) => {
-  const temp = await createTempRoot(t, "daily-cockpit-install-");
+  const temp = await createTempRoot(t, "agent-notebook-install-");
   const vault = path.join(temp, "vault");
-  const pluginDir = path.join(vault, ".obsidian", "plugins", "daily-cockpit");
+  const pluginDir = path.join(vault, ".obsidian", "plugins", "agent-notebook");
   await fs.mkdir(pluginDir, { recursive: true });
   await fs.writeFile(
     path.join(pluginDir, "data.json"),
     JSON.stringify({
       schemaVersion: 2,
       settings: {
-        dailyNoteFolder: "Daily Cockpit",
+        dailyNoteFolder: "Agent Notebook",
         llmEndpoint: "http://127.0.0.1:11434/v1/chat/completions",
         llmModel: "qwen2.5:7b",
         llmApiKey: "",
@@ -69,9 +69,9 @@ test("install-local migrates existing plugin data to the continuity schema", asy
 });
 
 test("install-local preserves a schema-one whiteboard for plugin-load migration", async (t) => {
-  const temp = await createTempRoot(t, "daily-cockpit-install-");
+  const temp = await createTempRoot(t, "agent-notebook-install-");
   const vault = path.join(temp, "vault");
-  const pluginDir = path.join(vault, ".obsidian", "plugins", "daily-cockpit");
+  const pluginDir = path.join(vault, ".obsidian", "plugins", "agent-notebook");
   await fs.mkdir(pluginDir, { recursive: true });
   const whiteboard = {
     projects: [{ id: "project-a", name: "A", rootPath: "/workspace/a" }],
@@ -99,9 +99,9 @@ test("install-local preserves a schema-one whiteboard for plugin-load migration"
 });
 
 test("install-local refuses to replace malformed whiteboard input", async (t) => {
-  const temp = await createTempRoot(t, "daily-cockpit-install-");
+  const temp = await createTempRoot(t, "agent-notebook-install-");
   const vault = path.join(temp, "vault");
-  const pluginDir = path.join(vault, ".obsidian", "plugins", "daily-cockpit");
+  const pluginDir = path.join(vault, ".obsidian", "plugins", "agent-notebook");
   await fs.mkdir(pluginDir, { recursive: true });
   const dataPath = path.join(pluginDir, "data.json");
   const original = JSON.stringify({ schemaVersion: 4, settings: {}, plans: [], whiteboard: { projects: "bad" } });
@@ -115,9 +115,9 @@ test("install-local refuses to replace malformed whiteboard input", async (t) =>
 });
 
 test("install-local fails closed before asset writes when outer data is malformed around valid schema one", async (t) => {
-  const temp = await createTempRoot(t, "daily-cockpit-install-");
+  const temp = await createTempRoot(t, "agent-notebook-install-");
   const vault = path.join(temp, "vault");
-  const pluginDir = path.join(vault, ".obsidian", "plugins", "daily-cockpit");
+  const pluginDir = path.join(vault, ".obsidian", "plugins", "agent-notebook");
   await fs.mkdir(pluginDir, { recursive: true });
   const whiteboard = {
     projects: [{ id: "project-a", name: "A", rootPath: "/workspace/a" }],
@@ -149,10 +149,10 @@ test("install-local rejects symlinks at plugin, runtime, package, release, and a
   const cases = ["plugin", "runtime", "package", "release", "asset"] as const;
   for (const kind of cases) {
     await t.test(kind, async (t) => {
-      const temp = await createTempRoot(t, `daily-cockpit-symlink-${kind}-`);
+      const temp = await createTempRoot(t, `agent-notebook-symlink-${kind}-`);
       const vault = path.join(temp, "vault");
       const pluginsDir = path.join(vault, ".obsidian", "plugins");
-      const pluginDir = path.join(pluginsDir, "daily-cockpit");
+      const pluginDir = path.join(pluginsDir, "agent-notebook");
       const outside = path.join(temp, "outside");
       const sentinel = path.join(outside, "sentinel.txt");
       await fs.mkdir(pluginsDir, { recursive: true });
@@ -186,10 +186,10 @@ test("install-local rejects symlinks at plugin, runtime, package, release, and a
 });
 
 test("verify-local strictly rejects malformed schema two without changing data", async (t) => {
-  const temp = await createTempRoot(t, "daily-cockpit-verify-");
+  const temp = await createTempRoot(t, "agent-notebook-verify-");
   const vault = path.join(temp, "vault");
   await execFileAsync("node", ["scripts/install-local.mjs", "--vault", vault], { cwd: process.cwd() });
-  const dataPath = path.join(vault, ".obsidian", "plugins", "daily-cockpit", "data.json");
+  const dataPath = path.join(vault, ".obsidian", "plugins", "agent-notebook", "data.json");
   const data = JSON.parse(await fs.readFile(dataPath, "utf8"));
   data.whiteboard.edges = [{ id: "orphan", sourceNodeId: "missing", targetNodeId: "missing" }];
   const malformed = `${JSON.stringify(data, null, 2)}\n`;
@@ -212,10 +212,10 @@ test("verify-local strictly rejects malformed schema two without changing data",
 });
 
 test("verify-local rejects unexpected, symlinked, and mode-tampered runtime entries", async (t) => {
-  const temp = await createTempRoot(t, "daily-cockpit-verify-runtime-");
+  const temp = await createTempRoot(t, "agent-notebook-verify-runtime-");
   const vault = path.join(temp, "vault");
   await execFileAsync("node", ["scripts/install-local.mjs", "--vault", vault], { cwd: process.cwd() });
-  const runtimeRoot = path.join(vault, ".obsidian", "plugins", "daily-cockpit", "runtime");
+  const runtimeRoot = path.join(vault, ".obsidian", "plugins", "agent-notebook", "runtime");
   const pointer = JSON.parse(await fs.readFile(path.join(runtimeRoot, "active.json"), "utf8"));
   const runtimeDir = path.join(runtimeRoot, "versions", pointer.version);
   const unexpected = path.join(runtimeDir, "unexpected.js");

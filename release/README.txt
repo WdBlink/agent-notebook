@@ -15,14 +15,14 @@ Install
 4. Enable "Agent Whiteboard" and reload Obsidian if it was already open.
 
 The installer copies only plugin assets into:
-  <vault>/.obsidian/plugins/daily-cockpit/
+  <vault>/.obsidian/plugins/agent-notebook/
 
 It does not delete or replace data.json, and it does not start Codex or Claude Code.
 
 Manual install
 --------------
-Copy the included "daily-cockpit" folder to:
-  <vault>/.obsidian/plugins/daily-cockpit/
+Copy the included "agent-notebook" folder to:
+  <vault>/.obsidian/plugins/agent-notebook/
 
 Privacy
 -------

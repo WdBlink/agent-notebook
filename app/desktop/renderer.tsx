@@ -337,13 +337,13 @@ function BootScreen(): ReactElement {
 }
 
 function BootError({ message, onRetry }: { message: string; onRetry(): void }): ReactElement {
-  return <div className="boot-screen"><AlertTriangle size={28} /><strong>Work Continuity 无法启动</strong><p>{message}</p><button type="button" onClick={onRetry}>重新尝试</button></div>;
+  return <div className="boot-screen"><AlertTriangle size={28} /><strong>Agent Notebook 无法启动</strong><p>{message}</p><button type="button" onClick={onRetry}>重新尝试</button></div>;
 }
 
 function Sidebar({ view, onView }: { view: ViewKey; onView(view: ViewKey): void }): ReactElement {
   return (
     <aside className="rail" aria-label="主导航">
-      <img className="brand-mark" src="./app-icon.png" alt="Work Continuity" />
+      <img className="brand-mark" src="./app-icon.png" alt="Agent Notebook" />
       <nav className="rail-nav" aria-label="产品视图">
         {(Object.keys(viewLabels) as ViewKey[]).map((key) => {
           const Icon = viewIcons[key];

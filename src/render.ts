@@ -35,10 +35,10 @@ export function renderCockpit(root: HTMLElement, initialState: RendererState, ac
   function draw(snapshot?: InteractionSnapshot): void {
     if (destroyed) return;
     root.replaceChildren();
-    root.classList.add("daily-cockpit-root");
+    root.classList.add("agent-notebook-root");
 
-    const shell = createEl("section", "daily-cockpit-shell");
-    shell.setAttribute("aria-label", "Daily Cockpit");
+    const shell = createEl("section", "agent-notebook-shell");
+    shell.setAttribute("aria-label", "Agent Notebook");
     shell.append(createMain(state, actions));
     root.append(shell);
     if (snapshot) restoreInteraction(root, snapshot);
@@ -80,7 +80,7 @@ export function groupSessionsByProject(sessions: AgentWorkSession[]): SessionPro
 }
 
 function createMain(state: RendererState, actions: RendererActions): HTMLElement {
-  const main = createEl("main", "daily-cockpit-main");
+  const main = createEl("main", "agent-notebook-main");
   main.append(createHeader(state));
   if (state.error) main.append(createError(state.error.message, actions.clearError));
   main.append(createWorkSessions(state, actions));
@@ -94,12 +94,12 @@ function createHeader(state: RendererState): HTMLElement {
   const plan = activePlan(state.data);
   const sessions = state.data.workSessionSnapshot.sessions;
   const projects = groupSessionsByProject(sessions);
-  const header = createEl("header", "daily-cockpit-header");
-  const intro = createEl("div", "daily-cockpit-intro");
+  const header = createEl("header", "agent-notebook-header");
+  const intro = createEl("div", "agent-notebook-intro");
   intro.append(textEl("p", state.data.workSessionSnapshot.date), textEl("h1", "昨日工作"));
   intro.append(textEl("span", "从正确的项目、工作目录和 Agent 会话继续。"));
 
-  const metrics = createEl("dl", "daily-cockpit-metrics");
+  const metrics = createEl("dl", "agent-notebook-metrics");
   const pairs: Array<[string, string]> = [
     ["项目", String(projects.length)],
     ["活动", String(sessions.length)],
@@ -107,7 +107,7 @@ function createHeader(state: RendererState): HTMLElement {
     ["计划日期", plan?.targetDate ?? "未拆解"]
   ];
   for (const [label, value] of pairs) {
-    const item = createEl("div", "daily-cockpit-metric");
+    const item = createEl("div", "agent-notebook-metric");
     item.append(textEl("dt", label), textEl("dd", value));
     metrics.append(item);
   }
@@ -118,10 +118,10 @@ function createHeader(state: RendererState): HTMLElement {
 function createWorkSessions(state: RendererState, actions: RendererActions): HTMLElement {
   const snapshot = state.data.workSessionSnapshot;
   const projects = groupSessionsByProject(snapshot.sessions);
-  const section = createEl("section", "daily-cockpit-sessions");
-  const header = createEl("div", "daily-cockpit-section-toolbar");
+  const section = createEl("section", "agent-notebook-sessions");
+  const header = createEl("div", "agent-notebook-section-toolbar");
   const title = createSectionTitle("昨日项目", `${projects.length} 个项目 · ${snapshot.sessions.length} 条活动`, true);
-  const button = createEl("button", "daily-cockpit-action daily-cockpit-action-small");
+  const button = createEl("button", "agent-notebook-action agent-notebook-action-small");
   button.type = "button";
   button.textContent = state.refreshingSessions ? "刷新中" : "刷新";
   button.disabled = Boolean(state.refreshingSessions);
@@ -131,7 +131,7 @@ function createWorkSessions(state: RendererState, actions: RendererActions): HTM
   section.append(header);
 
   if (snapshot.warnings.length > 0) {
-    const warning = createEl("div", "daily-cockpit-session-warning");
+    const warning = createEl("div", "agent-notebook-session-warning");
     warning.setAttribute("role", "status");
     warning.textContent = snapshot.warnings.join(" ");
     section.append(warning);
@@ -142,7 +142,7 @@ function createWorkSessions(state: RendererState, actions: RendererActions): HTM
     return section;
   }
 
-  const board = createEl("div", "daily-cockpit-project-board");
+  const board = createEl("div", "agent-notebook-project-board");
   board.dataset.scrollKey = "project-board";
   for (const project of projects) board.append(createProject(project, actions));
   section.append(board);
@@ -150,16 +150,16 @@ function createWorkSessions(state: RendererState, actions: RendererActions): HTM
 }
 
 function createProject(project: SessionProjectGroup, actions: RendererActions): HTMLElement {
-  const article = createEl("article", "daily-cockpit-project");
-  const head = createEl("header", "daily-cockpit-project-head");
-  const identity = createEl("div", "daily-cockpit-project-identity");
+  const article = createEl("article", "agent-notebook-project");
+  const head = createEl("header", "agent-notebook-project-head");
+  const identity = createEl("div", "agent-notebook-project-identity");
   const artifacts = Array.from(new Set(project.sessions.flatMap((session) => session.artifacts)));
   identity.append(textEl("h2", project.name));
   identity.append(textEl("p", project.path ?? "工作目录尚未从平台元数据中确认"));
   const stats = textEl("span", `${project.sessions.length} 个会话 · ${artifacts.length} 个产物`);
   head.append(identity, stats);
   if (project.path) {
-    const open = createEl("button", "daily-cockpit-action daily-cockpit-action-small");
+    const open = createEl("button", "agent-notebook-action agent-notebook-action-small");
     open.type = "button";
     open.textContent = "打开目录";
     open.setAttribute("aria-label", `打开项目目录：${project.name}`);
@@ -168,14 +168,14 @@ function createProject(project: SessionProjectGroup, actions: RendererActions): 
   }
   article.append(head);
 
-  const lanes = createEl("div", "daily-cockpit-status-lanes");
+  const lanes = createEl("div", "agent-notebook-status-lanes");
   for (const status of STATUS_ORDER) {
     const sessions = project.sessions.filter((session) => session.status === status);
     if (sessions.length === 0) continue;
-    const lane = createEl("section", "daily-cockpit-status-lane");
+    const lane = createEl("section", "agent-notebook-status-lane");
     lane.dataset.status = status;
     lane.append(textEl("h3", `${statusLabel(status)} · ${sessions.length}`));
-    const list = createEl("div", "daily-cockpit-session-list");
+    const list = createEl("div", "agent-notebook-session-list");
     for (const session of sessions) list.append(createWorkSession(session, actions));
     lane.append(list);
     lanes.append(lane);
@@ -185,22 +185,22 @@ function createProject(project: SessionProjectGroup, actions: RendererActions): 
 }
 
 function createWorkSession(session: AgentWorkSession, actions: RendererActions): HTMLElement {
-  const article = createEl("article", "daily-cockpit-session");
+  const article = createEl("article", "agent-notebook-session");
   article.dataset.platform = session.platform;
-  const head = createEl("div", "daily-cockpit-session-head");
+  const head = createEl("div", "agent-notebook-session-head");
   head.append(textEl("span", platformLabel(session.platform)), textEl("h4", session.title));
   article.append(head, textEl("p", session.summary));
 
-  const details = createEl("div", "daily-cockpit-session-details");
+  const details = createEl("div", "agent-notebook-session-details");
   if (session.branch) details.append(textEl("code", session.branch));
   details.append(textEl("time", formatSessionTime(session.updatedAt)));
   article.append(details);
 
-  const footer = createEl("div", "daily-cockpit-session-actions");
+  const footer = createEl("div", "agent-notebook-session-actions");
   for (const artifact of session.artifacts.slice(0, 2)) {
     const path = resolveArtifactPath(session, artifact);
     if (!path) continue;
-    const button = createEl("button", "daily-cockpit-action daily-cockpit-action-small");
+    const button = createEl("button", "agent-notebook-action agent-notebook-action-small");
     button.type = "button";
     button.textContent = session.artifacts.length > 1 ? basename(artifact) : "查看产物";
     button.title = artifact;
@@ -209,7 +209,7 @@ function createWorkSession(session: AgentWorkSession, actions: RendererActions):
     footer.append(button);
   }
 
-  const process = createEl("button", "daily-cockpit-action daily-cockpit-action-small");
+  const process = createEl("button", "agent-notebook-action agent-notebook-action-small");
   process.type = "button";
   process.textContent = "查看过程";
   process.setAttribute("aria-label", `查看会话过程：${session.title}`);
@@ -218,7 +218,7 @@ function createWorkSession(session: AgentWorkSession, actions: RendererActions):
 
   const resumeCommand = buildResumeCommand(session);
   if (resumeCommand) {
-    const button = createEl("button", "daily-cockpit-action daily-cockpit-action-small daily-cockpit-resume");
+    const button = createEl("button", "agent-notebook-action agent-notebook-action-small agent-notebook-resume");
     button.type = "button";
     button.textContent = "续上会话";
     button.setAttribute("aria-label", `续上会话：${session.title}`);
@@ -231,8 +231,8 @@ function createWorkSession(session: AgentWorkSession, actions: RendererActions):
 }
 
 function createIntentForm(state: RendererState, actions: RendererActions): HTMLElement {
-  const form = createEl("form", "daily-cockpit-intent");
-  const field = createEl("label", "daily-cockpit-field");
+  const form = createEl("form", "agent-notebook-intent");
+  const field = createEl("label", "agent-notebook-field");
   field.append(textEl("span", "说明天想推进什么"));
   const textarea = document.createElement("textarea");
   textarea.name = "intent";
@@ -243,9 +243,9 @@ function createIntentForm(state: RendererState, actions: RendererActions): HTMLE
   textarea.dataset.focusKey = "intent-draft";
   field.append(textarea);
 
-  const footer = createEl("div", "daily-cockpit-intent-footer");
+  const footer = createEl("div", "agent-notebook-intent-footer");
   const model = textEl("span", `${state.data.settings.llmModel} · ${state.data.settings.llmEndpoint}`);
-  const submit = createEl("button", "daily-cockpit-primary");
+  const submit = createEl("button", "agent-notebook-primary");
   submit.type = "submit";
   submit.textContent = state.processing ? "正在拆解" : "拆成待办";
   submit.disabled = state.processing;
@@ -266,17 +266,17 @@ function createIntentForm(state: RendererState, actions: RendererActions): HTMLE
 
 function createTasks(state: RendererState, actions: RendererActions): HTMLElement {
   const plan = activePlan(state.data);
-  const section = createEl("section", "daily-cockpit-tasks");
+  const section = createEl("section", "agent-notebook-tasks");
   section.append(createSectionTitle("待办事项", plan ? `${plan.targetDate} · ${plan.tasks.length} 条` : "未拆解"));
   if (state.processing) {
     section.append(createLoading());
   } else if (!plan) {
     section.append(createEmpty("说一段目标，本地模型会把它拆成普通待办。"));
   } else {
-    const intent = createEl("div", "daily-cockpit-intent-source");
+    const intent = createEl("div", "agent-notebook-intent-source");
     intent.append(textEl("strong", "原始意图"), textEl("p", plan.intent));
     section.append(intent);
-    const list = createEl("div", "daily-cockpit-task-list");
+    const list = createEl("div", "agent-notebook-task-list");
     list.dataset.scrollKey = "task-list";
     for (const task of plan.tasks) list.append(createTask(task, actions));
     section.append(list);
@@ -285,7 +285,7 @@ function createTasks(state: RendererState, actions: RendererActions): HTMLElemen
 }
 
 function createTask(task: DecomposedTask, actions: RendererActions): HTMLElement {
-  const article = createEl("article", "daily-cockpit-task");
+  const article = createEl("article", "agent-notebook-task");
   article.dataset.taskId = task.id;
   if (task.completed) article.dataset.completed = "true";
   const checkbox = document.createElement("input");
@@ -295,8 +295,8 @@ function createTask(task: DecomposedTask, actions: RendererActions): HTMLElement
   checkbox.dataset.focusKey = `task-${task.id}`;
   checkbox.addEventListener("change", () => void actions.toggleTaskCompletion(task.id, checkbox.checked));
 
-  const body = createEl("div", "daily-cockpit-task-body");
-  const meta = createEl("div", "daily-cockpit-task-meta");
+  const body = createEl("div", "agent-notebook-task-body");
+  const meta = createEl("div", "agent-notebook-task-meta");
   meta.append(textEl("span", task.priority), textEl("span", CATEGORY_LABELS[task.category]));
   body.append(meta, textEl("h3", task.title), textEl("p", task.detail));
   article.append(checkbox, body);
@@ -304,11 +304,11 @@ function createTask(task: DecomposedTask, actions: RendererActions): HTMLElement
 }
 
 function createExportPanel(state: RendererState, actions: RendererActions): HTMLElement {
-  const panel = createEl("section", "daily-cockpit-export");
-  const body = createEl("div", "daily-cockpit-export-copy");
+  const panel = createEl("section", "agent-notebook-export");
+  const body = createEl("div", "agent-notebook-export-copy");
   body.append(textEl("h2", "每日简报"));
   body.append(textEl("p", state.exportPath ?? state.data.lastExportPath ?? `目标文件夹：${state.data.settings.dailyNoteFolder}`));
-  const button = createEl("button", "daily-cockpit-action");
+  const button = createEl("button", "agent-notebook-action");
   button.type = "button";
   button.textContent = "写入 Markdown";
   button.addEventListener("click", () => void actions.exportDailyNote());
@@ -400,24 +400,24 @@ async function runPathAction(
 }
 
 function createSectionTitle(title: string, meta: string, compact = false): HTMLElement {
-  const wrapper = createEl("div", `daily-cockpit-section-title${compact ? " daily-cockpit-section-title-compact" : ""}`);
+  const wrapper = createEl("div", `agent-notebook-section-title${compact ? " agent-notebook-section-title-compact" : ""}`);
   wrapper.append(textEl("h2", title), textEl("span", meta));
   return wrapper;
 }
 
 function createLoading(): HTMLElement {
-  const wrapper = createEl("div", "daily-cockpit-loading");
+  const wrapper = createEl("div", "agent-notebook-loading");
   wrapper.setAttribute("aria-live", "polite");
   wrapper.append(textEl("h3", "正在让本地模型拆解"));
-  for (let index = 0; index < 3; index += 1) wrapper.append(createEl("div", "daily-cockpit-skeleton"));
+  for (let index = 0; index < 3; index += 1) wrapper.append(createEl("div", "agent-notebook-skeleton"));
   return wrapper;
 }
 
 function createError(message: string, clearError: () => void): HTMLElement {
-  const alert = createEl("section", "daily-cockpit-error");
+  const alert = createEl("section", "agent-notebook-error");
   alert.setAttribute("role", "alert");
   alert.append(textEl("strong", "这次没有完成"), textEl("span", message));
-  const button = createEl("button", "daily-cockpit-action");
+  const button = createEl("button", "agent-notebook-action");
   button.type = "button";
   button.textContent = "知道了";
   button.addEventListener("click", clearError);
@@ -426,7 +426,7 @@ function createError(message: string, clearError: () => void): HTMLElement {
 }
 
 function createEmpty(copy: string): HTMLElement {
-  const empty = createEl("div", "daily-cockpit-empty");
+  const empty = createEl("div", "agent-notebook-empty");
   empty.append(textEl("p", copy));
   return empty;
 }
