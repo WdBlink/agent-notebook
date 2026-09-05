@@ -43,6 +43,8 @@ The primary product is a standalone macOS app. It does not require Obsidian and 
 
 ## macOS Install
 
+[Download the latest Agent Notebook release](https://github.com/WdBlink/agent-notebook/releases/latest).
+
 Agent Notebook v0.7.2 ships a DMG and ZIP for each current Mac architecture:
 
 ```text
