@@ -657,9 +657,17 @@ test("historical date discovery precedes newer files and exposes discovery trunc
     const newDir = path.join(scanRoot, "2026", "09", "05");
     await mkdir(oldDir, { recursive: true });
     await mkdir(newDir, { recursive: true });
-    const line = (date: string) => JSON.stringify({ type: "response_item", timestamp: `${date}T01:00:00.000Z`, payload: { type: "message", role: "user", content: "target activity" } });
-    await writeFile(path.join(oldDir, "old.jsonl"), line("2026-08-29"));
-    await Promise.all(Array.from({ length: 180 }, (_, i) => writeFile(path.join(newDir, `new-${i}.jsonl`), line("2026-09-05"))));
+    const line = (date: string) => JSON.stringify({ type: "response_item", timestamp: new Date(`${date}T12:00:00`).toISOString(), payload: { type: "message", role: "user", content: "target activity" } });
+    const oldFile = path.join(oldDir, "old.jsonl");
+    const oldTime = new Date("2026-08-29T12:00:00");
+    const newTime = new Date("2026-09-05T12:00:00");
+    await writeFile(oldFile, line("2026-08-29"));
+    await utimes(oldFile, oldTime, oldTime);
+    await Promise.all(Array.from({ length: 180 }, async (_, i) => {
+      const file = path.join(newDir, `new-${i}.jsonl`);
+      await writeFile(file, line("2026-09-05"));
+      await utimes(file, newTime, newTime);
+    }));
     const snapshot = await loadAgentWorkSnapshot({ ...createEmptyData().settings, sessionScanRoots: [scanRoot], enabledSessionProviders: ["codex"] },
       { date: "2026-08-29", now: new Date("2026-09-06T12:00:00Z"), fs: fsAdapter, maxFiles: 180, maxDepth: 5, maxEntries: 2400 });
     assert.equal(snapshot.sessions.length, 1);
