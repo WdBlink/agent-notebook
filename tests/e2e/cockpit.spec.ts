@@ -379,7 +379,13 @@ test("external viewport updates synchronize the controlled React Flow viewport",
 test("moving a frame moves owned children by the same canvas delta and persists", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(whiteboardHarnessUrl);
+  const initialZoom = await page.evaluate(() => (window as unknown as Window & {
+    whiteboardSavedDocument: GlobalBoardDocument;
+  }).whiteboardSavedDocument.viewport.zoom);
   await page.getByRole("button", { name: "Zoom In" }).click();
+  await expect.poll(async () => page.evaluate(() => (window as unknown as Window & {
+    whiteboardSavedDocument: GlobalBoardDocument;
+  }).whiteboardSavedDocument.viewport.zoom)).toBeGreaterThan(initialZoom);
   const frame = page.locator('.react-flow__node-frame[data-id="project-alpha"]');
   const header = frame.locator(".agent-whiteboard-frame-header");
   const handle = await header.boundingBox();
@@ -398,13 +404,15 @@ test("moving a frame moves owned children by the same canvas delta and persists"
   );
   await page.mouse.up();
 
-  await expect.poll(async () => page.evaluate(() => (
-    window as unknown as Window & { whiteboardSaveCount: number }
-  ).whiteboardSaveCount)).toBeGreaterThan(0);
+  const beforeFrame = before.projects.find((candidate) => candidate.id === "project-alpha")!;
+  await expect.poll(async () => page.evaluate((origin) => {
+    const saved = (window as unknown as Window & { whiteboardSavedDocument: GlobalBoardDocument }).whiteboardSavedDocument;
+    const position = saved.projects.find((candidate) => candidate.id === "project-alpha")!.position;
+    return Math.max(Math.abs(position.x - origin.x - 180), Math.abs(position.y - origin.y - 120));
+  }, beforeFrame.position)).toBeLessThanOrEqual(4);
   const after = await page.evaluate(() => (window as unknown as Window & {
     whiteboardSavedDocument: GlobalBoardDocument;
   }).whiteboardSavedDocument);
-  const beforeFrame = before.projects.find((candidate) => candidate.id === "project-alpha")!;
   const afterFrame = after.projects.find((candidate) => candidate.id === "project-alpha")!;
   const delta = {
     x: afterFrame.position.x - beforeFrame.position.x,

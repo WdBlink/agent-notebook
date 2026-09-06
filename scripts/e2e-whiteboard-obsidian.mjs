@@ -1717,7 +1717,7 @@ async function runLifecycleContractSelfTest() {
     const startedAt = Date.now();
     const result = await runFakeLifecycleCase(undefined, { hang });
     result.elapsedMs = Date.now() - startedAt;
-    if (result.elapsedMs > 500) throw new Error(`Never-settling ${hang} probe exceeded its deadline`);
+    if (result.elapsedMs > 1000) throw new Error(`Never-settling ${hang} probe exceeded its deadline`);
     neverSettlingCases.push(result);
   }
 
@@ -1887,7 +1887,8 @@ async function runFakeLifecycleCase(failAfter, options = {}) {
     const lifecycle = await runWhiteboardLifecycle({
       failAfter,
       restoreStabilityMs: 1,
-      lifecycleTimeoutMs: options.hang === "stage" || options.delayedMutation || options.ignoreCancellation ? 25 : 1000,
+      // Allow fixture IO to reach the injected hang before the lifecycle deadline expires.
+      lifecycleTimeoutMs: options.hang === "stage" || options.delayedMutation || options.ignoreCancellation ? 250 : 1000,
       cleanupTimeoutMs: 250,
       mutatorQuiescenceTimeoutMs: 25,
       cdpCloseTimeoutMs: 25,
@@ -1982,7 +1983,7 @@ async function runFakeLifecycleCase(failAfter, options = {}) {
                   processAlive = true;
                 }
                 resolve();
-              }, 80);
+              }, 350);
               const onAbort = () => {
                 clearTimeout(timer);
                 signal.removeEventListener("abort", onAbort);
@@ -2025,7 +2026,7 @@ async function runFakeLifecycleCase(failAfter, options = {}) {
         await fs.writeFile(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
       }
     });
-    if (options.delayedMutation) await abortableSleep(120);
+    if (options.delayedMutation) await abortableSleep(400);
     const evidence = JSON.parse(await fs.readFile(evidencePath, "utf8"));
     const presentBytes = await fs.readFile(managedPresent, "utf8");
     const absentExists = await fs.access(managedAbsent).then(() => true).catch(() => false);
