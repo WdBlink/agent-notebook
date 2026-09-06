@@ -45,18 +45,18 @@ The primary product is a standalone macOS app. It does not require Obsidian and 
 
 [Download the latest Agent Notebook release](https://github.com/WdBlink/agent-notebook/releases/latest).
 
-Agent Notebook v0.7.2 ships a DMG and ZIP for each current Mac architecture:
+Agent Notebook v0.7.4 ships a DMG and ZIP for each current Mac architecture:
 
 ```text
-dist/macos/agent-notebook-0.7.2-macos-arm64.dmg
-dist/macos/agent-notebook-0.7.2-macos-arm64.zip
-dist/macos/agent-notebook-0.7.2-macos-x64.dmg
-dist/macos/agent-notebook-0.7.2-macos-x64.zip
+dist/macos/agent-notebook-0.7.4-macos-arm64.dmg
+dist/macos/agent-notebook-0.7.4-macos-arm64.zip
+dist/macos/agent-notebook-0.7.4-macos-x64.dmg
+dist/macos/agent-notebook-0.7.4-macos-x64.zip
 ```
 
 Use `arm64` on Apple Silicon and `x64` on Intel. The DMG is the normal install path; the ZIP is a fallback archive of the same app bundle.
 
-These initial builds are unsigned and not notarized. On first launch, macOS may require you to Control-click **Agent Notebook.app** and choose **Open**.
+These builds use an ad-hoc signature, without Apple Developer ID signing or notarization. After the first launch attempt, macOS may require **System Settings → Privacy & Security → Open Anyway**. Only approve a download whose source you trust.
 
 ## Usage
 

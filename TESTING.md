@@ -78,6 +78,7 @@ npm run verify:desktop-release -- --archive "dist/macos/Agent Notebook-${VERSION
 The verifier mounts or extracts the archive and then checks:
 
 - the archive contains `Agent Notebook.app` and the required app bundle files;
+- `codesign --verify --deep --strict` accepts the app bundle and its nested code;
 - `CFBundleShortVersionString` matches `package.json`;
 - the executable contains exactly the requested architecture;
 - the packaged main process and preload bridge expose explicit daily-review preparation;
@@ -103,7 +104,7 @@ Use `dist:macos` for desktop packages. `release:plugin:macos` is only for the de
 9. Write and save a reflection, open **今日收口**, select zero to three continuation bookmarks, and seal the active generation. If a refresh activates a newer generation while the review is open, both the stale save and stale seal must fail without modifying the newer package.
 10. Reopen the sealed date. Confirm the selected workline package, evidence links, original reflection, and bookmarks are read-only and no model request occurs.
 
-These v0.7.0 archives are unsigned and not notarized. A first manual launch may require Control-clicking **Agent Notebook.app** and choosing **Open**.
+Desktop archives use ad-hoc signing without Apple Developer ID signing or notarization. Signature verification establishes bundle integrity, not Gatekeeper approval. A first manual launch may require **System Settings → Privacy & Security → Open Anyway**.
 
 ## Legacy Obsidian Plugin Compatibility
 

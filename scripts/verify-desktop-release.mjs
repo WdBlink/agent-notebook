@@ -30,6 +30,7 @@ try {
   const executable = path.join(appBundle, "Contents", "MacOS", "Agent Notebook");
   const appAsar = path.join(appBundle, "Contents", "Resources", "app.asar");
   await Promise.all([assertFile(infoPlist), assertFile(executable), assertFile(appAsar)]);
+  await execFileAsync("/usr/bin/codesign", ["--verify", "--deep", "--strict", appBundle]);
 
   const [{ stdout: plistVersion }, { stdout: architectures }] = await Promise.all([
     execFileAsync("/usr/libexec/PlistBuddy", ["-c", "Print :CFBundleShortVersionString", infoPlist]),

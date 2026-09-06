@@ -1,3 +1,9 @@
+# Agent Notebook v0.7.4
+
+Fixes invalid macOS app signatures that could make v0.7.3 appear damaged after download. Both Apple Silicon and Intel packages now receive a complete ad-hoc signature, and archive verification rejects invalid signatures before publication.
+
+These builds do not have an Apple Developer ID signature or notarization. macOS may still require explicit approval in **System Settings → Privacy & Security → Open Anyway** after the first launch attempt. A valid ad-hoc signature checks bundle integrity; it does not establish an Apple-verified publisher.
+
 # Agent Notebook v0.7.3
 
 This maintenance release improves daily review reliability and avoids repeated work while preserving existing saved and sealed pages.

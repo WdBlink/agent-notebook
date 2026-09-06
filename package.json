@@ -1,6 +1,6 @@
 {
   "name": "agent-notebook",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "description": "A local-first knowledge notebook co-written by you and your agents.",
   "main": "dist/desktop/main.js",
   "type": "module",
@@ -52,6 +52,8 @@
     "npmRebuild": false,
     "asar": true,
     "mac": {
+      "identity": "-",
+      "hardenedRuntime": false,
       "category": "public.app-category.productivity",
       "icon": "app-icon.icns",
       "artifactName": "agent-notebook-${version}-macos-${arch}.${ext}",
