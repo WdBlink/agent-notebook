@@ -2,6 +2,7 @@ import { Bot, Quote, UserRound } from "lucide-react";
 import type { ReactElement, ReactNode } from "react";
 import type { TodayWorklineIndexV1 } from "../../src/structured-today-contracts";
 import type { SessionTranscriptRequest } from "./api";
+import { structuredTranscriptEvidence } from "../../src/session-family";
 
 export interface StructuredTodayEvidenceTarget {
   title: string;
@@ -29,19 +30,15 @@ export function createStructuredTodayCitationTargets(
   labelPrefix: "E" | ""
 ): StructuredTodayCitationTarget[] {
   return evidenceIds.flatMap((evidenceId, position) => {
-    const evidence = index.evidence.find((item) => item.evidenceId === evidenceId);
-    if (
-      !evidence ||
-      evidence.sourceKind !== "session" ||
-      !evidence.provider ||
-      !evidence.sessionId
-    ) return [];
+    const evidence = structuredTranscriptEvidence(index.evidence.find((item) => item.evidenceId === evidenceId));
+    if (!evidence) return [];
     const session = index.sessions.find((item) =>
       item.sessionId === evidence.sessionId &&
       item.provider === evidence.provider &&
       item.sourcePath === evidence.sourcePath
     );
-    if (!session) return [];
+    if (!session && !index.sessions.some((item) => item.evidenceIds.includes(evidenceId))) return [];
+    const title = session?.title ?? `子 Agent · ${evidence.sessionId}`;
     const number = String(position + 1);
     const label = `${labelPrefix}${number}`;
     return [{
@@ -49,9 +46,9 @@ export function createStructuredTodayCitationTargets(
       label,
       aliases: [number, `E${number}`],
       provider: evidence.provider,
-      title: session.title,
+      title,
       target: {
-        title: session.title,
+        title,
         platform: evidence.provider,
         request: {
           id: evidence.sessionId,

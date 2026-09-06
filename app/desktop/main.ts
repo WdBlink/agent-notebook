@@ -3,6 +3,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { StructuredTodayRuntimeStore } from "./structured-today-runtime-store";
+import { readJsonFile, writeJsonFile } from "./json-file-store";
 import { createCliSessionSummarizer } from "../../src/agent-summary";
 import { NodeSqliteSaver } from "../../src/langgraph-node-sqlite-checkpointer";
 import { projectStructuredTodayReview } from "../../src/structured-today-review-state";
@@ -12,7 +14,7 @@ import { compileTraceinkDossier, compileTraceinkIndex, compileTraceinkProposals 
 import { traceinkArtifactReference, userReflectionAssetReference, type TraceinkArtifactReferenceV1, type TraceinkIndexArtifactV1, type TraceinkWorklineSelectionV1, type UserReflectionAssetReferenceV1 } from "../../src/traceink-review-assets";
 import { loadAgentWorkSnapshot, mergeSessionSummaries, type RuntimeFileStat, type RuntimeFileSystem } from "../../src/agent-sessions";
 import { DEFAULT_SESSION_SCAN_ROOTS, MAX_WORK_SESSION_SNAPSHOT_SESSIONS } from "../../src/constants";
-import { createEmptyData, localDateString, normalizeData, setWorkSessionSnapshot } from "../../src/state";
+import { createEmptyData, createEmptyWorkSessionSnapshot, localDateString, normalizeData, setWorkSessionSnapshot } from "../../src/state";
 import { deriveDailyReviewPreparationState, normalizeDailyReviewScheduleTime, shouldScheduleSessionSummaries, shouldStartAutomaticDailyReview, type DailyReviewPreparationTrigger } from "../../src/daily-review-schedule";
 import type { AgentWorkSession, AgentWorkSnapshot, CockpitData, SessionProvider } from "../../src/types";
 import type { DailyDraftInput, DailyReviewPreparationMode, DailySealInput, DesktopNotebookState, DesktopSettingsPatch, DesktopState, DesktopSummaryJob, NotebookNote, NotebookNoteInput, ProjectContextDocument, ProjectContextState, SessionTranscriptRequest, SessionTranscriptState, StructuredTodayProgressState, StructuredTodayRunProgress, StructuredTodaySpanRequest, StructuredTodaySpanState, TraceinkProposalDispositionInput } from "./api";
@@ -118,6 +120,13 @@ let notebook = createEmptyNotebookDocument();
 let activeDate = localDateString();
 let summaryCache = createEmptySessionSummaryCache();
 let summaryRunId = 0;
+let summaryAbort: AbortController | undefined;
+let snapshotRunId = 0;
+let stateRevision = 0;
+let structuredRuntimeStore: StructuredTodayRuntimeStore | undefined;
+let activityDateCache: { key: string; dates: Promise<string[]> } | undefined;
+let pendingBroadcast: Promise<void> | undefined;
+let broadcastAgain = false;
 let summaryJob: DesktopSummaryJob = { status: "idle", total: 0, completed: 0, models: summaryModels };
 let traceinkAssetRepository: TraceinkAssetRepository | undefined;
 let structuredTodayCheckpointer: NodeSqliteSaver | undefined;
@@ -184,15 +193,20 @@ void app.whenReady().then(async () => {
   } catch {
     console.warn("Checkpoint startup maintenance deferred.");
   }
-  await refreshSnapshot(activeDate);
+  if (data.workSessionSnapshot.date !== activeDate) data = setWorkSessionSnapshot(data, createEmptyWorkSessionSnapshot(activeDate));
   if (process.platform === "darwin") app.dock?.setIcon(path.join(__dirname, "app-icon.png"));
   createWindow();
+  await refreshSnapshot(activeDate);
+  await broadcastState();
   startDailyReviewSchedule();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
     void evaluateAutomaticDailyReview();
   });
   powerMonitor.on("resume", () => { void evaluateAutomaticDailyReview(); });
+}).catch((error: unknown) => {
+  dialog.showErrorBox("Agent Notebook 无法加载本地数据", errorMessage(error));
+  app.quit();
 });
 
 app.on("window-all-closed", () => {
@@ -203,6 +217,7 @@ app.on("before-quit", () => {
   if (dailyReviewScheduleTimer) clearInterval(dailyReviewScheduleTimer);
   try {
     structuredTodayCheckpointer?.close();
+    structuredRuntimeStore?.close();
   } catch {
     // Shutdown must not be held open by an already-closed checkpoint handle.
   } finally {
@@ -393,6 +408,7 @@ ipcMain.handle("desktop:prepare-structured-today-dossier", async (
           settings: current.settings,
           repository,
           checkpointer: requireStructuredTodayCheckpointer(),
+          runtimeStore: requireStructuredRuntimeStore(),
           runner: desktopCliRunner,
           onProgress(progress) {
             const currentProgress = structuredTodayProgressByDate.get(logicalDate)?.dossierByWorklineId[cleanWorklineId];
@@ -404,7 +420,7 @@ ipcMain.handle("desktop:prepare-structured-today-dossier", async (
               completed: Math.min(4, (currentProgress?.completed ?? 0) + (ready ? 1 : 0)),
               total: 4
             });
-            void broadcastState();
+            broadcastStructuredProgress(logicalDate);
           }
         });
         setStructuredDossierProgress(logicalDate, cleanWorklineId, {
@@ -537,6 +553,7 @@ ipcMain.handle("desktop:prepare-structured-today-proposals", async (
           settings: current.settings,
           repository,
           checkpointer: requireStructuredTodayCheckpointer(),
+          runtimeStore: requireStructuredRuntimeStore(),
           runner: desktopCliRunner,
           onProgress(progress) {
             setStructuredProposalProgress(logicalDate, cleanWorklineId, {
@@ -546,7 +563,7 @@ ipcMain.handle("desktop:prepare-structured-today-proposals", async (
               completed: progress.status === "ready" ? 1 : 0,
               total: 1
             });
-            void broadcastState();
+            broadcastStructuredProgress(logicalDate);
           }
         });
         setStructuredProposalProgress(logicalDate, cleanWorklineId, {
@@ -990,6 +1007,7 @@ async function performDailyReviewForDate(
       settings: current.settings,
       repository,
       checkpointer: requireStructuredTodayCheckpointer(),
+      runtimeStore: requireStructuredRuntimeStore(),
       runner: desktopCliRunner,
       onProgress(progress) {
         const existing = structuredTodayProgressByDate.get(logicalDate)?.index;
@@ -1006,7 +1024,7 @@ async function performDailyReviewForDate(
           ),
           total: progressTotal
         });
-        void broadcastState();
+        broadcastStructuredProgress(logicalDate);
       }
     });
     setStructuredIndexProgress(logicalDate, {
@@ -1059,16 +1077,11 @@ async function ensureLoaded(): Promise<CockpitData> {
 }
 
 async function loadStore(): Promise<CockpitData> {
-  try {
-    return normalizeData(JSON.parse(await fs.readFile(storePath(), "utf8")) as unknown);
-  } catch {
-    return createEmptyData();
-  }
+  return normalizeData(await readJsonFile(storePath(), createEmptyData));
 }
 
 async function persistStore(next: CockpitData): Promise<void> {
-  await fs.mkdir(app.getPath("userData"), { recursive: true });
-  await fs.writeFile(storePath(), `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  await writeJsonFile(storePath(), next);
 }
 
 function storePath(): string {
@@ -1084,18 +1097,11 @@ function notebookPath(): string {
 }
 
 async function loadNotebook(): Promise<NotebookDocument> {
-  try {
-    return normalizeNotebookDocument(JSON.parse(await fs.readFile(notebookPath(), "utf8")) as unknown);
-  } catch {
-    return createEmptyNotebookDocument();
-  }
+  return normalizeNotebookDocument(await readJsonFile(notebookPath(), createEmptyNotebookDocument));
 }
 
 async function persistNotebook(next: NotebookDocument): Promise<void> {
-  await fs.mkdir(app.getPath("userData"), { recursive: true });
-  const temporary = `${notebookPath()}.tmp`;
-  await fs.writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, "utf8");
-  await fs.rename(temporary, notebookPath());
+  await writeJsonFile(notebookPath(), next);
 }
 
 let notebookWriteQueue: Promise<void> = Promise.resolve();
@@ -1139,15 +1145,16 @@ async function loadSummaryCache(): Promise<SessionSummaryCacheDocument> {
 }
 
 async function persistSummaryCache(): Promise<void> {
-  await fs.mkdir(app.getPath("userData"), { recursive: true });
-  await fs.writeFile(summaryCachePath(), `${JSON.stringify(summaryCache, null, 2)}\n`, "utf8");
+  await writeJsonFile(summaryCachePath(), summaryCache);
 }
 
 async function refreshSnapshot(
   date: string,
   options: { scheduleSummaries?: boolean; publish?: boolean } = {}
 ): Promise<AgentWorkSnapshot> {
-  const runId = ++summaryRunId;
+  if (options.publish !== false) summaryAbort?.abort();
+  const requestId = options.publish !== false ? ++snapshotRunId : snapshotRunId;
+  const runId = options.publish !== false ? ++summaryRunId : summaryRunId;
   const current = await ensureLoaded();
   const snapshot = await loadAgentWorkSnapshot(current.settings, {
     date,
@@ -1158,6 +1165,7 @@ async function refreshSnapshot(
     maxDepth: 5,
     maxEntries: 2400
   });
+  activityDateCache = undefined;
   const cached = readCachedSessionSummaries(summaryCache, date, snapshot.sessions, summaryModels);
   const cachedSnapshot = { ...snapshot, sessions: mergeSessionSummaries(snapshot.sessions, cached.summaries) };
   const legacyBoardMode = notebookStateForDate(notebook, date, cachedSnapshot.sessions).todayBoard.mode;
@@ -1170,10 +1178,14 @@ async function refreshSnapshot(
     legacyBoardMode
   ).boardMode;
   const reviewMode = effectiveStructuredBoardMode(date, structuredReview, legacyReviewMode);
-  if (options.publish !== false) {
-    data = normalizeData(setWorkSessionSnapshot(current, cachedSnapshot));
-    await persistStore(data);
-  }
+  const latest = await ensureLoaded();
+  const canPublish = () => options.publish !== false && requestId === snapshotRunId && date === activeDate &&
+    JSON.stringify([current.settings.sessionScanRoots, current.settings.enabledSessionProviders]) ===
+    JSON.stringify([data?.settings.sessionScanRoots, data?.settings.enabledSessionProviders]);
+  if (!canPublish()) return cachedSnapshot;
+  data = normalizeData(setWorkSessionSnapshot(latest, cachedSnapshot));
+  await persistStore(data);
+  if (!canPublish()) return cachedSnapshot;
   if (
     options.scheduleSummaries !== false &&
     options.publish !== false &&
@@ -1222,7 +1234,10 @@ function scheduleSessionSummaries(
   void broadcastState();
   let processed = 0;
   let completed = 0;
+  summaryAbort?.abort();
+  summaryAbort = new AbortController();
   const summarizer = createCliSessionSummarizer({
+    signal: summaryAbort.signal,
     runner: desktopCliRunner,
     homeDir: os.homedir(),
     modelByPlatform: summaryModels,
@@ -1232,7 +1247,8 @@ function scheduleSessionSummaries(
       if (runId !== summaryRunId || date !== activeDate) return;
       processed += 1;
       completed += batch.summaries.length;
-      await applySummaryBatch(date, scannedSessions, batch);
+      await applySummaryBatch(runId, date, scannedSessions, batch);
+      if (runId !== summaryRunId || date !== activeDate) return;
       summaryJob = {
         status: "running",
         total: misses.length,
@@ -1267,13 +1283,14 @@ function scheduleSessionSummaries(
 }
 
 async function applySummaryBatch(
+  runId: number,
   date: string,
   scannedSessions: CockpitData["workSessionSnapshot"]["sessions"],
   batch: Awaited<ReturnType<ReturnType<typeof createCliSessionSummarizer>>>
 ): Promise<void> {
-  summaryCache = writeCachedSessionSummaries(summaryCache, date, scannedSessions, batch.summaries, summaryModels);
   const current = await ensureLoaded();
-  if (current.workSessionSnapshot.date !== date) return;
+  if (runId !== summaryRunId || date !== activeDate || current.workSessionSnapshot.date !== date) return;
+  summaryCache = writeCachedSessionSummaries(summaryCache, date, scannedSessions, batch.summaries, summaryModels);
   const mergedSnapshot = {
     ...current.workSessionSnapshot,
     sessions: mergeSessionSummaries(current.workSessionSnapshot.sessions, batch.summaries),
@@ -1285,14 +1302,28 @@ async function applySummaryBatch(
 
 async function broadcastState(): Promise<void> {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send("desktop:state-changed", await buildState());
+  if (pendingBroadcast) {
+    broadcastAgain = true;
+    return pendingBroadcast;
+  }
+  pendingBroadcast = (async () => {
+    do {
+      broadcastAgain = false;
+      const state = await buildState();
+      if (mainWindow && !mainWindow.isDestroyed() && state.activeDate === activeDate) {
+        mainWindow.webContents.send("desktop:state-changed", state);
+      }
+    } while (broadcastAgain);
+  })();
+  try { await pendingBroadcast; } finally { pendingBroadcast = undefined; }
 }
 
 async function buildState(): Promise<DesktopState> {
+  const revision = ++stateRevision;
   const requestDate = activeDate;
   const current = await ensureLoaded();
   const [providerActivityDates, activity] = await Promise.all([
-    findActivityDates(current.settings.sessionScanRoots, current.settings.enabledSessionProviders),
+    cachedActivityDates(current.settings.sessionScanRoots, current.settings.enabledSessionProviders),
     loadDailySessionActivity(requestDate, current.workSessionSnapshot.sessions)
   ]);
   const assetStore = requireTraceinkAssetRepository().snapshot();
@@ -1355,6 +1386,7 @@ async function buildState(): Promise<DesktopState> {
     ...(dailyReviewCoordinator.activeRun ? { activeRun: dailyReviewCoordinator.activeRun } : {})
   }), traceinkReviewError, effectiveBoardMode);
   return {
+    stateRevision: revision,
     data: current,
     activeDate: requestDate,
     activityDates,
@@ -1374,7 +1406,7 @@ async function buildState(): Promise<DesktopState> {
     },
     structuredTodayProgress: projectStructuredTodayProgress(
       requestDate,
-      assetStore.structuredRuns ?? [],
+      [...(assetStore.structuredRuns ?? []), ...requireStructuredRuntimeStore().listRuns()],
       structuredTodayProgressByDate.get(requestDate) ?? { dossierByWorklineId: {} }
     ),
     ...(traceinkReviewError ? { traceinkReviewError } : {}),
@@ -1443,6 +1475,27 @@ function requireStructuredTodayCheckpointer(): NodeSqliteSaver {
     path.join(app.getPath("userData"), structuredTodayCheckpointFileName)
   );
   return structuredTodayCheckpointer;
+}
+
+function requireStructuredRuntimeStore(): StructuredTodayRuntimeStore {
+  structuredRuntimeStore ??= new StructuredTodayRuntimeStore(path.join(app.getPath("userData"), "structured-today-state-v1.sqlite"));
+  return structuredRuntimeStore;
+}
+
+function broadcastStructuredProgress(logicalDate: string): void {
+  if (!mainWindow || mainWindow.isDestroyed() || logicalDate !== activeDate) return;
+  mainWindow.webContents.send("desktop:structured-progress", {
+    logicalDate, stateRevision: ++stateRevision,
+    progress: structuredTodayProgressByDate.get(logicalDate) ?? { dossierByWorklineId: {} }
+  });
+}
+
+function cachedActivityDates(roots: string[], providers: SessionProvider[]): Promise<string[]> {
+  const key = JSON.stringify([roots, providers]);
+  if (!activityDateCache || activityDateCache.key !== key) {
+    activityDateCache = { key, dates: findActivityDates(roots, providers) };
+  }
+  return activityDateCache.dates;
 }
 
 function setStructuredIndexProgress(logicalDate: string, progress: StructuredTodayRunProgress): void {
@@ -1774,16 +1827,7 @@ async function loadSessionTranscript(request: SessionTranscriptRequest): Promise
     userAuthorKind: sessionUserAuthorKind(
       current.workSessionSnapshot.sessions.find((session) =>
         session.id === target.id && session.platform === target.platform && session.path === target.path
-      ) ?? {
-        id: target.id,
-        platform: target.platform,
-        path: target.path,
-        title: target.title,
-        summary: "",
-        updatedAt: "",
-        artifacts: [],
-        status: "unknown"
-      }
+      ) ?? {}
     )
   });
 }

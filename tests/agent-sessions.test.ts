@@ -648,3 +648,24 @@ test("provider selection supports both, either provider, and neither", async () 
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+test("historical date discovery precedes newer files and exposes discovery truncation", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "history-discovery-"));
+  try {
+    const scanRoot = path.join(root, "codex", "sessions");
+    const oldDir = path.join(scanRoot, "2026", "08", "29");
+    const newDir = path.join(scanRoot, "2026", "09", "05");
+    await mkdir(oldDir, { recursive: true });
+    await mkdir(newDir, { recursive: true });
+    const line = (date: string) => JSON.stringify({ type: "response_item", timestamp: `${date}T01:00:00.000Z`, payload: { type: "message", role: "user", content: "target activity" } });
+    await writeFile(path.join(oldDir, "old.jsonl"), line("2026-08-29"));
+    await Promise.all(Array.from({ length: 180 }, (_, i) => writeFile(path.join(newDir, `new-${i}.jsonl`), line("2026-09-05"))));
+    const snapshot = await loadAgentWorkSnapshot({ ...createEmptyData().settings, sessionScanRoots: [scanRoot], enabledSessionProviders: ["codex"] },
+      { date: "2026-08-29", now: new Date("2026-09-06T12:00:00Z"), fs: fsAdapter, maxFiles: 180, maxDepth: 5, maxEntries: 2400 });
+    assert.equal(snapshot.sessions.length, 1);
+    assert.ok(snapshot.sessions[0]!.path.endsWith("old.jsonl"));
+    assert.ok(snapshot.warnings.some((warning) => warning.includes("发现范围不完整")));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

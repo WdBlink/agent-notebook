@@ -3,7 +3,7 @@ import { access, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { runDesktopCli } from "../app/desktop/cli-runner";
+import { desktopCliRunner, runDesktopCli } from "../app/desktop/cli-runner";
 
 test("desktop CLI runner works in an ESM process and forwards stdin", async () => {
   const result = await runDesktopCli({
@@ -15,6 +15,39 @@ test("desktop CLI runner works in an ESM process and forwards stdin", async () =
   });
   assert.equal(result.stdout, "AGENT NOTEBOOK");
   assert.equal(result.stderr, "");
+});
+
+test("desktop CLI calls share three slots and skip cancelled queued requests", async () => {
+  const controller = new AbortController();
+  const calls = Array.from({ length: 8 }, (_, index) => desktopCliRunner({
+    command: process.execPath,
+    args: ["-e", "const start=Date.now(); setTimeout(()=>process.stdout.write(JSON.stringify([start,Date.now()])),200)"],
+    stdin: "", cwd: process.cwd(), timeoutMs: 5_000,
+    ...(index === 3 ? { signal: controller.signal } : {})
+  }));
+  const completed = Promise.allSettled(calls);
+  controller.abort();
+  const results = await completed;
+  assert.equal(results[3]?.status, "rejected");
+  const intervals = results.flatMap((result) => result.status === "fulfilled"
+    ? [JSON.parse(result.value.stdout) as [number, number]] : []);
+  assert.equal(intervals.length, 7);
+  const events = intervals.flatMap(([start, end]) => [[start, 1], [end, -1]])
+    .sort((a, b) => a[0]! - b[0]! || a[1]! - b[1]!);
+  let active = 0;
+  let peak = 0;
+  for (const [, delta] of events) { active += delta!; peak = Math.max(peak, active); }
+  assert.equal(peak, 3);
+});
+
+test("desktop CLI cancellation terminates a running child", async () => {
+  const controller = new AbortController();
+  const call = desktopCliRunner({ command: process.execPath,
+    args: ["-e", "setInterval(()=>{},1000)"], stdin: "x".repeat(1_000_000), cwd: process.cwd(),
+    timeoutMs: 5_000, signal: controller.signal });
+  const rejected = assert.rejects(call, /CLI 任务已取消/);
+  controller.abort();
+  await rejected;
 });
 
 test("desktop CLI runner includes provider install locations in PATH", async () => {

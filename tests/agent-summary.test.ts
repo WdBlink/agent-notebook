@@ -302,3 +302,15 @@ function session(overrides: Partial<AgentWorkSession> = {}): AgentWorkSession {
     ...overrides
   };
 }
+
+test("cancelled summary batch stops scheduling remaining provider jobs", async () => {
+  const abort = new AbortController();
+  let calls = 0;
+  const result = await summarizeSessionsWithProviderClis({ ...createEmptyData().settings, sessionSummaryMode: "native" }, "2026-08-29",
+    Array.from({ length: 5 }, (_, n) => session({ id: `session-${n}`, platform: "codex", path: `/tmp/${n}.jsonl` })), {
+      signal: abort.signal, concurrency: 1, batchSize: 1,
+      runner: async () => { calls += 1; abort.abort(); return { stdout: '{"sessions":[]}', stderr: "" }; }
+    });
+  assert.equal(calls, 1);
+  assert.deepEqual(result.summaries, []);
+});

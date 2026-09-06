@@ -181,6 +181,13 @@ test("real Electron default persists and reloads the complete structured Today c
     expect(stickyReflectionLayout.inputTop).toBeGreaterThanOrEqual(stickyReflectionLayout.viewportTop - 1);
     expect(stickyReflectionLayout.inputBottom).toBeLessThanOrEqual(stickyReflectionLayout.viewportBottom + 1);
     await page.locator(".today-board-scroll").evaluate((element) => { element.scrollTop = 0; });
+
+    await workline.getByPlaceholder("写下你的理解、保留意见或下一步判断…").fill("尚未保存的回顾");
+    await page.getByRole("button", { name: "Sources", exact: true }).click();
+    await page.getByRole("button", { name: "今日", exact: true }).click();
+    await workline.locator("summary").click();
+    await workline.getByRole("button", { name: "打开深入分析", exact: true }).click();
+    await expect(workline.getByPlaceholder("写下你的理解、保留意见或下一步判断…")).toHaveValue("尚未保存的回顾");
     await workline.getByPlaceholder("写下你的理解、保留意见或下一步判断…").fill(originalReflection);
     await workline.getByRole("button", { name: "保存我的回顾" }).click();
     await expect(workline.getByText("已保存版本 1", { exact: true })).toBeVisible();

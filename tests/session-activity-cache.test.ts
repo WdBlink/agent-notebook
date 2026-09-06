@@ -107,3 +107,22 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
   let resolve!: (value: T) => void;
   return { promise: new Promise<T>((next) => { resolve = next; }), resolve };
 }
+
+test("activity cache bounds read concurrency and retries transient failures", async () => {
+  let active = 0;
+  let peak = 0;
+  let reads = 0;
+  const cache = createSessionActivityCache({ async readTranscript() {
+    reads += 1;
+    if (reads === 1) throw new Error("temporary failure");
+    peak = Math.max(peak, ++active);
+    await new Promise((resolve) => setImmediate(resolve));
+    active -= 1;
+    return transcript();
+  } });
+  const sessions = Array.from({ length: 12 }, (_, n) => ({ ...session(), id: String(n) }));
+  await cache.load("2026-08-10", sessions);
+  await cache.load("2026-08-10", sessions);
+  assert.equal(reads, 13);
+  assert.ok(peak <= 3);
+});

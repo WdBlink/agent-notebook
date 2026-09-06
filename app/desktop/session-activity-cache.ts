@@ -12,23 +12,30 @@ export function createSessionActivityCache(input: {
   const lanes = new Map<string, Promise<SessionActivityLane>>();
   return {
     async load(logicalDate, sessions) {
-      const projected = await Promise.all(sessions.map(async (session) => {
-        const key = sessionActivityCacheKey(logicalDate, session);
-        let cached = lanes.get(key);
-        if (!cached) {
-          cached = input.readTranscript(session)
-            .then((transcript) => projectSessionActivityLane({ logicalDate, source: { session, transcript } }))
-            .catch((error: unknown) => projectSessionActivityLane({
-              logicalDate,
-              source: {
-                session,
-                transcript: unreadableTranscript(session, error)
-              }
-            }));
-          lanes.set(key, cached);
+      const projected: SessionActivityLane[] = [];
+      let next = 0;
+      await Promise.all(Array.from({ length: Math.min(3, sessions.length) }, async () => {
+        while (next < sessions.length) {
+          const index = next++;
+          const session = sessions[index]!;
+          const key = sessionActivityCacheKey(logicalDate, session);
+          let cached = lanes.get(key);
+          if (!cached) {
+            cached = input.readTranscript(session)
+              .then((transcript) => projectSessionActivityLane({ logicalDate, source: { session, transcript } }))
+              .catch((error: unknown) => {
+                if (lanes.get(key) === cached) lanes.delete(key);
+                return projectSessionActivityLane({
+                  logicalDate,
+                  source: { session, transcript: unreadableTranscript(session, error) }
+                });
+              });
+            lanes.set(key, cached);
+            while (lanes.size > 256) lanes.delete(lanes.keys().next().value!);
+          }
+          const lane = await cached;
+          projected[index] = { ...lane, operationalState: session.status === "active" ? "running" as const : "not-running" as const };
         }
-        const lane = await cached;
-        return { ...lane, operationalState: session.status === "active" ? "running" as const : "not-running" as const };
       }));
       return summarizeDailySessionActivity({ logicalDate, lanes: projected });
     }

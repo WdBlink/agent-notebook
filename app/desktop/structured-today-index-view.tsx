@@ -5,6 +5,7 @@ import type { StructuredTodayReviewProjection } from "../../src/structured-today
 import type { StructuredTodayWorklineReviewState } from "../../src/structured-today-review-state";
 import type { TodaySessionRefV1, TodayWorklineDossierV1, TodayWorklineV1 } from "../../src/structured-today-contracts";
 import type { AgentWorkSession } from "../../src/types";
+import { structuredTranscriptEvidence } from "../../src/session-family";
 import type {
   StructuredTodayProgressState,
   DailyContinuationBookmark
@@ -18,6 +19,9 @@ import {
 } from "./structured-today-citations";
 
 export type { StructuredTodayEvidenceTarget } from "./structured-today-citations";
+
+// Unsaved drafts live for this renderer session, independently of navigation mounts.
+const reflectionDrafts = new Map<string, string>();
 
 interface StructuredTodayMemberSession {
   ref: TodaySessionRefV1;
@@ -199,7 +203,15 @@ export function StructuredTodayIndexView({
           const memberSessions = workline.sessionIds.flatMap((sessionId) => {
             const ref = active.sessions.find((session) => session.sessionId === sessionId);
             if (!ref) return [];
-            return [{ ref, current: sessionByTuple.get(tuple(ref.provider, ref.sessionId, ref.sourcePath)) }];
+            const children = ref.evidenceIds.flatMap((evidenceId): TodaySessionRefV1[] => {
+              const evidence = structuredTranscriptEvidence(active.evidence.find((item) => item.evidenceId === evidenceId));
+              if (!evidence || evidence.sessionId === ref.sessionId) return [];
+              return [{ sessionId: evidence.sessionId, provider: evidence.provider, sourcePath: evidence.sourcePath,
+                title: `子 Agent · ${evidence.sessionId}`, startedAt: ref.startedAt, evidenceIds: [evidenceId],
+                lineage: { origin: "subagent", parentSessionId: ref.sessionId } }];
+            });
+            return [ref, ...children].map((member) => ({ ref: member,
+              current: sessionByTuple.get(tuple(member.provider, member.sessionId, member.sourcePath)) }));
           });
           const sessionFamilies = groupSessionFamilies(memberSessions, sessions);
           return (
@@ -242,8 +254,8 @@ export function StructuredTodayIndexView({
                         </button>
                         {family.members.length === 1 || expandedFamilyIds.has(family.id) ? <div className="structured-today-session-members" role="list">
                           {family.members.map(({ ref, current }) => {
-                            const evidence = active.evidence.find((item) =>
-                              item.sourceKind === "session" &&
+                            const evidence = active.evidence.map(structuredTranscriptEvidence).find((item) =>
+                              item &&
                               item.provider === ref.provider &&
                               item.sessionId === ref.sessionId &&
                               item.sourcePath === ref.sourcePath
@@ -360,7 +372,9 @@ function StructuredCloseoutWorkspace({
   index: StructuredTodayReviewProjection["activeIndex"] & {};
   progress?: StructuredTodayProgressState["index"];
 }): ReactElement {
-  const [reflectionText, setReflectionText] = useState(review.reflection?.text ?? "");
+  const draftKey = JSON.stringify([index.logicalDate, index.artifactId, index.revision, index.contentHash,
+    review.workline.worklineId, review.dossier?.contentHash]);
+  const [reflectionText, setReflectionText] = useState(() => reflectionDrafts.get(draftKey) ?? review.reflection?.text ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -369,8 +383,8 @@ function StructuredCloseoutWorkspace({
   const reflectionUnchanged = review.reflection?.text === reflectionText;
 
   useEffect(() => {
-    setReflectionText(review.reflection?.text ?? "");
-  }, [review.reflection?.contentHash]);
+    setReflectionText(reflectionDrafts.get(draftKey) ?? review.reflection?.text ?? "");
+  }, [draftKey, review.reflection?.contentHash]);
 
   async function saveReflection(): Promise<void> {
     if (!reflectionText.trim()) return;
@@ -384,6 +398,7 @@ function StructuredCloseoutWorkspace({
         review.workline.worklineId,
         reflectionText
       );
+      if (reflectionDrafts.get(draftKey) === reflectionText) reflectionDrafts.delete(draftKey);
       setFeedback("你的原文已保存在 Agent Notebook 本地数据中，并绑定当前深入分析；没有写入 Wiki、CTX 或项目文件。");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "你的回顾没有保存成功。");
@@ -454,7 +469,10 @@ function StructuredCloseoutWorkspace({
       </div>
       <textarea
         value={reflectionText}
-        onChange={(event) => setReflectionText(event.target.value)}
+        onChange={(event) => {
+          reflectionDrafts.set(draftKey, event.target.value);
+          setReflectionText(event.target.value);
+        }}
         placeholder="写下你的理解、保留意见或下一步判断…"
       />
       <div className="structured-today-closeout-actions">

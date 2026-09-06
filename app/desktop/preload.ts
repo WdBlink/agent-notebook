@@ -121,6 +121,11 @@ const api: DesktopApi = {
   openPath(path: string, reveal = false): Promise<boolean> {
     return ipcRenderer.invoke("desktop:open-path", path, reveal) as Promise<boolean>;
   },
+  subscribeStructuredProgress(listener) {
+    const handler = (_event: Electron.IpcRendererEvent, update: Parameters<typeof listener>[0]): void => listener(update);
+    ipcRenderer.on("desktop:structured-progress", handler);
+    return () => ipcRenderer.removeListener("desktop:structured-progress", handler);
+  },
   subscribeState(listener: (state: DesktopState) => void): () => void {
     const handler = (_event: Electron.IpcRendererEvent, state: DesktopState): void => listener(state);
     ipcRenderer.on("desktop:state-changed", handler);

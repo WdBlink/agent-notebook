@@ -1,0 +1,110 @@
+{
+  "scope": "Offline synthetic fixtures; no real provider calls or user data",
+  "node": "26.8.1",
+  "results": [
+    {
+      "probe": "terminal-retry",
+      "firstCalls": 1,
+      "retryAdditionalCalls": 0,
+      "retryStillFails": true
+    },
+    {
+      "probe": "dossier-grounding",
+      "modelCalls": 3,
+      "frozenFactInPrompts": false,
+      "publishedWithDeletedSource": true,
+      "oneSessionIndexRepositoryPublishes": 7
+    },
+    {
+      "probe": "child-citation",
+      "admitted": true,
+      "clickableTargets": 0,
+      "authorized": false
+    },
+    {
+      "probe": "history-starvation",
+      "existingTargetSessions": 1,
+      "returnedSessions": 0,
+      "newerFiles": 180,
+      "warnings": 0,
+      "truncationInCoverageOnly": true
+    },
+    {
+      "probe": "message-truncation",
+      "originalCharacters": 81000,
+      "retainedCharacters": 80018,
+      "truncated": false
+    },
+    {
+      "probe": "evidence-budget",
+      "advertisedCap": 240000,
+      "actualCharacters": 1364469,
+      "inputMessages": 4000,
+      "outputMessages": 8001,
+      "uniqueMessageIds": 4001
+    },
+    {
+      "probe": "incremental-reuse",
+      "firstCalls": 2,
+      "unchangedEvidenceSecondCalls": 2
+    },
+    {
+      "probe": "history-progress-cost",
+      "diskIo": "stubbed",
+      "samples": [
+        {
+          "revisions": 10,
+          "storeBytes": 125614,
+          "medianProgressMutationMs": 1.2,
+          "serializedBytesPerProgressWrite": 137065
+        },
+        {
+          "revisions": 100,
+          "storeBytes": 1251606,
+          "medianProgressMutationMs": 9.5,
+          "serializedBytesPerProgressWrite": 1362597
+        },
+        {
+          "revisions": 500,
+          "storeBytes": 6256406,
+          "medianProgressMutationMs": 50.6,
+          "serializedBytesPerProgressWrite": 6809797
+        }
+      ]
+    },
+    {
+      "probe": "refresh-race",
+      "harness": "original function with gated dependencies",
+      "requestedLatestDate": "2026-08-30",
+      "finalSnapshotDate": "2026-08-29",
+      "newSettingsOverwritten": true
+    },
+    {
+      "probe": "unsaved-reflection",
+      "harness": "real Electron with temporary profile and fake provider",
+      "action": "type then Sources then Today then reopen dossier",
+      "retainedText": "",
+      "observedDraftLoss": true
+    }
+  ],
+  "checks": {
+    "targeted_node_tests": {
+      "passed": 54,
+      "failed": 0
+    },
+    "typecheck": "passed",
+    "desktop_build": "passed",
+    "existing_electron_closeout": {
+      "passed": 1,
+      "failed": 0
+    },
+    "audit_ui_draft_loss": {
+      "passed_observed_bug_assertion": 1,
+      "failed": 0
+    },
+    "audit_node_probes": {
+      "passed_observed_bug_or_benchmark_assertions": 9,
+      "failed": 0
+    }
+  }
+}

@@ -12,6 +12,15 @@ The automated tests use fixtures and temporary directories. Provider authenticat
 
 ## Desktop Development Checks
 
+For a focused logic change, run the affected test file directly:
+
+```bash
+node --import tsx --test tests/traceink-review.test.ts
+npm run typecheck
+```
+
+Build first when the test reads generated files. Changes to `skills/traceink/SKILL.md` or its editorial contract require updating their hashes in `src/traceink-skill-bundle.ts`, running `npm run build:desktop`, then the bundle, review and proposals tests. These checks validate integrity and transport behavior; they do not measure live model review quality.
+
 Build only the standalone app:
 
 ```bash
@@ -27,6 +36,8 @@ npm run test:e2e
 ```
 
 `npm run lint` runs TypeScript, privacy, and README checks. `npm test` rebuilds the project and runs the Node unit/integration suite. `npm run test:e2e` rebuilds the project and runs the full Playwright suite, including intentional legacy-plugin coverage.
+
+The release workflow builds once per native architecture, then runs the same Node and Playwright suites directly and packages the tested output. Local convenience commands retain their builds so they work independently. Use full gates for release readiness; a focused development change needs its relevant checks, without repeating successful suites unless the change or a failure warrants it.
 
 For a faster desktop-only browser pass after `build:desktop`:
 

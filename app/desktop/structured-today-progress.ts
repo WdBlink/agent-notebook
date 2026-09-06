@@ -1,6 +1,12 @@
 import type { StructuredTodayProgressState, StructuredTodayRunProgress } from "./api";
 import type { StructuredTodayRunRecordV1 } from "./traceink-asset-store";
 
+export function mergeStructuredTodayProgress(current: StructuredTodayProgressState, update: StructuredTodayProgressState): StructuredTodayProgressState {
+  return { ...current, ...update,
+    dossierByWorklineId: { ...current.dossierByWorklineId, ...update.dossierByWorklineId },
+    proposalByWorklineId: { ...current.proposalByWorklineId, ...update.proposalByWorklineId } };
+}
+
 export function projectStructuredTodayProgress(
   logicalDate: string,
   runs: StructuredTodayRunRecordV1[],

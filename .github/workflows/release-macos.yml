@@ -12,7 +12,7 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -38,10 +38,13 @@ jobs:
         run: test "$(node -p process.arch)" = "${{ matrix.arch }}"
       - run: npm ci
       - run: npm run lint
-      - run: npm test
-      - run: npm run test:e2e
+      - run: npm run build
+      - name: Unit and integration tests
+        run: node --import tsx --test tests/*.test.ts
+      - name: Browser and Electron tests
+        run: node scripts/build-e2e.mjs && npx playwright test
       - name: Build installers without implicit publishing
-        run: npm run build:desktop && npx electron-builder --mac dmg zip --${{ matrix.arch }} --publish never
+        run: npx electron-builder --mac dmg zip --${{ matrix.arch }} --publish never
       - name: Create checksums
         run: |
           cd dist/macos
@@ -67,6 +70,8 @@ jobs:
     name: Publish GitHub Release
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}

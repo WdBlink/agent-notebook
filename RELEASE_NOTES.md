@@ -1,3 +1,18 @@
+# Agent Notebook v0.7.3
+
+This maintenance release improves daily review reliability and avoids repeated work while preserving existing saved and sealed pages.
+
+- Fixes evidence input limits, failed-family retries, stale date responses, and child-Agent transcript links.
+- Preserves unsaved reflection text when navigating between pages during the same app session.
+- Supplies verified frozen transcript content to every dossier stage and reports missing or incomplete evidence.
+- Prioritizes the requested date during discovery and makes bounded discovery gaps visible.
+- Reuses successful family digests, persists workflow progress separately from review history, and sends lightweight progress updates.
+- Limits provider CLI concurrency to three, cancels obsolete smart-title work, and handles cancellation while sending large inputs.
+- Uses serialized atomic JSON writes and preserves unreadable source files instead of silently replacing them with empty data.
+- Clarifies the hosted Traceink stage contract and verifies release builds on native Apple Silicon and Intel runners.
+
+Unsaved drafts do not survive application exit. Frozen evidence references still require the original provider files. Message-level V2 remains development-only; no live model quality improvement is claimed. macOS installers remain unsigned and not notarized.
+
 # Agent Notebook v0.7.2
 
 The product is now Agent Notebook: a knowledge notebook co-written by you and your agents. Application, repository, package, installer, export attribution and product configuration names now agree. The repository is `WdBlink/agent-notebook`, the application ID is `com.wdblink.agentnotebook`, and product environment variables use `AGENT_NOTEBOOK_*`.

@@ -243,6 +243,9 @@ export function TodayBoard({
       {displayedError && !hasCanonicalIndex ? <div className="today-board-alert" role="alert"><strong>{generation ? "整理没有替换现有材料" : "没有生成工作脉络"}</strong><span>{displayedError}</span></div> : null}
 
       <div className="today-board-scroll">
+        {!sealedSurface && state.data.workSessionSnapshot.evidenceCoverage?.some((item) => item.disposition === "truncated" || item.disposition === "failed") ? (
+          <div className="today-board-alert" role="status"><strong>发现范围不完整</strong><span>部分来源读取失败或达到扫描上限；工作线覆盖率仅针对已纳入的会话。可在 Sources 查看读取警告并刷新。</span></div>
+        ) : null}
         {surfaceMode === "sealed" ? <SealedPageDetails notebook={state.notebook} /> : null}
         {hasStructuredIndex && !sealedSurface ? (
           <StructuredTodayIndexView

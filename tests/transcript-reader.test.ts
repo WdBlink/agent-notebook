@@ -71,3 +71,11 @@ test("transcript reader derives Agent activity from provider task and tool windo
     { id: "claude-turn-2", start: "2026-08-31T02:00:00.000Z", end: "2026-08-31T02:03:00.000Z", basis: "provider-task" }
   ]);
 });
+
+test("individual message truncation is visible even below the total character limit", () => {
+  const transcript = parseSessionTranscript({ platform: "codex", sessionId: "long", title: "long", path: "/tmp/long",
+    content: JSON.stringify({ type: "response_item", payload: { type: "message", role: "assistant", content: "x".repeat(81000) } }) });
+  assert.equal(transcript.truncated, true);
+  assert.ok(transcript.warning);
+  assert.ok(transcript.messages[0]!.content.length < 81000);
+});

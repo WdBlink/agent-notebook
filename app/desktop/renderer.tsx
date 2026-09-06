@@ -36,7 +36,8 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactElement }
 import { buildResumeCommand } from "../../src/resume";
 import type { AgentSessionStatus, AgentWorkSession, SessionProvider } from "../../src/types";
 import type { DailyReviewBlock, DailyReviewEvidence, DailyWorklineReview } from "../../src/workline-review";
-import type { DailyDraftInput, DailySealInput, DailyWorkRecord, DesktopNotebookState, DesktopState, NotebookNote, ProjectContextDocument, ProjectContextState, SessionTranscriptState } from "./api";
+import { mergeStructuredTodayProgress } from "./structured-today-progress";
+import type { DailyDraftInput, DailySealInput, DailyWorkRecord, DesktopNotebookState, DesktopState, StructuredTodayProgressUpdate, NotebookNote, ProjectContextDocument, ProjectContextState, SessionTranscriptState } from "./api";
 import { TodayBoard } from "./today-board";
 import type { TodayReviewEntry, TodayTranscriptTarget } from "./today-board";
 
@@ -148,6 +149,23 @@ function App(): ReactElement {
   const [transcriptTarget, setTranscriptTarget] = useState<TodayTranscriptTarget | null>(null);
   const [reviewEntry, setReviewEntry] = useState<TodayReviewEntry | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const requestedDate = useRef<string | undefined>(undefined);
+  const displayedDate = useRef<string | undefined>(undefined);
+  const acceptedRevision = useRef(0);
+  const progressUpdate = useRef<StructuredTodayProgressUpdate | null>(null);
+  const loadRequest = useRef(0);
+  function acceptState(next: DesktopState): boolean {
+    if (requestedDate.current && next.activeDate !== requestedDate.current) return false;
+    if (next.data.workSessionSnapshot.date !== next.activeDate) return false;
+    if (next.stateRevision !== undefined && next.stateRevision < acceptedRevision.current) return false;
+    acceptedRevision.current = next.stateRevision ?? acceptedRevision.current;
+    displayedDate.current = next.activeDate;
+    const update = progressUpdate.current;
+    setState(update?.logicalDate === next.activeDate && update.stateRevision > (next.stateRevision ?? 0)
+      ? { ...next, structuredTodayProgress: mergeStructuredTodayProgress(next.structuredTodayProgress, update.progress) }
+      : next);
+    return true;
+  }
   const transcriptReturnFocus = useRef<HTMLElement | null>(null);
   const reviewReturnFocus = useRef<HTMLElement | null>(null);
 
@@ -155,9 +173,18 @@ function App(): ReactElement {
     void load();
   }, []);
 
+  useEffect(() => window.agentWhiteboard.subscribeStructuredProgress?.((update) => {
+    if (update.logicalDate !== (requestedDate.current ?? displayedDate.current) || update.stateRevision < acceptedRevision.current ||
+      update.stateRevision < (progressUpdate.current?.stateRevision ?? 0)) return;
+    progressUpdate.current = update;
+    setState((current) => current?.activeDate === update.logicalDate
+      ? { ...current, structuredTodayProgress: mergeStructuredTodayProgress(current.structuredTodayProgress, update.progress) }
+      : current);
+  }), []);
+
   useEffect(() => {
     return window.agentWhiteboard.subscribeState((next) => {
-      setState(next);
+      if (!acceptState(next)) return;
       setEvidenceSession((current) => {
         if (!current) return null;
         return next.data.workSessionSnapshot.sessions.find((session) => session.id === current.id && session.platform === current.platform && session.path === current.path) ?? current;
@@ -191,27 +218,41 @@ function App(): ReactElement {
   }, [reviewEntry, transcriptTarget]);
 
   async function load(date?: string): Promise<void> {
+    const request = ++loadRequest.current;
+    if (date) requestedDate.current = date;
     setLoading(true);
     setLoadError(null);
     try {
-      setState(await window.agentWhiteboard.getState(date));
+      const next = await window.agentWhiteboard.getState(date);
+      if (request === loadRequest.current) acceptState(next);
     } catch (error) {
-      setLoadError(error instanceof Error ? error.message : "无法读取本机 Agent 会话。 ");
+      if (request === loadRequest.current) setLoadError(error instanceof Error ? error.message : "无法读取本机 Agent 会话。 ");
     } finally {
-      setLoading(false);
+      if (request === loadRequest.current) {
+        requestedDate.current = undefined;
+        setLoading(false);
+      }
     }
   }
 
-  async function refresh(date = state?.activeDate): Promise<void> {
+  async function refresh(date = requestedDate.current ?? state?.activeDate): Promise<void> {
+    const request = ++loadRequest.current;
+    if (date) requestedDate.current = date;
     setLoading(true);
     setLoadError(null);
     try {
-      setState(await window.agentWhiteboard.refreshSessions(date));
-      showNotice("只读快照已经更新");
+      const next = await window.agentWhiteboard.refreshSessions(date);
+      if (request === loadRequest.current) {
+        acceptState(next);
+        showNotice("只读快照已经更新");
+      }
     } catch (error) {
-      setLoadError(error instanceof Error ? error.message : "本地证据暂时无法读取。 ");
+      if (request === loadRequest.current) setLoadError(error instanceof Error ? error.message : "本地证据暂时无法读取。 ");
     } finally {
-      setLoading(false);
+      if (request === loadRequest.current) {
+        requestedDate.current = undefined;
+        setLoading(false);
+      }
     }
   }
 
@@ -223,7 +264,7 @@ function App(): ReactElement {
       : [...current, provider];
     setLoading(true);
     try {
-      setState(await window.agentWhiteboard.updateSettings({ enabledSessionProviders }));
+      acceptState(await window.agentWhiteboard.updateSettings({ enabledSessionProviders }));
       showNotice(enabledSessionProviders.length ? `正在读取 ${enabledSessionProviders.map(platformLabel).join(" + ")}` : "所有会话来源均已关闭");
     } finally {
       setLoading(false);
@@ -235,7 +276,7 @@ function App(): ReactElement {
     const directory = await window.agentWhiteboard.chooseDirectory();
     if (!directory) return;
     const roots = Array.from(new Set([directory, ...state.data.settings.sessionScanRoots]));
-    setState(await window.agentWhiteboard.updateSettings({ sessionScanRoots: roots }));
+    acceptState(await window.agentWhiteboard.updateSettings({ sessionScanRoots: roots }));
     showNotice("读取目录已经加入");
   }
 
@@ -363,7 +404,7 @@ function App(): ReactElement {
                 const directory = await window.agentWhiteboard.chooseDirectory();
                 if (!directory) return;
                 const next = await window.agentWhiteboard.updateSettings({ knowledgeRoot: directory });
-                setState(next);
+                acceptState(next);
                 showNotice("LLM-Wiki 根目录已经更新");
               }}
               onReviewSchedule={async (enabled, time) => {
@@ -371,7 +412,7 @@ function App(): ReactElement {
                   dailyReviewScheduleEnabled: enabled,
                   dailyReviewScheduleTime: time
                 });
-                setState(next);
+                acceptState(next);
                 showNotice(enabled ? `每天 ${time} 自动准备工作脉络` : "已关闭每日自动整理");
               }}
             />

@@ -4,17 +4,11 @@
 
 Prepare a bounded, evidence-linked reconstruction of Agent work so the user can understand it quickly and form their own judgment. Do not replace reflection with an AI conclusion.
 
-## Research lineage and source corrections
+## Application scope
 
-The Knowledge-Centric Self-Improvement research protocol contributes a Prompt-led editorial discipline, not this product's human closeout lifecycle.
+Apply this contract to the requested stage. A Session digest extracts evidence; an index groups worklines; a dossier develops the interpretation and human question; proposals require saved user reflection. Do not perform other stages or add prose outside the host's output schema. Questions belong in the requested artifact, not an approval pause during generation.
 
-- Its formal per-task Prompt requests exactly six values: one load-bearing assumption, evidence, optional `evidence_post_id`, one concrete next-generation change, one falsifiable predicted outcome, and confidence.
-- `evidence_post_id` cites evidence. It is not `parent_post_id` and does not point to a prior human decision.
-- The formal cross-task relations are `AGREE`, `DISAGREE`, and `SYNTHESIZE`. `refine` appears in project-page explanatory prose, not as a fourth formal paper operator.
-- Its distillation favors actionable, scoped, evidence-grounded claims with applicability boundaries and calibrated confidence.
-- The research protocol does not supply human reflection, adoption, migration, sealing, or background-work authority. Those are product interactions added after evidence preparation.
-
-Do not copy the six values into a rigid wire schema. Use them as an editing rubric that can benefit from future model improvements.
+The KSI research lineage informs scoped assumptions, evidence, falsifiable changes and calibrated confidence; it does not grant human adoption, delivery or sealing authority. Its `evidence_post_id` is an evidence citation, not a prior human decision; formal cross-task relations are `AGREE`, `DISAGREE`, and `SYNTHESIZE`. Use this lineage as an editorial rubric, not an additional wire schema.
 
 ## Editorial recipe
 
@@ -87,22 +81,9 @@ During initial review, the skill primarily prepares basis evidence. Commitment a
 
 ## Authority boundary
 
-Generated material may say:
+Describe changes as possible until an explicit user action adopts them. Do not infer commitment from confident prose, file modifications, successful tests or generated documents. Preserve the user's own wording separately; do not write first-person reflection on their behalf.
 
-- `证据表明值得重新评估...`
-- `可能的变化是...`
-- `仍需你判断...`
-
-Generated material must not say:
-
-- `你决定了...`
-- `今天我们确认了...`
-- `明天必须...`
-- `已写入 CTX / 已交给后台 / 已封页`
-
-unless the current conversation contains the exact explicit user action and the corresponding action actually succeeded.
-
-Do not write first-person prose on the user's behalf. Do not infer commitment from confident wording, file modifications, completed tests, or a generated design document.
+Only claim a decision, delivery, CTX write, background authorization or sealing when the corresponding explicit user action is evidenced and the claimed operation actually succeeded. Historical decisions may be cited as historical evidence; they do not authorize a new action in this invocation.
 
 ## Evaluation rubric
 

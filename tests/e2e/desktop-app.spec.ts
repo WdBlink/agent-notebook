@@ -593,6 +593,9 @@ async function installDesktopApi(page: Page): Promise<void> {
     let state = persistedSnapshot ? restorePersistedState(persistedSnapshot) : createState(undefined, undefined, scenario);
     const stateListeners: Array<(next: ReturnType<typeof createState>) => void> = [];
     const notifyState = (): void => { for (const listener of stateListeners) listener(state); };
+    (window as unknown as { emitState(next: typeof state): void }).emitState = (next) => {
+      for (const listener of stateListeners) listener(next);
+    };
     const goldenWorkline = (worklineId: string): any => state.traceinkReview.worklines?.find((item: any) => item.selection.worklineId === worklineId);
     const goldenDossier = (workline: any): any => {
       const evidence = state.traceinkReview.activeIndex.evidence.filter((item: any) => workline.presentation?.evidenceIds.includes(item.id));
@@ -1574,6 +1577,30 @@ test("background smart titles replace metadata without a manual refresh", async 
   await page.evaluate(() => (window as unknown as { emitSmartTitle(title: string): void }).emitSmartTitle("完成会话智能命名链路"));
   await expect(page.getByText("完成会话智能命名链路", { exact: true })).toBeVisible();
   await expect(page.getByText(/Codex AI 摘要/).first()).toBeVisible();
+});
+
+test("older revisions and mismatched dates cannot replace the displayed snapshot", async ({ page }) => {
+  await page.getByRole("button", { name: "Sessions", exact: true }).click();
+  await page.evaluate(async () => {
+    const api = window as unknown as { agentWhiteboard: { getState(): Promise<any> }; emitState(next: any): void };
+    const next = structuredClone(await api.agentWhiteboard.getState());
+    next.stateRevision = 10;
+    next.data.workSessionSnapshot.sessions[0].title = "保留当前快照";
+    api.emitState(next);
+  });
+  await expect(page.getByText("保留当前快照", { exact: true })).toBeVisible();
+  await page.evaluate(async () => {
+    const api = window as unknown as { agentWhiteboard: { getState(): Promise<any> }; emitState(next: any): void };
+    const old = structuredClone(await api.agentWhiteboard.getState());
+    old.stateRevision = 9;
+    old.data.workSessionSnapshot.sessions[0].title = "过期响应";
+    api.emitState(old);
+    old.stateRevision = 11;
+    old.data.workSessionSnapshot.date = "2026-07-19";
+    api.emitState(old);
+  });
+  await expect(page.getByText("保留当前快照", { exact: true })).toBeVisible();
+  await expect(page.getByText("过期响应", { exact: true })).toHaveCount(0);
 });
 
 test("evidence opens a readable in-app transcript and keeps resume action legible", async ({ page }) => {

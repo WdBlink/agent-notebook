@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 
 export const TRACEINK_SKILL_PACKAGE_ID = "traceink" as const;
 export const TRACEINK_SKILL_BUNDLE_VERSION = "traceink-skill-bundle-v1" as const;
-export const TRACEINK_SKILL_SHA256 = "3f2a7743bb6a51fd5b8d63558133536c92e4a8c4dfe5b6fbaab23cea08a310d4" as const;
-export const TRACEINK_EDITORIAL_CONTRACT_SHA256 = "0b63c6ab864fd909823384fe79091a1e22d265cc8a5ff4d8f0e735c8a5826130" as const;
+export const TRACEINK_SKILL_SHA256 = "0596391934a10552937ab4b16c3a22911a8915d50670f5075c2e52eb3db002ca" as const;
+export const TRACEINK_EDITORIAL_CONTRACT_SHA256 = "9b39a78a37c62677b487cb29931c158fda4183a0e7b7efeb3b1eab231caa5279" as const;
 
 export interface TraceinkSkillBundle {
   readonly packageId: typeof TRACEINK_SKILL_PACKAGE_ID;
