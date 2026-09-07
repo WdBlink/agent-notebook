@@ -49,6 +49,8 @@ test("Copilot discovery uses events.jsonl and canonical session.start identity a
     ].map(record => JSON.stringify(record)).join('\n') + '\n';
     await writeFile(path.join(sessionDir, "events.jsonl"), content);
     await writeFile(path.join(sessionDir, "other.jsonl"), content);
+    await utimes(path.join(sessionDir, "events.jsonl"), new Date(timestamp), new Date(timestamp));
+    await utimes(path.join(sessionDir, "other.jsonl"), new Date(timestamp), new Date(timestamp));
     const snapshot = await loadAgentWorkSnapshot(createEmptyData().settings, { date, homeDir: dir, providers: ["copilot"], fs: fsAdapter });
     assert.equal(snapshot.sessions.length, 1);
     const session = snapshot.sessions[0]!;
