@@ -1,6 +1,39 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseSessionTranscript } from "../app/desktop/transcript-reader";
+import { parseEvidenceJsonl } from "../src/structured-today-evidence-spans";
+
+test("Copilot transcript and evidence readers preserve message content, roles, tool timing and parse warnings", () => {
+  const content = [
+    { type: "session.start", data: { sessionId: "copilot-1" } },
+    { type: "user.message", id: "u1", data: { content: "读取本地会话", source: "user", transformedContent: "hidden instructions" } },
+    { type: "user.message", id: "u2", data: { content: "来源未确认的提示" } },
+    { type: "user.message", id: "u3", agentId: "child-agent", data: { content: "子 Agent 指令", source: "user" } },
+    { type: "tool.execution_start", timestamp: "2026-09-07T01:00:00Z", data: { toolCallId: "t1" } },
+    { type: "tool.execution_complete", timestamp: "2026-09-07T01:00:01Z", data: { toolCallId: "t1", result: { content: "hidden tool output" } } },
+    { type: "assistant.message_delta", data: { deltaContent: "hidden partial duplicate" } },
+    { type: "assistant.message", id: "a1", data: { content: "已完成。" } }
+  ].map(record => JSON.stringify(record)).join('\n') + '\n{"type":\n';
+  const transcript = parseSessionTranscript({ content, platform: "copilot", sessionId: "copilot-1", title: "Copilot", path: "/tmp/events.jsonl" });
+  assert.deepEqual(transcript.messages.map(m => [m.id, m.content, m.authorKind]), [["u1", "读取本地会话", "human"], ["u2", "来源未确认的提示", "unknown"], ["u3", "子 Agent 指令", "agent"], ["a1", "已完成。", "agent"]]);
+  assert.equal(transcript.omittedToolEvents, 2);
+  assert.equal(transcript.activityWindows?.length, 1);
+  assert.match(transcript.warning ?? "", /1 行 JSON 无法解析/);
+  const evidence = parseEvidenceJsonl({ source: Buffer.from(content), provider: "copilot", sessionId: "copilot-1", evidenceId: "session:copilot:copilot-1", defaultUserAuthorKind: "unknown" });
+  assert.deepEqual(evidence.messages.map(m => [m.content, m.locator.authorKind]), transcript.messages.map(m => [m.content, m.authorKind]));
+  assert.equal(evidence.issues.length, 1);
+});
+
+test("an incomplete Codex record does not hide valid event-only messages", () => {
+  const content = [
+    JSON.stringify({ type: "session_meta", payload: { id: "session" } }),
+    '{"type":',
+    JSON.stringify({ type: "event_msg", payload: { type: "user_message", message: "完整消息仍可读" } })
+  ].join('\n');
+  const transcript = parseSessionTranscript({ content, platform: "codex", sessionId: "session", title: "test", path: "/tmp/codex.jsonl" });
+  assert.equal(transcript.messages[0]?.content, "完整消息仍可读");
+  assert.match(transcript.warning ?? "", /1 行 JSON 无法解析/);
+});
 
 test("Codex transcript reader keeps conversation text and folds system and tool noise", () => {
   const content = [

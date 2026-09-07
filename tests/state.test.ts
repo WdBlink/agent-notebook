@@ -133,7 +133,8 @@ test("schema two data gains target dates and drops retired task semantics", () =
   assert.ok(normalized.settings.sessionScanRoots.includes("~/.codex/sessions"));
   assert.ok(normalized.settings.sessionScanRoots.includes("~/.claude/projects"));
   assert.ok(normalized.settings.sessionScanRoots.includes("/custom/session-root"));
-  assert.deepEqual(normalized.settings.enabledSessionProviders, ["codex", "claude"]);
+  assert.deepEqual(normalized.settings.enabledSessionProviders, ["codex", "claude", "copilot"]);
+  assert.ok(normalized.settings.sessionScanRoots.includes("~/.copilot/session-state"));
   assert.equal(normalized.settings.sessionScanRoots.includes("~/.claude/tasks"), false);
   assert.equal(normalized.settings.sessionScanRoots.includes("~/.minimax/plans"), false);
   assert.equal(normalized.plans[0]?.targetDate, "2026-07-04");

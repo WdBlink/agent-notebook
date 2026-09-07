@@ -543,9 +543,9 @@ function ProviderMenu({ enabled, onToggle }: { enabled: SessionProvider[]; onTog
   return (
     <div className="provider-menu" role="dialog" aria-label="选择读取来源" onPointerDown={(event) => event.stopPropagation()}>
       <div className="provider-menu-head"><strong>读取来源</strong><span>各平台独立只读，可同时启用</span></div>
-      {(["codex", "claude"] as SessionProvider[]).map((provider) => {
+      {(["codex", "claude", "copilot"] as SessionProvider[]).map((provider) => {
         const checked = enabled.includes(provider);
-        return <button type="button" className="provider-option" key={provider} onClick={() => onToggle(provider)}><span className={`provider-check${checked ? " checked" : ""}`}>{checked ? <Check size={11} /> : null}</span><span><strong>{platformLabel(provider)}</strong><small>{provider === "codex" ? "~/.codex/sessions/" : "~/.claude/projects/"}</small></span><em>{checked ? "读取" : "关闭"}</em></button>;
+        return <button type="button" className="provider-option" key={provider} onClick={() => onToggle(provider)}><span className={`provider-check${checked ? " checked" : ""}`}>{checked ? <Check size={11} /> : null}</span><span><strong>{platformLabel(provider)}</strong><small>{provider === "codex" ? "~/.codex/sessions/" : provider === "copilot" ? "~/.copilot/session-state/" : "~/.claude/projects/"}</small></span><em>{checked ? "读取" : "关闭"}</em></button>;
       })}
       <p>只改变简报范围；不会启动、修改或归档原始会话。</p>
     </div>
@@ -1131,7 +1131,7 @@ function SourcesPanel({ state, onProvider, onAddRoot, onOpenPath, onKnowledgeRoo
         <div className="source-main">
           <div className="source-record review-schedule static"><Clock3 size={18} /><span><strong>每日自动准备工作脉络</strong><code>{scheduleEnabled ? `每天 ${scheduleTime}` : "未开启"}</code><small>应用保持运行时在后台整理；可能使用本地配置的模型额度。</small></span><div className="review-schedule-controls"><label><input type="checkbox" checked={scheduleEnabled} onChange={(event) => onReviewSchedule(event.target.checked, scheduleTime)} /><span>{scheduleEnabled ? "已开启" : "开启"}</span></label><input type="time" aria-label="每日自动整理时间" value={scheduleTime} disabled={!scheduleEnabled} onChange={(event) => onReviewSchedule(scheduleEnabled, event.target.value)} /></div></div>
           <div className="source-record knowledge-root"><Archive size={18} /><span><strong>LLM-Wiki knowledge root</strong><code>{state.notebook.knowledgeRoot}</code><small>INGEST → {state.notebook.knowledgeRawPath}</small></span><em>protocol</em><div><button type="button" onClick={() => onOpenPath(state.notebook.knowledgeRawPath)}>打开 raw</button><button type="button" onClick={onKnowledgeRoot}>管理根目录</button></div></div>
-          {(["codex", "claude"] as SessionProvider[]).map((provider) => <button type="button" className="source-record" key={provider} onClick={() => onProvider(provider)}><Bot size={18} /><span><strong>{platformLabel(provider)} sessions</strong><code>{provider === "codex" ? "~/.codex/sessions/" : "~/.claude/projects/"}</code></span><em data-enabled={enabled.has(provider)}>{enabled.has(provider) ? "connected" : "disabled"}</em></button>)}
+          {(["codex", "claude", "copilot"] as SessionProvider[]).map((provider) => <button type="button" className="source-record" key={provider} onClick={() => onProvider(provider)}><Bot size={18} /><span><strong>{platformLabel(provider)} sessions</strong><code>{provider === "codex" ? "~/.codex/sessions/" : provider === "copilot" ? "~/.copilot/session-state/" : "~/.claude/projects/"}</code></span><em data-enabled={enabled.has(provider)}>{enabled.has(provider) ? "connected" : "disabled"}</em></button>)}
           <div className="source-record static"><Archive size={18} /><span><strong>Archived sessions</strong><code>provider-specific archives</code></span><em>read only</em></div>
           <div className="source-record static"><FileText size={18} /><span><strong>Project context</strong><code>&lt;project&gt;/ctx → current overview, progress, spec, decisions</code></span><em>on demand</em></div>
           <div className="source-record static"><Bot size={18} /><span><strong>Smart session titles</strong><code>Codex: {state.summaryJob?.models.codex ?? "provider default"} · Claude: {state.summaryJob?.models.claude ?? "provider default"}</code></span><em>{summaryJobLabel(state)}</em></div>
@@ -1350,6 +1350,7 @@ function statusLabel(status: AgentSessionStatus): string {
 function platformLabel(platform: string): string {
   if (platform === "codex") return "Codex";
   if (platform === "claude") return "Claude Code";
+  if (platform === "copilot") return "GitHub Copilot";
   if (platform === "minimax") return "MiniMax";
   return "Other";
 }

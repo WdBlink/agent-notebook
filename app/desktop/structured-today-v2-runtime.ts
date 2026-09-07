@@ -47,7 +47,7 @@ export async function runStructuredTodayIndexV2CandidatePreparation(input: {
   const plan = freezeStructuredTodayProviderPlan(
     input.settings,
     input.snapshot.sessions.flatMap((session) =>
-      session.platform === "codex" || session.platform === "claude"
+      session.platform === "codex" || session.platform === "claude" || session.platform === "copilot"
         ? [{ sessionId: session.id, provider: session.platform }]
         : []
     )

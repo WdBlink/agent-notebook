@@ -1354,6 +1354,8 @@ test("background preparation never replaces the raw work surface", async ({ page
 test("Sources exposes one restrained daily preparation setting without implementation language", async ({ page }) => {
   await page.getByRole("button", { name: "Sources", exact: true }).click();
   const sources = page.locator(".sources-view");
+  await expect(sources.getByRole("button", { name: /GitHub Copilot sessions/ })).toBeVisible();
+  await expect(sources.getByText("~/.copilot/session-state/", { exact: true })).toBeVisible();
   await expect(sources.getByText("每日自动准备工作脉络", { exact: true })).toBeVisible();
   await expect(sources.getByText("未开启", { exact: true })).toBeVisible();
   expect(await sources.innerText()).not.toMatch(/Skill|Traceink|KSI/i);

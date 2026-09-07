@@ -18,7 +18,7 @@ export interface VerifiedStructuredTodaySpanTarget {
   statementId: string;
   spanId: string;
   evidenceId: string;
-  provider: "codex" | "claude";
+  provider: "codex" | "claude" | "copilot";
   sessionId: string;
   sourcePath: string;
   messageKey: string;

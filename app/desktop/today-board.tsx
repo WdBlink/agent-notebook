@@ -231,7 +231,7 @@ export function TodayBoard({
           {surfaceMode === "sealed" ? null : <ProjectFilters projects={projects} selected={selectedProjectKey} onProject={onProject} />}
           <div className="today-board-filters" aria-label="来源筛选">
             <Filter size={14} aria-hidden="true" />
-            {(["all", "codex", "claude"] as ProviderFilter[]).map((value) => (
+            {(["all", "codex", "claude", "copilot"] as ProviderFilter[]).map((value) => (
               <button key={value} type="button" aria-pressed={provider === value} onClick={() => setProvider(value)}>
                 {value === "all" ? "全部来源" : platformLabel(value)}
               </button>
@@ -753,7 +753,7 @@ function modeDescription(
 }
 
 function platformLabel(platform: string): string {
-  return platform === "codex" ? "Codex" : platform === "claude" ? "Claude Code" : platform === "minimax" ? "MiniMax" : "Other";
+  return platform === "codex" ? "Codex" : platform === "claude" ? "Claude Code" : platform === "copilot" ? "GitHub Copilot" : platform === "minimax" ? "MiniMax" : "Other";
 }
 
 function statusLabel(status: AgentWorkSession["status"]): string {
