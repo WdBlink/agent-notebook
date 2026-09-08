@@ -721,8 +721,8 @@ function TraceinkIndexSkeleton({ headingId }: { headingId: string }): ReactEleme
   );
 }
 
-function producerLabel(provider: "codex" | "claude"): string {
-  return provider === "codex" ? "Codex" : "Claude Code";
+function producerLabel(provider: "codex" | "claude" | "cursor"): string {
+  return provider === "codex" ? "Codex" : provider === "cursor" ? "Cursor" : "Claude Code";
 }
 
 /** Destinations stay visible as evidence text but never reach an active URL-bearing element. */

@@ -1621,12 +1621,13 @@ function inferProvider(value: string): SessionProvider | undefined {
   const lower = value.toLowerCase();
   if (lower.includes("codex")) return "codex";
   if (lower.includes("claude")) return "claude";
+  if (lower.includes("cursor")) return "cursor";
   return undefined;
 }
 
 function normalizeProviders(value: unknown, fallback: SessionProvider[]): SessionProvider[] {
   if (!Array.isArray(value)) return fallback;
-  const supported = new Set<SessionProvider>(["codex", "claude", "copilot"]);
+  const supported = new Set<SessionProvider>(["codex", "claude", "copilot", "cursor"]);
   const next = value.filter((provider): provider is SessionProvider => supported.has(provider as SessionProvider));
   return Array.from(new Set(next));
 }

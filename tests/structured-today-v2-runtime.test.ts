@@ -308,6 +308,7 @@ function settings(): CockpitSettings {
     runtimeNodePath: "node",
     codexCliPath: "codex",
     claudeCliPath: "claude",
+    cursorCliPath: "agent",
     dailyReviewScheduleEnabled: false,
     dailyReviewScheduleTime: "18:30"
   };

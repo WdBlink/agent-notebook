@@ -7,6 +7,7 @@ export const MAX_SESSION_SUMMARY_CACHE_ENTRIES = 600;
 export interface SummaryModelMap {
   codex: string;
   claude: string;
+  cursor?: string;
 }
 
 export interface SessionSummaryCacheEntry {
@@ -46,7 +47,7 @@ export function sessionSummaryCacheKey(
     `v${SESSION_SUMMARY_PROMPT_VERSION}`,
     date,
     session.platform,
-    session.platform === "codex" || session.platform === "claude" ? models[session.platform] : "unsupported",
+    session.platform === "codex" || session.platform === "claude" || session.platform === "cursor" ? models[session.platform] ?? "default" : "unsupported",
     session.id,
     sourcePath,
     revision
@@ -105,7 +106,7 @@ function isCacheEntry(value: unknown): value is SessionSummaryCacheEntry {
   return typeof entry.key === "string"
     && typeof entry.cachedAt === "string"
     && typeof summary?.id === "string"
-    && (summary.platform === "codex" || summary.platform === "claude")
+    && (summary.platform === "codex" || summary.platform === "claude" || summary.platform === "cursor")
     && typeof summary.title === "string"
     && typeof summary.summary === "string"
     && Array.isArray(summary.artifacts)

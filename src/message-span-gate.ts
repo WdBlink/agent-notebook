@@ -79,7 +79,7 @@ export interface MessageSpanCoverageDeficit {
 export interface AdmittedMessageEvidence {
   evidenceId: string;
   sessionId: string;
-  provider: "codex" | "claude" | "copilot";
+  provider: "codex" | "claude" | "copilot" | "cursor";
   messageId: string;
   messageOrdinal: number;
   role: "user" | "assistant";
@@ -138,7 +138,7 @@ export type MessageSpanGateFailureCode = "F1" | "F2" | "F3" | "F4" | "F5" | "F6"
 export interface MessageSpanGateReviewSpanV1 {
   evidenceId: string;
   sessionId: string;
-  provider: "codex" | "claude" | "copilot";
+  provider: "codex" | "claude" | "copilot" | "cursor";
   messageId: string;
   messageOrdinal: number;
   role: "user" | "assistant";
@@ -2395,7 +2395,7 @@ function parseAndValidateReviewSpan(
 function messageTupleKey(value: {
   evidenceId: string;
   sessionId: string;
-  provider: "codex" | "claude" | "copilot";
+  provider: "codex" | "claude" | "copilot" | "cursor";
   messageId: string;
   messageOrdinal: number;
   role: "user" | "assistant";
