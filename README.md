@@ -169,6 +169,8 @@ The Obsidian plugin releases from v0.2.0 through v0.3.1 are deprecated implement
 
 ## Contributing
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for branch responsibilities and the `dev → develop → main` release flow.
+
 Keep provider stores read-only, preserve explicit human authority boundaries, and run `npm run check` before submitting a change. Desktop release changes should also follow the archive-specific checks in [TESTING.md](TESTING.md).
 
 ## License
