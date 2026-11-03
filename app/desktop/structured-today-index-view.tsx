@@ -5,7 +5,7 @@ import type { StructuredTodayReviewProjection } from "../../src/structured-today
 import type { StructuredTodayWorklineReviewState } from "../../src/structured-today-review-state";
 import type { TodaySessionRefV1, TodayWorklineDossierV1, TodayWorklineV1 } from "../../src/structured-today-contracts";
 import type { AgentWorkSession } from "../../src/types";
-import { structuredTranscriptEvidence } from "../../src/session-family";
+import { structuredTranscriptEvidence, sessionFamilyKey, sessionParentKey } from "../../src/session-family";
 import type {
   StructuredTodayProgressState,
   DailyContinuationBookmark
@@ -32,17 +32,18 @@ export function groupSessionFamilies(
   members: StructuredTodayMemberSession[],
   currentSessions: AgentWorkSession[]
 ): Array<{ id: string; title: string; members: StructuredTodayMemberSession[]; subagentCount: number }> {
-  const currentById = new Map(currentSessions.map((session) => [session.id, session]));
+  const currentById = new Map(currentSessions.map((session) => [sessionFamilyKey(session), session]));
   const groups = new Map<string, StructuredTodayMemberSession[]>();
   for (const member of members) {
     const lineage = member.current?.lineage ?? member.ref.lineage;
-    let rootId = member.ref.sessionId;
-    let parentId = lineage?.parentSessionId;
+    let rootId = sessionFamilyKey({ platform: member.ref.provider, id: member.ref.sessionId });
+    let parentId = sessionParentKey({ platform: member.ref.provider, ...(lineage ? { lineage } : {}) });
     const seen = new Set([rootId]);
     while (parentId && !seen.has(parentId)) {
       rootId = parentId;
       seen.add(parentId);
-      parentId = currentById.get(parentId)?.lineage?.parentSessionId;
+      const parent = currentById.get(parentId);
+      parentId = parent && sessionParentKey(parent);
     }
     const group = groups.get(rootId) ?? [];
     group.push(member);
@@ -50,16 +51,16 @@ export function groupSessionFamilies(
   }
   for (const current of currentSessions) {
     if (current.lineage?.origin !== "subagent" || (current.platform !== "codex" && current.platform !== "claude")) continue;
-    let rootId = current.lineage.parentSessionId;
-    const seen = new Set([current.id]);
+    let rootId = sessionParentKey(current);
+    const seen = new Set([sessionFamilyKey(current)]);
     while (rootId && !seen.has(rootId)) {
       seen.add(rootId);
       const parent = currentById.get(rootId);
       if (!parent || parent.lineage?.origin !== "subagent") break;
-      rootId = parent.lineage.parentSessionId;
+      rootId = sessionParentKey(parent);
     }
     const group = rootId ? groups.get(rootId) : undefined;
-    if (!group || group.some((member) => member.ref.sessionId === current.id)) continue;
+    if (!group || group.some((member) => sessionFamilyKey({ platform: member.ref.provider, id: member.ref.sessionId }) === sessionFamilyKey(current))) continue;
     group.push({
       current,
       ref: {
@@ -205,10 +206,10 @@ export function StructuredTodayIndexView({
             if (!ref) return [];
             const children = ref.evidenceIds.flatMap((evidenceId): TodaySessionRefV1[] => {
               const evidence = structuredTranscriptEvidence(active.evidence.find((item) => item.evidenceId === evidenceId));
-              if (!evidence || evidence.sessionId === ref.sessionId) return [];
+              if (!evidence || (evidence.sessionId === ref.sessionId && evidence.provider === ref.provider)) return [];
               return [{ sessionId: evidence.sessionId, provider: evidence.provider, sourcePath: evidence.sourcePath,
                 title: `子 Agent · ${evidence.sessionId}`, startedAt: ref.startedAt, evidenceIds: [evidenceId],
-                lineage: { origin: "subagent", parentSessionId: ref.sessionId } }];
+                lineage: { origin: "subagent", parentSessionId: ref.sessionId, parentProvider: ref.provider } }];
             });
             return [ref, ...children].map((member) => ({ ref: member,
               current: sessionByTuple.get(tuple(member.provider, member.sessionId, member.sourcePath)) }));

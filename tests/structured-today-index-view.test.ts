@@ -226,3 +226,15 @@ function session(): AgentWorkSession {
     }
   };
 }
+
+test("family display retains providers when a workflow parent ID collides", () => {
+  const parent = { ...session(), platform: "claude" as const, title: "Claude parent", lineage: { origin: "primary" as const } };
+  const unrelated = { ...session(), title: "Unrelated Codex same ID", lineage: { origin: "primary" as const } };
+  const child = { ...session(), id: "worker", lineage: { origin: "subagent" as const, parentSessionId: parent.id, parentProvider: "claude" as const } };
+  const members = [parent, unrelated, child].map(current => ({ current, ref: { sessionId: current.id, provider: current.platform as "codex" | "claude", sourcePath: current.path,
+    title: current.title, startedAt: current.updatedAt, evidenceIds: ["e1"], lineage: current.lineage } }));
+  const families = groupSessionFamilies(members, [parent, unrelated, child]);
+  assert.equal(families.length, 2);
+  assert.equal(families.find(family => family.title === "Claude parent")?.members.length, 2);
+  assert.equal(families.find(family => family.title === "Unrelated Codex same ID")?.members.length, 1);
+});
